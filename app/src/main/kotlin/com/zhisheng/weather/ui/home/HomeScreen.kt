@@ -23,6 +23,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -101,6 +102,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -112,6 +114,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.zhisheng.weather.model.AlertInfo
 import com.zhisheng.weather.model.AqiInfo
+import com.zhisheng.weather.model.BriefingEmote
+import com.zhisheng.weather.model.BriefingKind
 import com.zhisheng.weather.model.CurrentWeather
 import com.zhisheng.weather.model.DailyWeather
 import com.zhisheng.weather.model.HourlyWeather
@@ -146,6 +150,7 @@ import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 import com.zhisheng.weather.ui.theme.ZhishengWarning
+import com.zhisheng.weather.ui.theme.alertLevelColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -1207,34 +1212,58 @@ private fun HeroSection(
                 WeatherIcon(cur.condition, Modifier.size(76.dp))
             }
         }
-        val nowMillis = System.currentTimeMillis()
-        val immediateBriefing = Nowcast.briefingLine(data, unit, nowMillis)
-        val futureBriefing = data.forecastSummary?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            "未来24小时：${Nowcast.tidyCopy(it)}"
-        }
-        (immediateBriefing ?: futureBriefing)?.let { raw ->
-            val line = Nowcast.tidyCopy(raw)
-            val rain = Nowcast.rainTiming(
-                data.rainMinutes,
-                nowMillis,
-                currentPrecip = cur.condition?.isPrecipitation == true || (cur.precipMm ?: 0.0) > 0.05,
-            )
-            val color = if (rain.hasRain || Nowcast.looksLikeIncomingRain(line)) {
-                ZhishengOrange
-            } else {
-                ZhishengMint
-            }
+        Nowcast.briefing(data, unit, System.currentTimeMillis())?.let { briefing ->
             Spacer(Modifier.height(10.dp))
-            Text(
-                text = line,
-                style = MaterialTheme.typography.titleSmall,
-                color = color,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "天气娘提示：${briefing.text}"
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(briefingEmoteRes(briefing.emote)),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(9.dp)),
+                )
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    text = briefing.text,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = briefingColor(briefing),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
+}
+
+private fun briefingEmoteRes(emote: BriefingEmote): Int = when (emote) {
+    BriefingEmote.SUNNY -> R.drawable.weather_girl_emote_sunny
+    BriefingEmote.CLOUDY -> R.drawable.weather_girl_emote_cloudy
+    BriefingEmote.RAIN -> R.drawable.weather_girl_emote_rain
+    BriefingEmote.HOT -> R.drawable.weather_girl_emote_hot
+    BriefingEmote.COLD -> R.drawable.weather_girl_emote_cold
+    BriefingEmote.WIND -> R.drawable.weather_girl_emote_wind
+    BriefingEmote.NIGHT -> R.drawable.weather_girl_emote_night
+    BriefingEmote.ALERT -> R.drawable.weather_girl_emote_alert
+}
+
+@Composable
+private fun briefingColor(briefing: com.zhisheng.weather.model.HeroBriefing): Color = when {
+    briefing.alertLevel != null -> alertLevelColor(briefing.alertLevel)
+    briefing.kind == BriefingKind.PRECIPITATION -> ZhishengOrange
+    briefing.kind == BriefingKind.TEMPERATURE && briefing.emote == BriefingEmote.COLD -> ZhishengCyan
+    briefing.kind == BriefingKind.TEMPERATURE -> ZhishengOrange
+    briefing.kind == BriefingKind.WIND -> ZhishengCyan
+    briefing.kind == BriefingKind.AIR_QUALITY || briefing.kind == BriefingKind.VISIBILITY -> ZhishengWarning
+    briefing.kind == BriefingKind.UV -> ZhishengOrange
+    else -> ZhishengMint
 }
 
 // 温度数字滚动（400ms，emphasizedDecelerate 近似）
@@ -1274,7 +1303,7 @@ private fun AlertSection(alerts: List<AlertInfo>, modifier: Modifier) {
         alerts.forEach { alert ->
             val expanded = alert.title in expandedTitles
             // v0.0.4：三源等级归一后按国标四档着色，未识别档退回警报红
-            val c = alertColor(alert.severity)
+            val c = alertLevelColor(alert.severity)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1322,16 +1351,6 @@ private fun AlertSection(alerts: List<AlertInfo>, modifier: Modifier) {
             }
         }
     }
-}
-
-// 预警等级 → 着色（国标蓝/黄/橙/红；黄色按主题取色板 warning：深色荧光黄 / 浅色油墨黄）
-@Composable
-private fun alertColor(level: com.zhisheng.weather.model.AlertLevel): Color = when (level) {
-    com.zhisheng.weather.model.AlertLevel.RED -> ZhishengRed
-    com.zhisheng.weather.model.AlertLevel.ORANGE -> ZhishengOrange
-    com.zhisheng.weather.model.AlertLevel.YELLOW -> ZhishengWarning
-    com.zhisheng.weather.model.AlertLevel.BLUE -> ZhishengCyan
-    com.zhisheng.weather.model.AlertLevel.UNKNOWN -> ZhishengRed
 }
 
 private fun hazardStripes(scope: DrawScope, color: Color) {

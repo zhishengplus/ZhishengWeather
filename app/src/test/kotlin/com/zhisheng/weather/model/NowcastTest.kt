@@ -143,7 +143,7 @@ class NowcastTest {
                 DailyWeather(dateMillis = t0 + 86_400_000L, high = 22.0, low = 14.0),
             ),
         )
-        assertEquals("明天比今天低 6°", Nowcast.briefingLine(data, "c", t0))
+        assertEquals("明天会比今天低 6°，今晚把外套备好。", Nowcast.briefingLine(data, "c", t0))
     }
 
     @Test
@@ -158,7 +158,7 @@ class NowcastTest {
             ),
             utcOffsetSeconds = offset,
         )
-        assertEquals("明天比今天低 6°", Nowcast.briefingLine(data, "c", now))
+        assertEquals("明天会比今天低 6°，今晚把外套备好。", Nowcast.briefingLine(data, "c", now))
     }
 
     @Test
@@ -180,7 +180,39 @@ class NowcastTest {
                 AlertInfo(title = "暴雨红色预警", severity = AlertLevel.RED),
             ),
         )
-        assertEquals("暴雨红色预警", Nowcast.briefingLine(data, "c", t0))
+        assertEquals("红色预警生效中，低洼路段和积水区域请谨慎通行。", Nowcast.briefingLine(data, "c", t0))
+    }
+
+    @Test
+    fun yellowAlertBecomesActionableBriefingInsteadOfDuplicateTitle() {
+        val data = WeatherData(
+            current = CurrentWeather(condition = WeatherCondition.CLEAR),
+            alerts = listOf(
+                AlertInfo(
+                    title = "金川发布地质灾害气象风险黄色预警",
+                    severity = AlertLevel.YELLOW,
+                ),
+            ),
+        )
+
+        val briefing = Nowcast.briefing(data, "c", t0)!!
+
+        assertEquals("黄色预警生效中，山区、沟谷和陡坡附近请多留意。", briefing.text)
+        assertEquals(BriefingKind.ALERT, briefing.kind)
+        assertEquals(BriefingEmote.ALERT, briefing.emote)
+        assertEquals(AlertLevel.YELLOW, briefing.alertLevel)
+    }
+
+    @Test
+    fun calmWeatherLineStaysStableForTheSameLocalDay() {
+        val data = WeatherData(current = CurrentWeather(condition = WeatherCondition.CLEAR))
+
+        val first = Nowcast.briefing(data, "c", t0)!!
+        val second = Nowcast.briefing(data, "c", t0 + 10 * 60_000L)!!
+
+        assertEquals(BriefingKind.AMBIENT, first.kind)
+        assertEquals(first.text, second.text)
+        assertEquals(BriefingEmote.NIGHT, first.emote)
     }
 
     @Test

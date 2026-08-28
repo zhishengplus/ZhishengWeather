@@ -1,5 +1,7 @@
 package com.zhisheng.weather.model
 
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -11,6 +13,36 @@ data class RainTiming(
 ) {
     val hasRain: Boolean get() = rainingNow || minutesUntilStart != null
 }
+
+enum class BriefingKind {
+    ALERT,
+    PRECIPITATION,
+    TEMPERATURE,
+    WIND,
+    AIR_QUALITY,
+    VISIBILITY,
+    UV,
+    FORECAST,
+    AMBIENT,
+}
+
+enum class BriefingEmote {
+    SUNNY,
+    CLOUDY,
+    RAIN,
+    HOT,
+    COLD,
+    WIND,
+    NIGHT,
+    ALERT,
+}
+
+data class HeroBriefing(
+    val text: String,
+    val kind: BriefingKind,
+    val emote: BriefingEmote,
+    val alertLevel: AlertLevel? = null,
+)
 
 object Nowcast {
     const val WET_THRESHOLD = 0.02f
@@ -103,7 +135,16 @@ object Nowcast {
         else -> null
     }
 
-    fun briefingLine(data: WeatherData, unit: String, nowMillis: Long): String? {
+    fun briefing(data: WeatherData, unit: String, nowMillis: Long): HeroBriefing? {
+        highestAlert(data.alerts)?.let { alert ->
+            return HeroBriefing(
+                text = alertActionLine(alert),
+                kind = BriefingKind.ALERT,
+                emote = BriefingEmote.ALERT,
+                alertLevel = alert.severity,
+            )
+        }
+
         val precipNow = data.current.let { cur ->
             cur != null && (cur.condition?.isPrecipitation == true || (cur.precipMm ?: 0.0) > 0.05)
         }
@@ -111,27 +152,43 @@ object Nowcast {
         val api = data.rainNowcast?.trim()?.takeIf { it.isNotEmpty() }?.let { tidyCopy(it) }
 
         if (timing.rainingNow) {
-            // 分钟序列能给出明确停雨时刻时，主屏与分钟降水卡必须共用同一个结论。
-            // 原先这里优先透传供应商的“半小时后雨渐停”，卡片却显示本地计算的
-            // “29 分钟后雨会停”，数值虽一致，用户看到的却像两份互相冲突的预报。
-            if (timing.minutesUntilEnd != null) return rainTimingLabel(timing)
-            // 实况或分钟序列显示正在下雨时，接口「不会下雨」一律丢掉。
-            if (api != null && !isDryNowcast(api)) return api
-            return rainTimingLabel(timing)
+            val snowing = data.current?.condition in setOf(WeatherCondition.SNOW, WeatherCondition.SLEET)
+            val text = when {
+                timing.minutesUntilEnd != null && snowing -> "${timing.minutesUntilEnd} 分钟后雪会停"
+                timing.minutesUntilEnd != null -> rainTimingLabel(timing)!!
+                snowing -> "正在下雪"
+                api != null && !isDryNowcast(api) -> api
+                else -> rainTimingLabel(timing)!!
+            }
+            return HeroBriefing(text, BriefingKind.PRECIPITATION, BriefingEmote.RAIN)
         }
         if (timing.minutesUntilStart != null) {
-            // 有可计算的分钟级开始时刻时，同样不用供应商的模糊取整文案覆盖它。
-            return rainTimingLabel(timing)
+            return HeroBriefing(
+                text = rainTimingLabel(timing)!!,
+                kind = BriefingKind.PRECIPITATION,
+                emote = BriefingEmote.RAIN,
+            )
         }
-        // 没雨不是新闻，不把「不会下雨」写进第一句。
-        // 雨在别处（距离文案）可以保留；近处有雨但此刻序列是干的，也让用户看到源站结论。
-        if (api != null && looksLikeIncomingRain(api)) return api
+        if (api != null && looksLikeIncomingRain(api)) {
+            return HeroBriefing(api, BriefingKind.PRECIPITATION, BriefingEmote.RAIN)
+        }
 
-        severeAlert(data.alerts)?.title?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-        tempDeltaLine(data, unit, nowMillis)?.let { return it }
-        mildAlert(data.alerts)?.title?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
-        return null
+        temperatureDeltaBriefing(data, unit, nowMillis)?.let { return it }
+        currentConditionBriefing(data)?.let { return it }
+
+        data.forecastSummary?.trim()?.takeIf { it.isNotEmpty() }?.let { summary ->
+            return HeroBriefing(
+                text = "未来24小时：${tidyCopy(summary)}",
+                kind = BriefingKind.FORECAST,
+                emote = emoteFor(data.current?.condition, localHour(data, nowMillis)),
+            )
+        }
+
+        return ambientBriefing(data, nowMillis)
     }
+
+    fun briefingLine(data: WeatherData, unit: String, nowMillis: Long): String? =
+        briefing(data, unit, nowMillis)?.text
 
     // 分钟降水卡：只在接下来一段时间真有雨，或雨带近到值得看时出现。
     fun shouldShowPrecipCard(data: WeatherData, nowMillis: Long): Boolean {
@@ -246,21 +303,153 @@ object Nowcast {
         return null
     }
 
-    private fun severeAlert(alerts: List<AlertInfo>): AlertInfo? =
+    private fun highestAlert(alerts: List<AlertInfo>): AlertInfo? =
         alerts.firstOrNull { it.severity == AlertLevel.RED }
             ?: alerts.firstOrNull { it.severity == AlertLevel.ORANGE }
-
-    private fun mildAlert(alerts: List<AlertInfo>): AlertInfo? =
-        alerts.firstOrNull { it.severity == AlertLevel.YELLOW }
+            ?: alerts.firstOrNull { it.severity == AlertLevel.YELLOW }
             ?: alerts.firstOrNull { it.severity == AlertLevel.BLUE }
             ?: alerts.firstOrNull()
 
-    private fun tempDeltaLine(data: WeatherData, unit: String, nowMillis: Long): String? {
+    private fun alertActionLine(alert: AlertInfo): String {
+        val lead = when (alert.severity) {
+            AlertLevel.RED -> "红色预警生效中"
+            AlertLevel.ORANGE -> "橙色预警生效中"
+            AlertLevel.YELLOW -> "黄色预警生效中"
+            AlertLevel.BLUE -> "蓝色预警生效中"
+            AlertLevel.UNKNOWN -> "天气预警生效中"
+        }
+        val title = alert.title
+        val action = when {
+            title.contains("地质灾害") -> "山区、沟谷和陡坡附近请多留意。"
+            title.contains("暴雨") || title.contains("强降水") -> "低洼路段和积水区域请谨慎通行。"
+            title.contains("雷电") || title.contains("雷暴") -> "户外活动请留意雷电和短时大风。"
+            title.contains("大风") || title.contains("台风") -> "请收好易被吹动的物品，远离临时搭建物。"
+            title.contains("高温") -> "午后减少长时间暴晒，记得及时补水。"
+            title.contains("寒潮") || title.contains("低温") -> "气温变化明显，外出请做好保暖。"
+            title.contains("大雾") || title.contains("浓雾") -> "能见度可能偏低，驾车请放慢速度。"
+            title.contains("道路结冰") -> "路面可能湿滑结冰，出行请注意防滑。"
+            title.contains("沙尘") || title.contains("霾") -> "外出请做好防护，敏感人群减少久留。"
+            else -> "请留意当地气象部门的最新提示。"
+        }
+        return "$lead，$action"
+    }
+
+    private fun temperatureDeltaBriefing(data: WeatherData, unit: String, nowMillis: Long): HeroBriefing? {
         val today = data.todayDaily(nowMillis)?.high ?: return null
         val tomorrow = data.tomorrowDaily(nowMillis)?.high ?: return null
         val delta = displayTemp(tomorrow, unit) - displayTemp(today, unit)
         if (abs(delta) < 3) return null
-        return if (delta > 0) "明天比今天高 ${delta}°" else "明天比今天低 ${-delta}°"
+        return if (delta > 0) {
+            HeroBriefing("明天会比今天高 ${delta}°，热意会更明显一些。", BriefingKind.TEMPERATURE, BriefingEmote.HOT)
+        } else {
+            HeroBriefing("明天会比今天低 ${-delta}°，今晚把外套备好。", BriefingKind.TEMPERATURE, BriefingEmote.COLD)
+        }
+    }
+
+    private fun currentConditionBriefing(data: WeatherData): HeroBriefing? {
+        val current = data.current ?: return null
+        val temperature = current.temperature
+        when {
+            temperature != null && temperature >= 35.0 ->
+                return HeroBriefing("热意很重，午后尽量避开长时间暴晒。", BriefingKind.TEMPERATURE, BriefingEmote.HOT)
+            temperature != null && temperature >= 30.0 ->
+                return HeroBriefing("今天会有些热，出门记得给自己留点阴凉。", BriefingKind.TEMPERATURE, BriefingEmote.HOT)
+            temperature != null && temperature <= 0.0 ->
+                return HeroBriefing("寒意很实在，外出前把保暖再检查一遍。", BriefingKind.TEMPERATURE, BriefingEmote.COLD)
+            temperature != null && temperature <= 5.0 ->
+                return HeroBriefing("空气里有明显寒意，外出别忘了添一层。", BriefingKind.TEMPERATURE, BriefingEmote.COLD)
+        }
+
+        val wind = maxOf(current.windSpeed ?: 0.0, current.windGust ?: 0.0)
+        when {
+            wind >= 39.0 -> return HeroBriefing(
+                "风力较强，外出留意高空坠物和易被吹动的物品。",
+                BriefingKind.WIND,
+                BriefingEmote.WIND,
+            )
+            wind >= 20.0 || current.condition == WeatherCondition.WIND -> return HeroBriefing(
+                "风会有些明显，帽子和轻便物品记得收好。",
+                BriefingKind.WIND,
+                BriefingEmote.WIND,
+            )
+        }
+
+        val aqi = data.aqi?.value
+        when {
+            aqi != null && aqi >= 151 -> return HeroBriefing(
+                "空气质量不太理想，长时间户外活动可以缓一缓。",
+                BriefingKind.AIR_QUALITY,
+                BriefingEmote.CLOUDY,
+            )
+            aqi != null && aqi >= 101 -> return HeroBriefing(
+                "空气质量一般，敏感人群外出可以少停留一会儿。",
+                BriefingKind.AIR_QUALITY,
+                BriefingEmote.CLOUDY,
+            )
+        }
+
+        current.visibility?.takeIf { it <= 3.0 }?.let {
+            return HeroBriefing(
+                "能见度偏低，驾车请把速度放慢一些。",
+                BriefingKind.VISIBILITY,
+                BriefingEmote.CLOUDY,
+            )
+        }
+        current.uvIndex?.takeIf { it >= 6 }?.let { uv ->
+            val text = if (uv >= 8) "紫外线很强，午后出门别忘了防晒。" else "阳光有些锋利，长时间户外记得防晒。"
+            return HeroBriefing(text, BriefingKind.UV, BriefingEmote.SUNNY)
+        }
+        return null
+    }
+
+    private fun ambientBriefing(data: WeatherData, nowMillis: Long): HeroBriefing? {
+        val condition = data.current?.condition ?: return null
+        val hour = localHour(data, nowMillis)
+        val lines = when {
+            hour >= 22 || hour < 5 -> listOf(
+                "夜色渐深，城市也安静了一些。",
+                "夜已经深了，窗外暂时没有特别的变化。",
+                "天气安静地守在窗外，今晚可以慢一点。",
+            )
+            condition in setOf(WeatherCondition.CLEAR, WeatherCondition.CLEAR_NIGHT) && hour < 10 -> listOf(
+                "晨光已经铺开，今天从清朗里开始。",
+                "天色正慢慢亮起来，天气没有特别的脾气。",
+                "清晨的光很干净，今天可以从容出发。",
+            )
+            condition in setOf(WeatherCondition.CLEAR, WeatherCondition.CLEAR_NIGHT) -> listOf(
+                "天色清朗，风景也显得格外利落。",
+                "阳光把城市照得很清楚，天气正平稳。",
+                "天空今天没什么脾气，按原计划出发吧。",
+            )
+            condition in setOf(WeatherCondition.PARTLY_CLOUDY, WeatherCondition.PARTLY_CLOUDY_NIGHT, WeatherCondition.CLOUDY, WeatherCondition.OVERCAST) -> listOf(
+                "云层收住了光线，天空显得安静一些。",
+                "云在慢慢铺开，天气暂时没有明显变化。",
+                "光线柔和下来，今天适合按自己的节奏走。",
+            )
+            else -> listOf(
+                "天气平稳，今天可以照常安排。",
+                "没有特别需要提醒的天气，这本身就是好消息。",
+                "一切都在正常变化，按自己的节奏出发吧。",
+            )
+        }
+        val localDate = Instant.ofEpochMilli(nowMillis)
+            .atOffset(ZoneOffset.ofTotalSeconds(data.utcOffsetSeconds ?: 0))
+            .toLocalDate()
+        val index = Math.floorMod(localDate.toEpochDay().toInt() + condition.ordinal, lines.size)
+        return HeroBriefing(lines[index], BriefingKind.AMBIENT, emoteFor(condition, hour))
+    }
+
+    private fun localHour(data: WeatherData, nowMillis: Long): Int =
+        Instant.ofEpochMilli(nowMillis)
+            .atOffset(ZoneOffset.ofTotalSeconds(data.utcOffsetSeconds ?: 0))
+            .hour
+
+    private fun emoteFor(condition: WeatherCondition?, hour: Int): BriefingEmote = when {
+        hour >= 22 || hour < 5 -> BriefingEmote.NIGHT
+        condition in setOf(WeatherCondition.RAIN, WeatherCondition.DRIZZLE, WeatherCondition.THUNDERSTORM, WeatherCondition.HAIL, WeatherCondition.FREEZING_RAIN, WeatherCondition.FREEZING_DRIZZLE, WeatherCondition.SNOW, WeatherCondition.SLEET) -> BriefingEmote.RAIN
+        condition == WeatherCondition.WIND -> BriefingEmote.WIND
+        condition in setOf(WeatherCondition.CLEAR, WeatherCondition.CLEAR_NIGHT) -> BriefingEmote.SUNNY
+        else -> BriefingEmote.CLOUDY
     }
 
     private fun displayTemp(celsius: Double, unit: String): Int =

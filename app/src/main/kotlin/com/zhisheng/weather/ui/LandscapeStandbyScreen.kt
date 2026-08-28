@@ -58,6 +58,7 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.alertLevelColor
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -245,11 +246,11 @@ fun LandscapeStandbyScreen(
                         }
                     }
 
-                    val alert = data?.alerts?.firstOrNull()?.title
+                    val alert = data?.alerts?.firstOrNull()
                     Text(
-                        alert?.let { "! $it" } ?: "SRC ${data?.dataSource ?: "--"}  ·  UPD ${data?.updateTime?.let { Fmt.clock(it, offset) } ?: "--:--"}",
+                        alert?.let { "! ${it.title}" } ?: "SRC ${data?.dataSource ?: "--"}  ·  UPD ${data?.updateTime?.let { Fmt.clock(it, offset) } ?: "--:--"}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (alert != null) ZhishengOrange else ZhishengTextTertiary,
+                        color = alert?.let { alertLevelColor(it.severity) } ?: ZhishengTextTertiary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
