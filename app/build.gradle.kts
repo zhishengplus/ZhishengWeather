@@ -27,9 +27,9 @@ android {
         applicationId = "com.zhisheng.weather"
         minSdk = 26
         targetSdk = 34
-        // 20260827：0.1.3 正式版
-        versionCode = 20260831
-        versionName = "0.1.3"
+        // 20260828：0.1.4 开发版
+        versionCode = 20260838
+        versionName = "0.1.4"
 
         buildConfigField("String", "QW_HOST", "\"${if (publicBuild) "" else lp("qw.host")}\"")
         buildConfigField("String", "QW_PROJECT_ID", "\"${if (publicBuild) "" else lp("qw.project_id")}\"")
@@ -141,6 +141,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.bouncycastle)
     implementation(libs.work.runtime.ktx)
+    implementation(libs.maplibre.android)
     testImplementation(libs.junit)
     debugImplementation(libs.compose.tooling)
 }

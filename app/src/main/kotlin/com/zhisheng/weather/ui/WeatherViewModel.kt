@@ -31,6 +31,7 @@ data class DisplayPrefs(
     val showYesterday: Boolean = true,
     val showPrecip: Boolean = true,
     val showTelemetry: Boolean = true,
+    val showSpacetime: Boolean = true,
     val windUnit: String = "kmh",
     val pressureUnit: String = "hpa",
     val scanlines: Boolean = true,
@@ -111,6 +112,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         SettingsRepository.showTelemetry,
     ) { aqi, ix, y, p, tele ->
         DisplayPrefs(showAqi = aqi, showIndices = ix, showYesterday = y, showPrecip = p, showTelemetry = tele)
+    }.combine(SettingsRepository.showSpacetime) { prefs, show ->
+        prefs.copy(showSpacetime = show)
     }.combine(
         combine(
             SettingsRepository.windUnit,

@@ -187,6 +187,7 @@ enum class AppIconStyle(val key: String, val cn: String) {
 enum class HomeModule(val key: String, val cn: String, val en: String) {
     HOURLY("hourly", "逐时预报", "HOURLY"),
     PRECIP("precip", "短时降水", "NOWCAST"),
+    SPACETIME("spacetime", "时空观测", "TIME / RADAR"),
     DAILY("daily", "逐日预报", "FORECAST"),
     TELEMETRY("telemetry", "遥测数据", "TELEMETRY"),
     AQI("aqi", "空气质量", "AIR QUALITY"),
@@ -198,10 +199,26 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
         val defaultOrder: List<HomeModule> = entries.toList()
 
         fun orderFrom(raw: String?): List<HomeModule> {
+            if (raw.isNullOrBlank()) return defaultOrder
             val selected = raw.orEmpty().split(',')
-                .mapNotNull { key -> entries.firstOrNull { it.key == key.trim() } }
+                .mapNotNull { key ->
+                    when (key.trim()) {
+                        // 0.1.4 早期体验版曾拆成两个序号；升级后无损并回一个模块。
+                        "history", "radar", "weather_tools" -> SPACETIME
+                        else -> entries.firstOrNull { it.key == key.trim() }
+                    }
+                }
                 .distinct()
-            return selected + defaultOrder.filterNot(selected::contains)
+                .toMutableList()
+            // 旧版自定义顺序中没有新模块：就近插在短时降水后，
+            // 既不打乱用户已排好的其他模块，也不把新入口丢到页尾。
+            if (SPACETIME !in selected) {
+                val anchor = selected.indexOf(PRECIP)
+                val insertion = if (anchor >= 0) anchor + 1 else selected.size
+                selected.add(insertion, SPACETIME)
+            }
+            selected += defaultOrder.filterNot(selected::contains)
+            return selected
         }
     }
 }
@@ -226,6 +243,10 @@ object SettingsRepository {
     private val KEY_SHOW_YESTERDAY = booleanPreferencesKey("show_yesterday")
     private val KEY_SHOW_PRECIP = booleanPreferencesKey("show_precip")
     private val KEY_SHOW_TELEMETRY = booleanPreferencesKey("show_telemetry")
+    private val KEY_SHOW_WEATHER_TOOLS = booleanPreferencesKey("show_weather_tools")
+    private val KEY_SHOW_HISTORY = booleanPreferencesKey("show_history")
+    private val KEY_SHOW_RADAR = booleanPreferencesKey("show_radar")
+    private val KEY_SHOW_SPACETIME = booleanPreferencesKey("show_spacetime")
     private val KEY_BOOT_ANIM = booleanPreferencesKey("boot_anim")
     private val KEY_KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
     private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
@@ -272,6 +293,13 @@ object SettingsRepository {
     val showYesterday: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_YESTERDAY] ?: true } }
     val showPrecip: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_PRECIP] ?: true } }
     val showTelemetry: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_TELEMETRY] ?: true } }
+    val showSpacetime: Flow<Boolean> by lazy {
+        store.data.map {
+            it[KEY_SHOW_SPACETIME]
+                ?: it[KEY_SHOW_WEATHER_TOOLS]
+                ?: ((it[KEY_SHOW_HISTORY] ?: true) || (it[KEY_SHOW_RADAR] ?: true))
+        }
+    }
     val bootAnim: Flow<Boolean> by lazy { store.data.map { it[KEY_BOOT_ANIM] ?: true } }
     val keepScreenOn: Flow<Boolean> by lazy { store.data.map { it[KEY_KEEP_SCREEN_ON] ?: false } }
     val landscapeStandby: Flow<Boolean> by lazy {
@@ -330,6 +358,7 @@ object SettingsRepository {
     suspend fun setShowYesterday(v: Boolean) = store.edit { it[KEY_SHOW_YESTERDAY] = v }
     suspend fun setShowPrecip(v: Boolean) = store.edit { it[KEY_SHOW_PRECIP] = v }
     suspend fun setShowTelemetry(v: Boolean) = store.edit { it[KEY_SHOW_TELEMETRY] = v }
+    suspend fun setShowSpacetime(v: Boolean) = store.edit { it[KEY_SHOW_SPACETIME] = v }
     suspend fun setBootAnim(v: Boolean) = store.edit { it[KEY_BOOT_ANIM] = v }
     suspend fun setKeepScreenOn(v: Boolean) = store.edit { it[KEY_KEEP_SCREEN_ON] = v }
     suspend fun setLandscapeStandby(v: Boolean) = store.edit { it[KEY_LANDSCAPE_STANDBY] = v }

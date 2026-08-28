@@ -124,6 +124,7 @@ fun SettingsScreen(
     val showYesterday by SettingsRepository.showYesterday.collectAsState(initial = true)
     val showPrecip by SettingsRepository.showPrecip.collectAsState(initial = true)
     val showTelemetry by SettingsRepository.showTelemetry.collectAsState(initial = true)
+    val showSpacetime by SettingsRepository.showSpacetime.collectAsState(initial = true)
     val bootAnim by SettingsRepository.bootAnim.collectAsState(initial = true)
     val keepScreenOn by SettingsRepository.keepScreenOn.collectAsState(initial = false)
     val landscapeStandby by SettingsRepository.landscapeStandby.collectAsState(initial = true)
@@ -387,6 +388,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             InlineGroupLabel("模块")
             CardBox {
+                ToggleRow("时空观测", "往年同日与近两小时雷达；作为一个模块排序", showSpacetime) {
+                    scope.launch { SettingsRepository.setShowSpacetime(!showSpacetime) }
+                }
+                HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
                 ToggleRow("短时降水", "未来两小时开始、停止与强度趋势", showPrecip) {
                     scope.launch { SettingsRepository.setShowPrecip(!showPrecip) }
                 }
@@ -623,7 +628,7 @@ fun SettingsScreen(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
             Text(
-                "数据来源：和风天气 / 彩云天气 / 小米公开接口 / Open-Meteo",
+                "数据来源：和风 / 彩云 / 小米公开接口 / Open-Meteo / RainViewer",
                 style = MaterialTheme.typography.labelSmall,
                 color = ZhishengTextTertiary.copy(alpha = 0.75f),
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp, bottom = 28.dp),

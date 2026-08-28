@@ -182,6 +182,8 @@ fun HomeScreen(
     viewModel: WeatherViewModel,
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onHistoryClick: () -> Unit,
+    onRadarClick: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -315,6 +317,8 @@ fun HomeScreen(
                                             prefs = uiState.prefs,
                                             staleAgeMillis = snapshot.staleAgeMillis,
                                             listState = weatherListState,
+                                            onHistoryClick = onHistoryClick,
+                                            onRadarClick = onRadarClick,
                                         )
                                     }
                                 }
@@ -979,6 +983,8 @@ private fun WeatherContent(
     prefs: com.zhisheng.weather.ui.DisplayPrefs,
     staleAgeMillis: Long?,
     listState: LazyListState,
+    onHistoryClick: () -> Unit = {},
+    onRadarClick: () -> Unit = {},
 ) {
     // 入场动画总开关：状态提升到 LazyColumn 之上，只驱动一次交错入场（v0.0.1 修复快滑闪卡）
     var entered by remember { mutableStateOf(false) }
@@ -1020,6 +1026,7 @@ private fun WeatherContent(
             val visible = when (module) {
                 HomeModule.HOURLY -> showHourly
                 HomeModule.PRECIP -> showPrecip
+                HomeModule.SPACETIME -> prefs.showSpacetime
                 HomeModule.DAILY -> showDaily
                 HomeModule.TELEMETRY -> showTele
                 HomeModule.AQI -> showAqi
@@ -1029,14 +1036,19 @@ private fun WeatherContent(
             }
             if (!visible) return@forEach
 
-            val n = nextIndex()
             val animationIndex = nextStagger()
+            val n = nextIndex()
             item(key = "title_${module.key}") { SectionTitle(n, module.cn, module.en) }
             item(key = "module_${module.key}") {
                 Stagger(animationIndex, entered) { m ->
                     when (module) {
                         HomeModule.HOURLY -> HourlySection(data.hourly, unit, prefs.windUnit, data.utcOffsetSeconds, m)
                         HomeModule.PRECIP -> PrecipCard(data, m)
+                        HomeModule.SPACETIME -> SpacetimeObservatory(
+                            modifier = m,
+                            onHistoryClick = onHistoryClick,
+                            onRadarClick = onRadarClick,
+                        )
                         HomeModule.DAILY -> DailySection(currentDaily, unit, prefs.windUnit, data.utcOffsetSeconds, m)
                         HomeModule.TELEMETRY -> data.current?.let { TelemetryGrid(it, todayDaily, unit, prefs, m) }
                         HomeModule.AQI -> data.aqi?.let { AqiCard(it, m) }
@@ -1362,6 +1374,63 @@ private fun BlinkDot(on: Boolean, color: Color? = null) {
             .size(8.dp)
             .background(if (on) c else c.copy(alpha = 0.25f)),
     )
+}
+
+@Composable
+private fun SpacetimeObservatory(
+    modifier: Modifier = Modifier,
+    onHistoryClick: () -> Unit,
+    onRadarClick: () -> Unit,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        WeatherToolEntry(
+            index = "01",
+            title = "往年同日",
+            subtitle = "5/10 年对照",
+            modifier = Modifier.weight(1f),
+            onClick = onHistoryClick,
+        )
+        WeatherToolEntry(
+            index = "02",
+            title = "雷达回波",
+            subtitle = "近 2 小时",
+            modifier = Modifier.weight(1f),
+            onClick = onRadarClick,
+        )
+    }
+}
+
+@Composable
+private fun WeatherToolEntry(
+    index: String,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .background(ZhishengSurface, RectangleShape)
+            .border(1.dp, ZhishengCardBorder, RectangleShape)
+            .clickable(role = Role.Button, onClickLabel = "打开$title", onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$index/", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, color = ZhishengText, maxLines = 1)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary, maxLines = 1)
+        }
+        Text(
+            "→",
+            style = MaterialTheme.typography.labelMedium,
+            color = ZhishengMint,
+        )
+    }
 }
 
 @Composable

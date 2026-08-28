@@ -120,6 +120,7 @@ fun AtmosphereLabScreen(
             showYesterday = false,
             showPrecip = scenario.condition.isPrecipitation,
             showTelemetry = true,
+            showSpacetime = false,
             scanlines = true,
             ambience = level,
             bootAnim = false,

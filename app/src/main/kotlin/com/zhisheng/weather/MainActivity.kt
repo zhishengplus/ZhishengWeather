@@ -43,6 +43,8 @@ import com.zhisheng.weather.ui.overlayEnter
 import com.zhisheng.weather.ui.overlayExit
 import com.zhisheng.weather.ui.screenTransition
 import com.zhisheng.weather.ui.LandscapeStandbyScreen
+import com.zhisheng.weather.ui.HistoryScreen
+import com.zhisheng.weather.ui.RadarScreen
 import com.zhisheng.weather.ui.WhatsNewDialog
 import com.zhisheng.weather.ui.WhatsNewPreferenceFile
 import com.zhisheng.weather.ui.WhatsNewSeenKey
@@ -169,6 +171,8 @@ class MainActivity : ComponentActivity() {
                             viewModel = vm,
                             onSearchClick = { screen = AppScreen.SEARCH },
                             onSettingsClick = { screen = AppScreen.SETTINGS },
+                            onHistoryClick = { screen = AppScreen.HISTORY },
+                            onRadarClick = { screen = AppScreen.RADAR },
                         )
                         val overlayVisible = screen != AppScreen.HOME
                         var overlayScreen by rememberSaveable { mutableStateOf(AppScreen.SETTINGS) }
@@ -207,6 +211,18 @@ class MainActivity : ComponentActivity() {
                                     AppScreen.ATMOSPHERE_LAB -> AtmosphereLabScreen(
                                         initialLevel = uiState.prefs.ambience,
                                         onBack = { screen = AppScreen.SETTINGS },
+                                    )
+                                    AppScreen.HISTORY -> HistoryScreen(
+                                        city = uiState.selectedCity,
+                                        tempUnit = uiState.tempUnit,
+                                        windUnit = uiState.prefs.windUnit,
+                                        utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
+                                        onBack = { screen = AppScreen.HOME },
+                                    )
+                                    AppScreen.RADAR -> RadarScreen(
+                                        city = uiState.selectedCity,
+                                        utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
+                                        onBack = { screen = AppScreen.HOME },
                                     )
                                     AppScreen.SEARCH -> SearchScreen(
                                         onCityPicked = { city: City ->

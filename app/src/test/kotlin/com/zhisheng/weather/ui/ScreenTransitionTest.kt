@@ -10,8 +10,10 @@ class ScreenTransitionTest {
     fun settingsSitsToTheRightOfHomeAndSearchToTheLeft() {
         assertEquals(0, AppScreen.SEARCH.navSlot())
         assertEquals(1, AppScreen.HOME.navSlot())
-        assertEquals(2, AppScreen.SETTINGS.navSlot())
-        assertEquals(3, AppScreen.ATMOSPHERE_LAB.navSlot())
+        assertEquals(2, AppScreen.HISTORY.navSlot())
+        assertEquals(3, AppScreen.RADAR.navSlot())
+        assertEquals(4, AppScreen.SETTINGS.navSlot())
+        assertEquals(5, AppScreen.ATMOSPHERE_LAB.navSlot())
         assertTrue(AppScreen.SETTINGS.navSlot() > AppScreen.HOME.navSlot())
         assertTrue(AppScreen.SEARCH.navSlot() < AppScreen.HOME.navSlot())
         assertTrue(AppScreen.ATMOSPHERE_LAB.navSlot() > AppScreen.SETTINGS.navSlot())

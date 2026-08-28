@@ -56,7 +56,7 @@ import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 
-internal const val WhatsNewVersion = "0.1.3"
+internal const val WhatsNewVersion = "0.1.4"
 internal const val WhatsNewPreferenceFile = "zhisheng_whats_new"
 internal const val WhatsNewSeenKey = "last_seen_version"
 
@@ -92,7 +92,7 @@ fun WhatsNewDialog(onClose: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
                         Text(
-                            "ZHISHENG WEATHER / 0.1.3",
+                            "ZHISHENG WEATHER / 0.1.4",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengCyan,
                             letterSpacing = 1.3.sp,
@@ -186,7 +186,7 @@ fun WhatsNewDialog(onClose: () -> Unit) {
                         contentAlignment = Alignment.CenterEnd,
                     ) {
                         Text(
-                            if (page < pageCount - 1) "[ 下一步 ]" else "[ 进入 0.1.3 ]",
+                            if (page < pageCount - 1) "[ 下一步 ]" else "[ 进入 0.1.4 ]",
                             style = MaterialTheme.typography.labelLarge,
                             color = if (page < pageCount - 1) ZhishengCyan else ZhishengMint,
                             fontWeight = FontWeight.Bold,
@@ -200,35 +200,29 @@ fun WhatsNewDialog(onClose: () -> Unit) {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.forecastPage() {
     item {
-        UpdateTitle("01//", "天气体验升级", "WHAT'S CHANGED", ZhishengOrange)
+        UpdateTitle("01//", "往年同日回顾", "WEATHER ARCHIVE", ZhishengOrange)
     }
     item {
         EmphasisBlock(
-            "横屏、定位、预报阅读和数据展示全面升级，日常查看更准确、更清楚。",
+            "今天冷不冷、雨大不大，不只能凭感觉：现在可以直接和往年同一天对照。",
         )
     }
-    item { FeatureBlock("横屏待机", "横放手机进入独立气象时钟；也可以在设置中关闭横屏，保持竖屏使用。") }
-    item { FeatureBlock("定位更精确", "可选择精确位置并尽量显示街道；无法识别时会稳妥回退到城市。") }
-    item { FeatureBlock("逐时与逐日修复", "修复预报缺失和温度曲线错位；逐日增加日号，跨月时显示月份分隔。") }
-    item { FeatureBlock("短时降水重做", "直接说明何时开始或停止，显示峰值雨势和两小时时间轴；无雨时也保持完整布局。") }
-    item { FeatureBlock("同一时刻对齐", "实况、逐时「现在」和短时降水按城市当地时间说话；正在下雨时不会再出现晴窗。") }
+    item { FeatureBlock("近5年 / 近10年", "一键切换回看范围，每一年都给出天气、高低温、降水和风速。") }
+    item { FeatureBlock("温度航迹", "把各年高低温放在同一标尺上，一眼看出哪年更冷、更热。") }
+    item { FeatureBlock("诚实展示", "数据不足时保留已成功年份并明确提示；闰年2月29日也会自动跳过非闰年。") }
+    item { FeatureBlock("跟随当前设置", "历史页自动跟随当前城市、温度单位、风速单位和深浅主题。") }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.sourcePage() {
-    item { UpdateTitle("02//", "数据与显示升级", "DATA + DISPLAY", ZhishengCyan) }
-    item { FeatureBlock("和风接入更可靠", "保存凭据前会验证真实天气权限；补齐昼夜预报、降水雨强和空气质量解析，手动选择后不再混入其他天气源。") }
-    item { FeatureBlock("自动优选更稳定", "自动优选以小米天气为主，只在缺少数据时补充其他来源；手动选择时保持单一来源，并标出真实时间粒度和更新时间。") }
-    item { FeatureBlock("套餐能力不浪费", "数据源返回了更长逐时预报或更多生活指数时会完整展示；没有返回的内容不会用占位信息冒充。") }
-    item { FeatureBlock("数据口径校准", "气压按地面观测口径显示，统一一小时降水与空气污染物单位，跨源对照更直观。") }
-    item { FeatureBlock("遥测可以自选", "开发者模式可自由选择显示项目，项目数量变化时会自动排满，不再留下突兀空栏。") }
-    item { FeatureBlock("生活指数更整齐", "生活指数会按返回数量自动排满；开发者模式也可以自由选择要显示的项目。") }
-    item { FeatureBlock("夜间氛围增强", "增加更明显的氛围档位，并改善夜间模式下天气效果不易看见的问题。") }
-    item { FeatureBlock("透明小组件", "桌面小组件换成分层半透明玻璃外壳，重新整理边框、字号和对齐，并补充逐时趋势与生活信息。") }
-    item { FeatureBlock("天气娘图标", "默认启用新的天气娘头像；喜欢原版时，可在设置的界面选项中随时切回经典图标。") }
-    item { FeatureBlock("真正铺满屏幕", "背景和天气氛围延伸到手势导航区域，底部不再出现割裂的黑边。") }
+    item { UpdateTitle("02//", "近两小时雷达", "RADAR ECHO", ZhishengCyan) }
+    item { EmphasisBlock("看雨云从哪来、往哪走：优先显示最新一帧，其余回波在后台逐步补齐。", ZhishengCyan) }
+    item { FeatureBlock("可播放时间轴", "按时间从早到新查看，可点选单帧，也可播放回波变化。") }
+    item { FeatureBlock("当前城市视野", "城市切换后自动重定位，网络不稳时优先使用短时本机缓存。") }
+    item { FeatureBlock("国内可用免费方案", "回波直接在应用内阅读；数据不可用时提供中央气象台官方雷达图备用入口。") }
+    item { FeatureBlock("和原有功能联动", "往年同日与雷达回波合并为一个“时空观测”模块，共用一个序号、开关和排序位置；旧的自定义顺序会原样保留。") }
     item {
         Text(
-            "以后想再看：设置 → 关于 → 点击版本号。",
+            "这两项都是辅助判断；出行和防灾请同时关注当地气象部门预警。",
             style = MaterialTheme.typography.bodyMedium,
             color = ZhishengOrange,
             fontWeight = FontWeight.Bold,
