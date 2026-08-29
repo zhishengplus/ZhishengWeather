@@ -28,7 +28,7 @@ android {
         minSdk = 26
         targetSdk = 34
         // 20260828：0.1.4 开发版
-        versionCode = 20260841
+        versionCode = 20260847
         versionName = "0.1.4"
 
         buildConfigField("String", "QW_HOST", "\"${if (publicBuild) "" else lp("qw.host")}\"")

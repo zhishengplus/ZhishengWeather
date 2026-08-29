@@ -128,23 +128,17 @@ fun HistoryScreen(
 
 @Composable
 private fun HistoryLoading(completed: Int, total: Int) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text(
-            "> ARCHIVE LINK ${if (total == 0) "--" else "$completed/$total"}",
-            style = MaterialTheme.typography.titleMedium,
-            color = ZhishengMint,
-            letterSpacing = 1.sp,
-        )
-        Text(
-            if (completed == 0) "正在寻找这一天的往年天气…" else "已找到 $completed 年，继续补齐其余年份",
-            style = MaterialTheme.typography.bodyMedium,
-            color = ZhishengTextSecondary,
-        )
-        HistoryProgress(completed, total)
-    }
+    FeatureBootLoader(
+        channel = "WEATHER ARCHIVE",
+        lines = listOf(
+            "ARCHIVE PORT ........ OPEN",
+            "RESOLVE DATE INDEX ... OK",
+            "FETCH CLIMATE RECORDS ...",
+            "BUILD YEAR TRACE ..... ${if (total == 0) "--" else "$completed/$total"}",
+        ),
+        status = if (completed == 0) "正在定位这一天的往年天气" else "已找到 $completed 年，继续补齐其余年份",
+        progress = if (total > 0) completed / total.toFloat() else 0f,
+    )
 }
 
 @Composable

@@ -85,6 +85,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
@@ -1124,7 +1125,7 @@ private fun HeroSection(
     prefs: com.zhisheng.weather.ui.DisplayPrefs,
     modifier: Modifier,
 ) {
-    Column(modifier = modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 10.dp)) {
+    Column(modifier = modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1215,11 +1216,21 @@ private fun HeroSection(
         Nowcast.briefing(data, unit, System.currentTimeMillis())?.let { briefing ->
             val copy = briefingCopy(briefing.text)
             val copyColor = briefingColor(briefing)
-            Spacer(Modifier.height(4.dp))
+            val emotePlacement = briefingEmotePlacement(briefing.emote)
+            Spacer(Modifier.height(2.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(84.dp)
+                    .height(80.dp)
+                    .drawBehind {
+                        val baselineY = size.height - 1.dp.toPx()
+                        drawLine(
+                            color = copyColor.copy(alpha = 0.18f),
+                            start = Offset(86.dp.toPx(), baselineY),
+                            end = Offset(size.width, baselineY),
+                            strokeWidth = 1.dp.toPx(),
+                        )
+                    }
                     .semantics(mergeDescendants = true) {
                         contentDescription = "天气娘提示：${briefing.text}"
                     },
@@ -1229,16 +1240,17 @@ private fun HeroSection(
                     contentDescription = null,
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .offset(x = (-10).dp, y = 8.dp)
+                        // 各表情 PNG 的透明边界不同：按有效轮廓校正，让发梢右缘与落地线一致。
+                        .offset(x = emotePlacement.x.dp, y = emotePlacement.y.dp)
                         .size(94.dp)
                         .alpha(0.96f),
                 )
                 Column(
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 70.dp, end = 2.dp, bottom = 5.dp)
+                        .align(Alignment.BottomStart)
+                        .padding(start = 88.dp, end = 2.dp, bottom = 9.dp)
                         .zIndex(1f),
-                    verticalArrangement = Arrangement.Center,
+                    verticalArrangement = Arrangement.Bottom,
                 ) {
                     Text(
                         text = copy.lead,
@@ -1274,6 +1286,20 @@ private fun briefingEmoteRes(emote: BriefingEmote): Int = when (emote) {
     BriefingEmote.WIND -> R.drawable.weather_girl_emote_wind
     BriefingEmote.NIGHT -> R.drawable.weather_girl_emote_night
     BriefingEmote.ALERT -> R.drawable.weather_girl_emote_alert
+}
+
+private data class BriefingEmotePlacement(val x: Int, val y: Int)
+
+// 256px 原图的有效 alpha 边界并不等宽；这里统一到约 80dp 的视觉右缘、78dp 的视觉底缘。
+private fun briefingEmotePlacement(emote: BriefingEmote): BriefingEmotePlacement = when (emote) {
+    BriefingEmote.SUNNY -> BriefingEmotePlacement(x = -10, y = 0)
+    BriefingEmote.CLOUDY -> BriefingEmotePlacement(x = -6, y = 0)
+    BriefingEmote.RAIN -> BriefingEmotePlacement(x = 0, y = 0)
+    BriefingEmote.HOT -> BriefingEmotePlacement(x = 6, y = 0)
+    BriefingEmote.COLD -> BriefingEmotePlacement(x = -10, y = 3)
+    BriefingEmote.WIND -> BriefingEmotePlacement(x = -5, y = 3)
+    BriefingEmote.NIGHT -> BriefingEmotePlacement(x = 3, y = 3)
+    BriefingEmote.ALERT -> BriefingEmotePlacement(x = 8, y = 3)
 }
 
 private data class BriefingCopy(val lead: String, val detail: String?)

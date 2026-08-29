@@ -20,6 +20,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -89,8 +90,10 @@ class MainActivity : ComponentActivity() {
             }
             ZhishengWeatherTheme(isLight = isLight, accentTone = accentTone) {
                 val vm: WeatherViewModel = viewModel()
-                // rememberSaveable：旋转/进程重建后仍停在原来那屏（v0.0.2）
-                var screen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
+                // 方向变化已由 configChanges 原地处理，不需要跨进程保存临时页面。
+                // 三星 / realme 会比小米更积极恢复任务状态；若保存 SEARCH，横向冷启动会误回城市选择页。
+                // 冷启动统一回主页（横放时由 standbyActive 展示气象时钟）；快捷方式仍由 command 明确跳转。
+                var screen by remember { mutableStateOf(AppScreen.HOME) }
                 var showWhatsNew by rememberSaveable { mutableStateOf(shouldShowWhatsNew()) }
                 val uiState by vm.uiState.collectAsState()
                 val command by shortcutCommand.collectAsState()
@@ -175,7 +178,7 @@ class MainActivity : ComponentActivity() {
                             onRadarClick = { screen = AppScreen.RADAR },
                         )
                         val overlayVisible = screen != AppScreen.HOME
-                        var overlayScreen by rememberSaveable { mutableStateOf(AppScreen.SETTINGS) }
+                        var overlayScreen by remember { mutableStateOf(AppScreen.SETTINGS) }
                         if (overlayVisible) overlayScreen = screen
                         AnimatedVisibility(
                             visible = overlayVisible,

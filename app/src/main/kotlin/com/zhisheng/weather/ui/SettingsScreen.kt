@@ -608,6 +608,18 @@ fun SettingsScreen(
                 ) { showCommunityGroup = true }
                 HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
                 LinkRow(
+                    "枳生天气官网",
+                    "zhishengweather.site · 官方网站",
+                ) {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://zhishengweather.site/"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
+                LinkRow(
                     "GitHub 仓库",
                     "开源主页 · 欢迎 star",
                 ) {
