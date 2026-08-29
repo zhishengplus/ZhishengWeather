@@ -1,5 +1,5 @@
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
-/* Hallmark · component: minute precipitation + wind compass · genre: atmospheric
+/* Hallmark · component: weather-girl briefing + minute precipitation + wind compass · genre: atmospheric
  * theme: existing Zhisheng terminal · contrast: pass
  */
 package com.zhisheng.weather.ui.home
@@ -1213,23 +1213,24 @@ private fun HeroSection(
             }
         }
         Nowcast.briefing(data, unit, System.currentTimeMillis())?.let { briefing ->
-            Spacer(Modifier.height(10.dp))
-            Row(
+            Spacer(Modifier.height(4.dp))
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(84.dp)
                     .semantics(mergeDescendants = true) {
                         contentDescription = "天气娘提示：${briefing.text}"
                     },
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Image(
                     painter = painterResource(briefingEmoteRes(briefing.emote)),
                     contentDescription = null,
                     modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(9.dp)),
+                        .align(Alignment.BottomStart)
+                        .offset(x = (-10).dp, y = 8.dp)
+                        .size(94.dp)
+                        .alpha(0.96f),
                 )
-                Spacer(Modifier.width(9.dp))
                 Text(
                     text = briefing.text,
                     style = MaterialTheme.typography.titleSmall,
@@ -1237,6 +1238,10 @@ private fun HeroSection(
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 70.dp, end = 2.dp, bottom = 5.dp)
+                        .zIndex(1f),
                 )
             }
         }
