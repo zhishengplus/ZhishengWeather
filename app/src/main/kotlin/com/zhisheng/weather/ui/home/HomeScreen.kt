@@ -1213,6 +1213,8 @@ private fun HeroSection(
             }
         }
         Nowcast.briefing(data, unit, System.currentTimeMillis())?.let { briefing ->
+            val copy = briefingCopy(briefing.text)
+            val copyColor = briefingColor(briefing)
             Spacer(Modifier.height(4.dp))
             Box(
                 modifier = Modifier
@@ -1231,18 +1233,33 @@ private fun HeroSection(
                         .size(94.dp)
                         .alpha(0.96f),
                 )
-                Text(
-                    text = briefing.text,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = briefingColor(briefing),
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .padding(start = 70.dp, end = 2.dp, bottom = 5.dp)
                         .zIndex(1f),
-                )
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = copy.lead,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = copyColor,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    copy.detail?.let { detail ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = detail,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = copyColor.copy(alpha = 0.78f),
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }
@@ -1257,6 +1274,18 @@ private fun briefingEmoteRes(emote: BriefingEmote): Int = when (emote) {
     BriefingEmote.WIND -> R.drawable.weather_girl_emote_wind
     BriefingEmote.NIGHT -> R.drawable.weather_girl_emote_night
     BriefingEmote.ALERT -> R.drawable.weather_girl_emote_alert
+}
+
+private data class BriefingCopy(val lead: String, val detail: String?)
+
+private fun briefingCopy(text: String): BriefingCopy {
+    if (text.length <= 18) return BriefingCopy(text, null)
+    val splitAt = text.indices.firstOrNull { index ->
+        index in 4..14 && text[index] in setOf('，', '：', '；', '。') && text.length - index > 4
+    } ?: return BriefingCopy(text, null)
+    val lead = text.substring(0, splitAt).trim().trimEnd('，', '：', '；', '。')
+    val detail = text.substring(splitAt + 1).trim()
+    return BriefingCopy(lead, detail.takeIf { it.isNotEmpty() })
 }
 
 @Composable
