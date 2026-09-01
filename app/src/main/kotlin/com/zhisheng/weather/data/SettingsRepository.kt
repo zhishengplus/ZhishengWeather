@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import com.zhisheng.weather.model.RadarSource
 
 private val Context.settingsStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -78,7 +79,7 @@ enum class TelemetryMetric(val key: String, val cn: String, val en: String) {
     DEW_POINT("dew_point", "露点", "DEW"),
     CLOUD_COVER("cloud_cover", "云量", "CLOUD"),
     WIND_GUST("wind_gust", "阵风", "GUST"),
-    PRECIPITATION("precipitation", "1时降水", "PRECIP"),
+    PRECIPITATION("precipitation", "当前雨强", "PRECIP"),
     LUMINARY("luminary", "日月", "LUMINARY");
 
     companion object {
@@ -184,9 +185,64 @@ enum class AppIconStyle(val key: String, val cn: String) {
     }
 }
 
+/** 主页首屏播报样式：默认保留天气娘，也为偏好纯天气工具的用户提供无人物模式。 */
+enum class HomeBriefingStyle(val key: String, val cn: String) {
+    WEATHER_GIRL("weather_girl", "天气娘"),
+    TIPS("tips", "简洁 Tips");
+
+    companion object {
+        fun from(v: String?): HomeBriefingStyle =
+            entries.firstOrNull { it.key == v } ?: WEATHER_GIRL
+    }
+}
+
+enum class WidgetBackgroundMode(val key: String, val cn: String) {
+    TRANSPARENT("transparent", "全透明"),
+    GLASS("glass", "玻璃"),
+    OPAQUE("opaque", "不透明");
+
+    companion object {
+        fun from(v: String?): WidgetBackgroundMode =
+            entries.firstOrNull { it.key == v } ?: GLASS
+    }
+}
+
+/** 横屏待机界面保留经典版，同时允许用户切换到新的沉浸式气象中枢。 */
+enum class LandscapeStandbyStyle(val key: String, val cn: String) {
+    CLASSIC("classic", "经典终端"),
+    WEATHER_CORE("weather_core", "气象中枢");
+
+    companion object {
+        fun from(v: String?): LandscapeStandbyStyle =
+            entries.firstOrNull { it.key == v } ?: WEATHER_CORE
+    }
+}
+
+enum class AppLanguage(val key: String, val cn: String) {
+    CHINESE("zh", "简体中文"),
+    JAPANESE("ja", "日本語");
+
+    companion object {
+        fun from(value: String?): AppLanguage = entries.firstOrNull { it.key == value } ?: CHINESE
+    }
+}
+
+// 逐日预报的首页呈现方式。默认先给出最值得扫一眼的 3 天，用户需要时再展开全量。
+enum class DailyForecastLayout(val key: String, val cn: String) {
+    COLLAPSIBLE("collapsible", "三天转上下"),
+    FULL("full", "完整上下式"),
+    CLASSIC("classic", "经典横排式");
+
+    companion object {
+        fun from(v: String?): DailyForecastLayout =
+            entries.firstOrNull { it.key == v } ?: COLLAPSIBLE
+    }
+}
+
 enum class HomeModule(val key: String, val cn: String, val en: String) {
     HOURLY("hourly", "逐时预报", "HOURLY"),
     PRECIP("precip", "短时降水", "NOWCAST"),
+    SPACETIME("spacetime", "时空观测", "TIME / RADAR"),
     DAILY("daily", "逐日预报", "FORECAST"),
     TELEMETRY("telemetry", "遥测数据", "TELEMETRY"),
     AQI("aqi", "空气质量", "AIR QUALITY"),
@@ -195,13 +251,45 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
     TYPHOON("typhoon", "台风关注", "TYPHOON");
 
     companion object {
-        val defaultOrder: List<HomeModule> = entries.toList()
+        // 默认阅读顺序先回答用户最常看的三件事：接下来几小时、是否马上下雨、
+        // 未来几天怎样；回看与雷达属于主动查看工具，放在核心预报之后。
+        // 用户已经保存的自定义排序仍按原顺序读取，不会被默认值覆盖。
+        val defaultOrder: List<HomeModule> = listOf(
+            HOURLY,
+            PRECIP,
+            DAILY,
+            SPACETIME,
+            TELEMETRY,
+            AQI,
+            INDICES,
+            YESTERDAY,
+            TYPHOON,
+        )
 
         fun orderFrom(raw: String?): List<HomeModule> {
+            if (raw.isNullOrBlank()) return defaultOrder
             val selected = raw.orEmpty().split(',')
-                .mapNotNull { key -> entries.firstOrNull { it.key == key.trim() } }
+                .mapNotNull { key ->
+                    when (key.trim()) {
+                        // 0.1.4 早期体验版曾拆成两个序号；升级后无损并回一个模块。
+                        "history", "radar", "weather_tools" -> SPACETIME
+                        else -> entries.firstOrNull { it.key == key.trim() }
+                    }
+                }
                 .distinct()
-            return selected + defaultOrder.filterNot(selected::contains)
+                .toMutableList()
+            // 旧版本曾把完整默认序列写入偏好；这不代表用户主动排序。
+            // 仅当它仍与旧默认完全一致时迁移到新默认，任何真实改动过的顺序都原样保留。
+            if (selected == entries.toList()) return defaultOrder
+            // 旧版自定义顺序中没有新模块：插在逐日预报后；既不打乱用户
+            // 已排好的其他模块，也让核心预报先于回看/雷达工具出现。
+            if (SPACETIME !in selected) {
+                val anchor = selected.indexOf(DAILY)
+                val insertion = if (anchor >= 0) anchor + 1 else selected.size
+                selected.add(insertion, SPACETIME)
+            }
+            selected += defaultOrder.filterNot(selected::contains)
+            return selected
         }
     }
 }
@@ -226,14 +314,24 @@ object SettingsRepository {
     private val KEY_SHOW_YESTERDAY = booleanPreferencesKey("show_yesterday")
     private val KEY_SHOW_PRECIP = booleanPreferencesKey("show_precip")
     private val KEY_SHOW_TELEMETRY = booleanPreferencesKey("show_telemetry")
+    private val KEY_SHOW_WEATHER_TOOLS = booleanPreferencesKey("show_weather_tools")
+    private val KEY_SHOW_HISTORY = booleanPreferencesKey("show_history")
+    private val KEY_SHOW_RADAR = booleanPreferencesKey("show_radar")
+    private val KEY_SHOW_SPACETIME = booleanPreferencesKey("show_spacetime")
     private val KEY_BOOT_ANIM = booleanPreferencesKey("boot_anim")
     private val KEY_KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
     private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
     private val KEY_ACCENT_TONE = stringPreferencesKey("accent_tone")
     private val KEY_APP_ICON = stringPreferencesKey("app_icon")
+    private val KEY_HOME_BRIEFING_STYLE = stringPreferencesKey("home_briefing_style")
+    private val KEY_WIDGET_BACKGROUND = stringPreferencesKey("widget_background")
+    private val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
+    private val KEY_DAILY_FORECAST_LAYOUT = stringPreferencesKey("daily_forecast_layout")
     private val KEY_MODULE_ORDER = stringPreferencesKey("home_module_order")
+    private val KEY_RADAR_SOURCE = stringPreferencesKey("radar_source")
     private val KEY_DEVELOPER = booleanPreferencesKey("developer_mode")
     private val KEY_LANDSCAPE_STANDBY = booleanPreferencesKey("landscape_standby")
+    private val KEY_LANDSCAPE_STANDBY_STYLE = stringPreferencesKey("landscape_standby_style")
     private val KEY_TELEMETRY_METRICS = stringPreferencesKey("telemetry_metrics")
     private val KEY_LIFE_INDEX_METRICS = stringPreferencesKey("life_index_metrics")
 
@@ -272,10 +370,20 @@ object SettingsRepository {
     val showYesterday: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_YESTERDAY] ?: true } }
     val showPrecip: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_PRECIP] ?: true } }
     val showTelemetry: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_TELEMETRY] ?: true } }
+    val showSpacetime: Flow<Boolean> by lazy {
+        store.data.map {
+            it[KEY_SHOW_SPACETIME]
+                ?: it[KEY_SHOW_WEATHER_TOOLS]
+                ?: ((it[KEY_SHOW_HISTORY] ?: true) || (it[KEY_SHOW_RADAR] ?: true))
+        }
+    }
     val bootAnim: Flow<Boolean> by lazy { store.data.map { it[KEY_BOOT_ANIM] ?: true } }
     val keepScreenOn: Flow<Boolean> by lazy { store.data.map { it[KEY_KEEP_SCREEN_ON] ?: false } }
     val landscapeStandby: Flow<Boolean> by lazy {
         store.data.map { it[KEY_LANDSCAPE_STANDBY] ?: true }.distinctUntilChanged()
+    }
+    val landscapeStandbyStyle: Flow<LandscapeStandbyStyle> by lazy {
+        store.data.map { LandscapeStandbyStyle.from(it[KEY_LANDSCAPE_STANDBY_STYLE]) }.distinctUntilChanged()
     }
     val telemetryMetrics: Flow<Set<TelemetryMetric>> by lazy {
         store.data.map { TelemetryMetric.selectionFrom(it[KEY_TELEMETRY_METRICS]) }.distinctUntilChanged()
@@ -293,9 +401,28 @@ object SettingsRepository {
     val appIconStyle: Flow<AppIconStyle> by lazy {
         store.data.map { AppIconStyle.from(it[KEY_APP_ICON]) }.distinctUntilChanged()
     }
+    val homeBriefingStyle: Flow<HomeBriefingStyle> by lazy {
+        store.data.map { HomeBriefingStyle.from(it[KEY_HOME_BRIEFING_STYLE]) }.distinctUntilChanged()
+    }
+    val widgetBackgroundMode: Flow<WidgetBackgroundMode> by lazy {
+        store.data.map { WidgetBackgroundMode.from(it[KEY_WIDGET_BACKGROUND]) }.distinctUntilChanged()
+    }
+    val appLanguage: Flow<AppLanguage> by lazy {
+        store.data.map { AppLanguage.from(it[KEY_APP_LANGUAGE]) }.distinctUntilChanged()
+    }
+    val dailyForecastLayout: Flow<DailyForecastLayout> by lazy {
+        store.data.map { DailyForecastLayout.from(it[KEY_DAILY_FORECAST_LAYOUT]) }.distinctUntilChanged()
+    }
     val moduleOrder: Flow<List<HomeModule>> by lazy {
         store.data.map { HomeModule.orderFrom(it[KEY_MODULE_ORDER]) }.distinctUntilChanged()
     }
+
+    // 雷达页数据源：RainViewer / 彩云拼图，用户选择后持久化
+    val radarSource: Flow<RadarSource> by lazy {
+        store.data.map { RadarSource.fromKey(it[KEY_RADAR_SOURCE]) }.distinctUntilChanged()
+    }
+
+    suspend fun setRadarSource(source: RadarSource) = store.edit { it[KEY_RADAR_SOURCE] = source.key }
 
     suspend fun setTempUnit(unit: String) = store.edit { it[KEY_TEMP_UNIT] = unit }
     suspend fun setShowTyphoon(show: Boolean) = store.edit { it[KEY_SHOW_TYPHOON] = show }
@@ -309,6 +436,10 @@ object SettingsRepository {
     suspend fun caiyunUnlocked(): Boolean {
         SecretStore.currentCaiyun()
         return SecretStore.caiyunReady && developerMode.first()
+    }
+    suspend fun amapUnlocked(): Boolean {
+        SecretStore.currentAmap()
+        return SecretStore.amapReady && developerMode.first()
     }
     suspend fun purgeRetiredProviderData() = store.edit { prefs ->
         listOf("caiyun_app_key", "caiyun_app_secret", "caiyun_credential")
@@ -330,9 +461,13 @@ object SettingsRepository {
     suspend fun setShowYesterday(v: Boolean) = store.edit { it[KEY_SHOW_YESTERDAY] = v }
     suspend fun setShowPrecip(v: Boolean) = store.edit { it[KEY_SHOW_PRECIP] = v }
     suspend fun setShowTelemetry(v: Boolean) = store.edit { it[KEY_SHOW_TELEMETRY] = v }
+    suspend fun setShowSpacetime(v: Boolean) = store.edit { it[KEY_SHOW_SPACETIME] = v }
     suspend fun setBootAnim(v: Boolean) = store.edit { it[KEY_BOOT_ANIM] = v }
     suspend fun setKeepScreenOn(v: Boolean) = store.edit { it[KEY_KEEP_SCREEN_ON] = v }
     suspend fun setLandscapeStandby(v: Boolean) = store.edit { it[KEY_LANDSCAPE_STANDBY] = v }
+    suspend fun setLandscapeStandbyStyle(style: LandscapeStandbyStyle) = store.edit {
+        it[KEY_LANDSCAPE_STANDBY_STYLE] = style.key
+    }
     suspend fun setTelemetryMetrics(selection: Set<TelemetryMetric>) = store.edit {
         it[KEY_TELEMETRY_METRICS] = TelemetryMetric.selectionKey(selection)
     }
@@ -342,6 +477,18 @@ object SettingsRepository {
     suspend fun setThemeMode(mode: ThemeMode) = store.edit { it[KEY_THEME_MODE] = mode.key }
     suspend fun setAccentTone(tone: AccentTone) = store.edit { it[KEY_ACCENT_TONE] = tone.key }
     suspend fun setAppIconStyle(style: AppIconStyle) = store.edit { it[KEY_APP_ICON] = style.key }
+    suspend fun setHomeBriefingStyle(style: HomeBriefingStyle) = store.edit {
+        it[KEY_HOME_BRIEFING_STYLE] = style.key
+    }
+    suspend fun setWidgetBackgroundMode(mode: WidgetBackgroundMode) = store.edit {
+        it[KEY_WIDGET_BACKGROUND] = mode.key
+    }
+    suspend fun setAppLanguage(language: AppLanguage) = store.edit {
+        it[KEY_APP_LANGUAGE] = language.key
+    }
+    suspend fun setDailyForecastLayout(layout: DailyForecastLayout) = store.edit {
+        it[KEY_DAILY_FORECAST_LAYOUT] = layout.key
+    }
     suspend fun setModuleOrder(order: List<HomeModule>) = store.edit {
         it[KEY_MODULE_ORDER] = HomeModule.orderFrom(order.joinToString(",") { module -> module.key })
             .joinToString(",") { module -> module.key }

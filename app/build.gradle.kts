@@ -27,14 +27,23 @@ android {
         applicationId = "com.zhisheng.weather"
         minSdk = 26
         targetSdk = 34
-        // 20260827：0.1.3 正式版
-        versionCode = 20260831
-        versionName = "0.1.3"
+        // 20260901：0.1.5 beta3 社区前瞻版
+        versionCode = 20260901
+        versionName = "0.1.5-beta3"
+
+        // 发行渠道面向实体手机；去掉仅供 Intel 模拟器使用的 x86/x86_64 MapLibre 库。
+        // 同时保留现代 ARM64 与 Android 8 时代的 32 位 ARM 设备。
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
 
         buildConfigField("String", "QW_HOST", "\"${if (publicBuild) "" else lp("qw.host")}\"")
         buildConfigField("String", "QW_PROJECT_ID", "\"${if (publicBuild) "" else lp("qw.project_id")}\"")
         buildConfigField("String", "QW_KID", "\"${if (publicBuild) "" else lp("qw.kid")}\"")
         buildConfigField("String", "QW_PRIVATE_KEY", "\"${if (publicBuild) "" else lp("qw.private_key")}\"")
+        // 天地图移动端 Key：仅从被 Git 忽略的 local.properties 注入；包名与 SHA1 在控制台绑定。
+        // 和风 JWT 在公开包必须清空；天地图 tk 按包名绑定，公开包同样需要底图。
+        buildConfigField("String", "TDT_TOKEN", "\"${lp("tianditu.token")}\"")
         buildConfigField("String", "COMMUNITY_QQ_GROUP", "\"$communityQqGroup\"")
         // 只有与 GitHub 公共版同包名、同签名的构建可以直接覆盖更新。
         buildConfigField("boolean", "CAN_SELF_UPDATE", publicBuild.toString())
@@ -141,6 +150,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.bouncycastle)
     implementation(libs.work.runtime.ktx)
+    implementation(libs.maplibre.android)
     testImplementation(libs.junit)
     debugImplementation(libs.compose.tooling)
 }

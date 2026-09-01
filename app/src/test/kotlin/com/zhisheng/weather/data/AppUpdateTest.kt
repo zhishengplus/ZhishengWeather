@@ -96,15 +96,16 @@ class AppUpdateTest {
             File("../update.json"),
         ).first { it.isFile }.readText()
         val info = AppUpdate.parseManifest(manifest)
-        assertEquals(20260831, info.versionCode)
-        assertEquals("0.1.3", info.versionName)
-        assertTrue(info.apkUrl.endsWith("ZhishengWeather-v0.1.3-public.apk"))
+        assertEquals(20260901, info.versionCode)
+        assertEquals("0.1.5-beta3", info.versionName)
+        assertTrue(info.apkUrl.endsWith("ZhishengWeather-v0.1.5-beta3-public.apk"))
         assertTrue(info.sha256?.matches(Regex("[0-9a-fA-F]{64}")) == true)
-        assertFalse(AppUpdate.isNewer(info, 20260831, "0.1.3"))
+        assertTrue(AppUpdate.isNewer(info, 20260831, "0.1.3"))
+        assertFalse(AppUpdate.isNewer(info, 20260901, "0.1.5-beta3"))
     }
 
     @Test
-    fun updateEntryIsManualOnly() {
+    fun silentUpdateCheckOnlyMarksSettingsAndNeverOpensADialog() {
         val settings = sequenceOf(
             File("src/main/kotlin/com/zhisheng/weather/ui/SettingsScreen.kt"),
             File("app/src/main/kotlin/com/zhisheng/weather/ui/SettingsScreen.kt"),
@@ -123,8 +124,11 @@ class AppUpdateTest {
         ).first { it.isFile }.readText()
 
         assertTrue(settings.contains("检查更新"))
+        assertTrue(settings.contains("attention = availableUpdate != null"))
+        assertTrue(settings.contains("不弹窗、不自动下载"))
         assertTrue(dialog.contains("不会自动下载"))
-        assertTrue(!activity.contains("AppUpdate.check"))
+        assertTrue(activity.contains("availableUpdate = when (val result = AppUpdate.check())"))
+        assertTrue(!activity.contains("showAppUpdate = true"))
         assertTrue(manifest.contains("REQUEST_INSTALL_PACKAGES"))
         assertTrue(manifest.contains("androidx.core.content.FileProvider"))
         assertTrue(manifest.contains("@xml/file_provider_paths"))

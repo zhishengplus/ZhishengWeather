@@ -1,11 +1,49 @@
 package com.zhisheng.weather.widget
 
+import com.zhisheng.weather.data.WidgetSnapshot
+
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WidgetLayoutTest {
+
+    @Test
+    fun widgetAqiKeepsItsNationalStandardVisible() {
+        assertEquals(
+            "AQI 46 · 优 · 美标",
+            widgetAqiText(WidgetSnapshot(aqi = 46, aqiLevel = "优", aqiStandard = "美国")),
+        )
+        assertEquals(
+            "AQI 35 · 国标",
+            widgetAqiText(WidgetSnapshot(aqi = 35, aqiStandard = "中国")),
+        )
+    }
+
+    @Test
+    fun widgetBackgroundOffersTransparentGlassAndOpaqueModes() {
+        val root = sequenceOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
+        val settings = File(root, "kotlin/com/zhisheng/weather/data/SettingsRepository.kt").readText()
+        val screen = File(root, "kotlin/com/zhisheng/weather/ui/SettingsScreen.kt").readText()
+        val provider = File(root, "kotlin/com/zhisheng/weather/widget/ZhishengWidgetProvider.kt").readText()
+
+        assertTrue(settings.contains("TRANSPARENT(\"transparent\", \"全透明\")"))
+        assertTrue(settings.contains("GLASS(\"glass\", \"玻璃\")"))
+        assertTrue(settings.contains("OPAQUE(\"opaque\", \"不透明\")"))
+        assertTrue(screen.contains("桌面组件底色"))
+        assertTrue(screen.contains("ZhishengWidgetProvider.refreshAll(context)"))
+        assertTrue(provider.contains("WidgetBackgroundMode.TRANSPARENT -> R.drawable.widget_bg_transparent"))
+        assertTrue(provider.contains("WidgetBackgroundMode.OPAQUE -> if (light) R.drawable.widget_bg_opaque_light else R.drawable.widget_bg_opaque"))
+
+        val transparent = File(root, "res/drawable/widget_bg_transparent.xml").readText()
+        val darkOpaque = File(root, "res/drawable/widget_bg_opaque.xml").readText()
+        val lightOpaque = File(root, "res/drawable/widget_bg_opaque_light.xml").readText()
+        assertTrue(transparent.contains("#00000000"))
+        assertTrue(darkOpaque.contains("#FF"))
+        assertTrue(lightOpaque.contains("#FF"))
+    }
 
     @Test
     fun everyWidgetLayoutUsesOnlyRemoteViewsSupportedElements() {
@@ -167,8 +205,8 @@ class WidgetLayoutTest {
         assertTrue(provider.contains("dailyRangeBitmap("))
         assertTrue(provider.contains("WidgetSyncWorker.refreshNow(context)"))
         assertTrue(provider.contains("PendingIntent.getBroadcast"))
-        assertTrue(provider.contains("setTextViewText(R.id.w_refresh, \"…\")"))
-        assertTrue(provider.contains("setTextViewText(R.id.w_upd, context.getString(R.string.widget_refreshing))"))
+        assertTrue(provider.contains("setLocalizedTextViewText(R.id.w_refresh, \"…\")"))
+        assertTrue(provider.contains("setLocalizedTextViewText(R.id.w_upd, context.getString(R.string.widget_refreshing))"))
         assertTrue(provider.contains("delay(REFRESH_PAINT_DELAY_MS)"))
         assertTrue(provider.contains("delay(REFRESH_FALLBACK_DELAY_MS)"))
     }

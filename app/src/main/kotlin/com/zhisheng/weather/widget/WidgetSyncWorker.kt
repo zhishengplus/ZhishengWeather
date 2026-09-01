@@ -17,6 +17,7 @@ import com.zhisheng.weather.data.WeatherRepository
 import com.zhisheng.weather.ui.WidgetSnapshotBuilder
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.TimeUnit
 
@@ -48,6 +49,8 @@ class WidgetSyncWorker(
                 android.util.Log.w(TAG, "后台刷新失败 ${city.name}，稍后重试")
                 Result.retry()
             }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (e: Exception) {
             android.util.Log.w(TAG, "后台刷新异常", e)
             Result.retry()

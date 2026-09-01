@@ -45,3 +45,11 @@ RESEARCH_*.md
 # 真机截图与调试目录（不入库）
 .device-screenshots/
 shots/
+
+# 发布前本地核对、回退副本与生成物（保留在工作区，不进入公开仓库）
+artifacts/
+backups/
+assets/branding/character_design/
+DEBUG_AUDIT_*.md
+fetch_caiyun_docs.ps1
+scripts/update_contributors_from_xlsx.py

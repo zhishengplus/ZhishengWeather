@@ -179,4 +179,75 @@ class WeatherConsistencyTest {
 
         assertEquals(1, WeatherConsistency.upcomingHourStartIndex(hourly, t0 + 20 * 60_000L))
     }
+
+    @Test
+    fun sanitizerRejectsImpossibleValuesAndOrdersTimeSeries() {
+        val sane = WeatherConsistency.sanitize(
+            WeatherData(
+                current = CurrentWeather(
+                    temperature = Double.NaN,
+                    humidity = 130.0,
+                    windDirectionDeg = -10.0,
+                    pressure = 1010.0,
+                ),
+                hourly = listOf(
+                    HourlyWeather(t0 + 3_600_000L, 20.0, precipProb = 130),
+                    HourlyWeather(t0, 18.0, windDirectionDeg = 725.0),
+                    HourlyWeather(t0, 99.0),
+                    HourlyWeather(-1L, 10.0),
+                ),
+                daily = listOf(
+                    DailyWeather(t0 + 86_400_000L, high = 10.0, low = 20.0),
+                    DailyWeather(t0, high = 30.0, low = 15.0, humidity = -1.0),
+                ),
+                rainMinutes = listOf(
+                    MinutePrecip(t0 + 60_000L, -1f),
+                    MinutePrecip(t0, 0.2f),
+                ),
+            ),
+        )
+
+        assertNull(sane.current?.temperature)
+        assertNull(sane.current?.humidity)
+        assertEquals(350.0, sane.current?.windDirectionDeg ?: -1.0, 0.0001)
+        assertEquals(listOf(t0, t0 + 3_600_000L), sane.hourly.map { it.timeMillis })
+        assertEquals(5.0, sane.hourly.first().windDirectionDeg ?: -1.0, 0.0001)
+        assertNull(sane.hourly.last().precipProb)
+        assertEquals(20.0, sane.daily.last().high ?: -1.0, 0.0001)
+        assertEquals(10.0, sane.daily.last().low ?: -1.0, 0.0001)
+        assertEquals(listOf(t0), sane.rainMinutes.map { it.timeMillis })
+    }
+
+    @Test
+    fun sanitizerDoesNotPretendAnEmptyInvalidCurrentIsUsable() {
+        val sane = WeatherConsistency.sanitize(
+            WeatherData(
+                current = CurrentWeather(
+                    temperature = 999.0,
+                    humidity = -2.0,
+                    condition = WeatherCondition.UNKNOWN,
+                    weatherText = "未知",
+                ),
+            ),
+        )
+
+        assertNull(sane.current)
+    }
+
+    @Test
+    fun sanitizerRejectsFutureFreshnessAndNonNumericPollutants() {
+        val sane = WeatherConsistency.sanitize(
+            WeatherData(
+                current = CurrentWeather(temperature = 20.0),
+                updateTime = t0 + 10 * 60_000L,
+                aqi = AqiInfo(value = 40, pm25 = "NaN", pm10 = "18.5", co = "-1"),
+            ),
+            nowMillis = t0,
+        )
+
+        assertNull(sane.updateTime)
+        assertNull(sane.aqi?.pm25)
+        assertEquals("18.5", sane.aqi?.pm10)
+        assertNull(sane.aqi?.co)
+    }
 }

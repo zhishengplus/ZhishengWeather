@@ -73,7 +73,12 @@ object CaiyunSource {
             if (!body.status.equals("ok", true) || body.result == null) {
                 WeatherData(error = "彩云天气请求失败")
             } else {
-                map(body.result, city)
+                map(
+                    r = body.result,
+                    city = city,
+                    utcOffsetSeconds = body.tzshift,
+                    providerUpdateTime = body.serverTime?.takeIf { it > 0L }?.times(1_000L),
+                )
             }
         } catch (ce: kotlinx.coroutines.CancellationException) {
             throw ce
@@ -97,12 +102,19 @@ object CaiyunSource {
         }
     }
 
-    private fun map(r: CaiyunResult, city: City): WeatherData {
+    internal fun map(
+        r: CaiyunResult,
+        city: City,
+        utcOffsetSeconds: Int? = null,
+        providerUpdateTime: Long? = null,
+    ): WeatherData {
         val rt = r.realtime
-        val now = System.currentTimeMillis() / Nowcast.MINUTE_MS * Nowcast.MINUTE_MS
+        val fetchedAt = System.currentTimeMillis()
+        val now = (providerUpdateTime ?: fetchedAt) / Nowcast.MINUTE_MS * Nowcast.MINUTE_MS
         val precip2h = r.minutely?.precipitation2h ?: r.minutely?.precipitation
         val minutes = precip2h?.let { Nowcast.minuteSeries(it.map { v -> v.toFloat() }, now) }.orEmpty()
-        val offsetHint = offsetSeconds(r.hourly?.temperature?.firstOrNull()?.datetime)
+        val offsetHint = utcOffsetSeconds?.takeIf { it in -18 * 3_600..18 * 3_600 }
+            ?: offsetSeconds(r.hourly?.temperature?.firstOrNull()?.datetime)
             ?: offsetSeconds(r.daily?.temperature?.firstOrNull()?.date)
         return WeatherData(
             current = rt?.let {
@@ -119,6 +131,7 @@ object CaiyunSource {
                     windSpeed = it.wind?.speed,
                     windDirectionDeg = it.wind?.direction,
                     pressure = it.pressure?.div(100.0),
+                    uvIndex = it.lifeIndex?.ultraviolet?.index?.roundToInt(),
                     visibility = it.visibility,
                     cloudCover = ratioToPercent(it.cloudrate),
                     precipMm = it.precipitation?.local?.intensity,
@@ -127,24 +140,46 @@ object CaiyunSource {
             hourly = r.hourly?.let { h ->
                 val n = maxOf(
                     h.temperature?.size ?: 0,
+                    h.apparentTemperature?.size ?: 0,
                     h.skycon?.size ?: 0,
                     h.wind?.size ?: 0,
                     h.precipitation?.size ?: 0,
+                    h.humidity?.size ?: 0,
+                    h.pressure?.size ?: 0,
+                    h.visibility?.size ?: 0,
+                    h.cloudrate?.size ?: 0,
+                    h.airQuality?.aqi?.size ?: 0,
                 ).coerceAtMost(360)
                 (0 until n).mapNotNull { i ->
                     val temp = h.temperature?.getOrNull(i)
+                    val apparent = h.apparentTemperature?.getOrNull(i)
                     val sky = h.skycon?.getOrNull(i)
                     val wind = h.wind?.getOrNull(i)
                     val precip = h.precipitation?.getOrNull(i)
-                    val rawTime = temp?.datetime ?: sky?.datetime ?: wind?.datetime ?: precip?.datetime
+                    val humidity = h.humidity?.getOrNull(i)
+                    val pressure = h.pressure?.getOrNull(i)
+                    val visibility = h.visibility?.getOrNull(i)
+                    val cloudrate = h.cloudrate?.getOrNull(i)
+                    val air = h.airQuality?.aqi?.getOrNull(i)
+                    val rawTime = temp?.datetime ?: apparent?.datetime ?: sky?.datetime ?: wind?.datetime
+                        ?: precip?.datetime ?: humidity?.datetime ?: pressure?.datetime
+                        ?: visibility?.datetime ?: cloudrate?.datetime ?: air?.datetime
                     val timeMillis = parseTime(rawTime, offsetHint) ?: return@mapNotNull null
                     HourlyWeather(
                         timeMillis = timeMillis,
                         temperature = temp?.value,
+                        feelsLike = apparent?.value,
                         condition = skycon(sky?.value),
                         profile = skyconProfile(sky?.value),
                         windSpeed = wind?.speed,
+                        windDirectionDeg = wind?.direction,
                         precipProb = normalizeProbability(precip?.probability),
+                        precipMm = precip?.value?.takeIf { it.isFinite() && it >= 0.0 },
+                        humidity = ratioToPercent(humidity?.value),
+                        pressure = pressure?.value?.div(100.0),
+                        visibility = visibility?.value,
+                        cloudCover = ratioToPercent(cloudrate?.value),
+                        aqi = air?.value?.chn,
                     )
                 }
             }.orEmpty(),
@@ -156,6 +191,13 @@ object CaiyunSource {
                     daily.skyconNight?.size ?: 0,
                     daily.astro?.size ?: 0,
                     daily.precipitation?.size ?: 0,
+                    daily.precipitationDay?.size ?: 0,
+                    daily.precipitationNight?.size ?: 0,
+                    daily.humidity?.size ?: 0,
+                    daily.cloudrate?.size ?: 0,
+                    daily.wind?.size ?: 0,
+                    daily.windDay?.size ?: 0,
+                    daily.windNight?.size ?: 0,
                 ).coerceAtMost(15)
                 (0 until n).mapNotNull { i ->
                     val temp = daily.temperature?.getOrNull(i)
@@ -164,6 +206,13 @@ object CaiyunSource {
                     val nightSky = daily.skyconNight?.getOrNull(i)?.value
                     val astro = daily.astro?.getOrNull(i)
                     val precip = daily.precipitation?.getOrNull(i)
+                    val precipDay = daily.precipitationDay?.getOrNull(i)
+                    val precipNight = daily.precipitationNight?.getOrNull(i)
+                    val humidity = daily.humidity?.getOrNull(i)
+                    val cloudrate = daily.cloudrate?.getOrNull(i)
+                    val wind = daily.wind?.getOrNull(i)
+                    val windDay = daily.windDay?.getOrNull(i)
+                    val windNight = daily.windNight?.getOrNull(i)
                     val rawDate = temp?.date ?: sky?.datetime ?: sky?.date ?: astro?.date ?: precip?.date
                     val dateMillis = parseTime(rawDate, offsetHint) ?: return@mapNotNull null
                     val dayNight = dailyDayNight(daySky, nightSky, sky?.value)
@@ -171,12 +220,26 @@ object CaiyunSource {
                         dateMillis = dateMillis,
                         high = temp?.max,
                         low = temp?.min,
+                        average = listOfNotNull(temp?.max, temp?.min).takeIf { it.isNotEmpty() }?.average(),
                         condition = dayNight.first,
                         weatherText = dayNight.second,
                         profile = skyconProfile(daySky ?: sky?.value) ?: skyconProfile(nightSky),
                         sunrise = astro?.sunrise?.time,
                         sunset = astro?.sunset?.time,
-                        precipProbability = normalizeProbability(precip?.probability),
+                        windSpeed = listOfNotNull(
+                            windDay?.max?.speed,
+                            windNight?.max?.speed,
+                            wind?.max?.speed,
+                        ).maxOrNull(),
+                        windDirectionDeg = wind?.avg?.direction ?: windDay?.avg?.direction ?: windNight?.avg?.direction,
+                        precipProbability = listOfNotNull(
+                            normalizeProbability(precip?.probability),
+                            normalizeProbability(precipDay?.probability),
+                            normalizeProbability(precipNight?.probability),
+                        ).maxOrNull(),
+                        humidity = ratioToPercent(humidity?.avg),
+                        cloudCover = ratioToPercent(cloudrate?.avg),
+                        uvIndex = daily.lifeIndex?.ultraviolet?.getOrNull(i)?.index?.toDoubleOrNull()?.roundToInt(),
                         // metric:v2 的 daily.precipitation.max 是峰值雨强 mm/h，不是日累计。
                         // 没有日合计就留空，不用峰值冒充全天降水量。
                     ), city.latitude, city.longitude)
@@ -186,12 +249,14 @@ object CaiyunSource {
                 AqiInfo(
                     value = a.aqi?.chn,
                     level = a.description?.chn,
+                    standard = "中国",
                     pm25 = a.pm25?.toInt()?.toString(),
                     pm10 = a.pm10?.toInt()?.toString(),
                     o3 = a.o3?.toInt()?.toString(),
                     no2 = a.no2?.toInt()?.toString(),
                     so2 = a.so2?.toInt()?.toString(),
                     co = a.co?.toString(),
+                    pollutantUnits = WeatherRepository.CHINA_POLLUTANT_UNITS,
                 )
             },
             alerts = r.alert?.content.orEmpty().mapNotNull { a ->
@@ -204,7 +269,7 @@ object CaiyunSource {
                     severity = alertLevelOf(a.code ?: a.title),
                 )
             },
-            updateTime = now,
+            updateTime = providerUpdateTime ?: fetchedAt,
             // 官方定义：minutely.description 是未来 2 小时短临，forecast_keypoint 是
             // 未来 24 小时变化。两者不能塞进同一个字段，否则“实况晴”下面紧接
             // “多云，今晚转雨”会被误读成同一时刻互相打架。
@@ -214,6 +279,9 @@ object CaiyunSource {
             rainMeta = minutes.takeIf { it.isNotEmpty() }?.let {
                 RainMeta("CAIYUN", 1, now, horizonMinutes = it.size.coerceIn(30, 180))
             },
+            rainDistanceKm = rt?.precipitation?.nearest?.distance
+                ?.takeIf { it.isFinite() && it >= 0.0 }
+                ?.div(1_000.0),
             extraIndices = mapLifeIndices(r.daily?.lifeIndex),
             dataSource = "CAIYUN",
             blockSources = mapOf("current" to "CAIYUN", "hourly" to "CAIYUN", "daily" to "CAIYUN", "minutely" to "CAIYUN"),

@@ -28,6 +28,7 @@ data class WidgetSnapshot(
     val conditionName: String = "",
     val aqi: Int? = null,
     val aqiLevel: String = "",
+    val aqiStandard: String = "",
     val updateMillis: Long = 0L,
     val source: String = "",
     val utcOffsetSeconds: Int? = null,

@@ -117,6 +117,9 @@ object Fmt {
         else -> "风速 km/h"
     }
 
+    /** 逐时窄列使用蒲福风级，读数完整且不会被 km/h 长单位挤压。 */
+    fun windForce(kmh: Double?): String? = kmh?.let { "${beaufort(it)}级" }
+
     // 蒲福风级（按 km/h 上界切分）
     private fun beaufort(kmh: Double): Int = when {
         kmh < 1.0 -> 0

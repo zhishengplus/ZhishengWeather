@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +44,7 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.i18n.uiText
 
 internal val CommunityQqGroup: String
     get() = BuildConfig.COMMUNITY_QQ_GROUP
@@ -136,7 +136,7 @@ fun CommunityGroupDialog(onClose: () -> Unit) {
                     ) {
                         Image(
                             painter = painterResource(R.drawable.qq_group_qr),
-                            contentDescription = "枳生天气 QQ 群二维码，群号 $CommunityQqGroup",
+                            contentDescription = uiText("枳生天气 QQ 群二维码，群号 $CommunityQqGroup"),
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit,
                         )
@@ -157,7 +157,7 @@ fun CommunityGroupDialog(onClose: () -> Unit) {
                             .weight(1f)
                             .clickable(role = Role.Button) {
                                 clipboard.setText(AnnotatedString(CommunityQqGroup))
-                                Toast.makeText(context, "群号已复制", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, uiText("群号已复制"), Toast.LENGTH_SHORT).show()
                             }
                             .padding(vertical = 15.dp),
                         contentAlignment = Alignment.Center,

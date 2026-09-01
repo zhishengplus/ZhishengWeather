@@ -15,11 +15,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -30,6 +35,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhisheng.weather.data.AccentTone
+import com.zhisheng.weather.data.AppLanguage
+import com.zhisheng.weather.data.AppUpdate
+import com.zhisheng.weather.data.AppUpdateCheck
+import com.zhisheng.weather.data.AppUpdateInfo
+import com.zhisheng.weather.data.LandscapeStandbyStyle
 import com.zhisheng.weather.data.SettingsRepository
 import com.zhisheng.weather.data.ThemeMode
 import com.zhisheng.weather.model.City
@@ -43,11 +53,17 @@ import com.zhisheng.weather.ui.overlayEnter
 import com.zhisheng.weather.ui.overlayExit
 import com.zhisheng.weather.ui.screenTransition
 import com.zhisheng.weather.ui.LandscapeStandbyScreen
+import com.zhisheng.weather.ui.HistoryScreen
+import com.zhisheng.weather.ui.DailyForecastScreen
+import com.zhisheng.weather.ui.RadarScreen
+import com.zhisheng.weather.ui.TyphoonScreen
+import com.zhisheng.weather.ui.PortraitSessionNotice
 import com.zhisheng.weather.ui.WhatsNewDialog
 import com.zhisheng.weather.ui.WhatsNewPreferenceFile
 import com.zhisheng.weather.ui.WhatsNewSeenKey
 import com.zhisheng.weather.ui.WhatsNewVersion
 import com.zhisheng.weather.ui.theme.ZhishengWeatherTheme
+import com.zhisheng.weather.i18n.ProvideAppLanguage
 import kotlinx.coroutines.flow.MutableStateFlow
 
 private data class ShortcutCommand(val action: String? = null, val sequence: Long = 0L)
@@ -60,24 +76,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         dispatchShortcut(intent)
         applySplashBackground()
-        // 部分厂商系统在新接口下仍依赖旧窗口标志；两者并用可兼容 Android 8.0 和定制 ROM。
-        @Suppress("DEPRECATION")
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
-        )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        }
-
         enableEdgeToEdge()
         applyEdgeToEdgeSystemBars()
         setContent {
             // 主题模式（v0.0.5）：深色 / 浅色 / 跟随系统三档，切换立即生效
             val themeMode by SettingsRepository.themeMode.collectAsState(initial = ThemeMode.DARK)
             val accentTone by SettingsRepository.accentTone.collectAsState(initial = AccentTone.STANDARD)
+            val appLanguage by SettingsRepository.appLanguage.collectAsState(initial = AppLanguage.CHINESE)
             val systemDark = isSystemInDarkTheme()
             val isLight = when (themeMode) {
                 ThemeMode.LIGHT -> true
@@ -86,19 +91,36 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.SYSTEM -> !systemDark
             }
             ZhishengWeatherTheme(isLight = isLight, accentTone = accentTone) {
+                ProvideAppLanguage(appLanguage) {
                 val vm: WeatherViewModel = viewModel()
-                // rememberSaveable：旋转/进程重建后仍停在原来那屏（v0.0.2）
-                var screen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
+                // 方向变化已由 configChanges 原地处理，不需要跨进程保存临时页面。
+                // 三星 / realme 会比小米更积极恢复任务状态；若保存 SEARCH，横向冷启动会误回城市选择页。
+                // 冷启动统一回主页（横放时由 standbyActive 展示气象时钟）；快捷方式仍由 command 明确跳转。
+                var screen by remember { mutableStateOf(AppScreen.HOME) }
                 var showWhatsNew by rememberSaveable { mutableStateOf(shouldShowWhatsNew()) }
+                var availableUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
                 val uiState by vm.uiState.collectAsState()
                 val command by shortcutCommand.collectAsState()
                 val landscapeStandby by SettingsRepository.landscapeStandby.collectAsState(initial = true)
+                val landscapeStandbyStyle by SettingsRepository.landscapeStandbyStyle.collectAsState(
+                    initial = LandscapeStandbyStyle.WEATHER_CORE,
+                )
+                // 横屏页点“竖屏”后，当前 Activity 会话保持竖向；重新开启横屏待机或
+                // 下次冷启动后再恢复传感器判断，避免用户躺着时手机立刻又转回横屏。
+                var portraitSession by remember { mutableStateOf(false) }
                 val configuration = LocalConfiguration.current
-                val standbyActive = landscapeStandby && configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                val standbyActive = landscapeStandby && !portraitSession &&
+                    configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                // 横屏只在主页展示待机时钟；从时钟进入设置后仍保持横向，
+                // 但恢复系统栏并展示完整设置，返回主页再回到待机界面。
+                val standbyVisible = standbyActive && screen == AppScreen.HOME
 
                 // 关闭横屏待机后立即回到竖屏并锁定；开启后由传感器决定竖/横屏。
                 LaunchedEffect(landscapeStandby) {
-                    requestedOrientation = if (landscapeStandby) {
+                    if (!landscapeStandby) portraitSession = false
+                }
+                LaunchedEffect(landscapeStandby, portraitSession) {
+                    requestedOrientation = if (landscapeStandby && !portraitSession) {
                         ActivityInfo.SCREEN_ORIENTATION_SENSOR
                     } else {
                         ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -118,22 +140,52 @@ class MainActivity : ComponentActivity() {
                     persistSplashBackground(isLight)
                 }
 
-                DisposableEffect(standbyActive) {
+                DisposableEffect(standbyVisible) {
                     val bars = androidx.core.view.WindowCompat.getInsetsController(window, view)
-                    if (standbyActive) {
+                    // 仅横屏待机需要锁屏上显示/点亮屏幕；普通竖屏天气页不能长期持有
+                    // SHOW_WHEN_LOCKED，否则部分三星、realme 在任务恢复时会越过锁屏露出页面。
+                    @Suppress("DEPRECATION")
+                    if (standbyVisible) {
+                        window.addFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                        )
+                    } else {
+                        window.clearFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                        )
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                        setShowWhenLocked(standbyVisible)
+                        setTurnScreenOn(standbyVisible)
+                    }
+                    if (standbyVisible) {
                         bars.systemBarsBehavior =
                             androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                         bars.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                     } else {
                         bars.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                     }
-                    onDispose { bars.show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
+                    onDispose {
+                        bars.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                        @Suppress("DEPRECATION")
+                        window.clearFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                        )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            setShowWhenLocked(false)
+                            setTurnScreenOn(false)
+                        }
+                    }
                 }
 
                 LaunchedEffect(command.sequence) {
                     when (command.action) {
                         ACTION_SEARCH -> screen = AppScreen.SEARCH
                         ACTION_SETTINGS -> screen = AppScreen.SETTINGS
+                        ACTION_TYPHOON -> screen = AppScreen.TYPHOON
                         ACTION_REFRESH -> {
                             screen = AppScreen.HOME
                             vm.refresh(force = true)
@@ -141,10 +193,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 每次应用进程启动后静默检查一次。只更新设置页的红点和说明，
+                // 不弹窗、不下载，也不会打断启动动画或主页操作。
+                LaunchedEffect(Unit) {
+                    availableUpdate = when (val result = AppUpdate.check()) {
+                        is AppUpdateCheck.Available -> result.info
+                        AppUpdateCheck.UpToDate, is AppUpdateCheck.Failed -> null
+                    }
+                }
+
                 // 常亮屏幕（设置项）
                 val keepOn by SettingsRepository.keepScreenOn.collectAsState(initial = false)
-                DisposableEffect(keepOn, standbyActive) {
-                    view.keepScreenOn = keepOn || standbyActive
+                DisposableEffect(keepOn, standbyVisible) {
+                    view.keepScreenOn = keepOn || standbyVisible
                     onDispose { view.keepScreenOn = false }
                 }
 
@@ -159,8 +220,17 @@ class MainActivity : ComponentActivity() {
                     vm.autoLocateIfEnabled()
                 }
 
-                if (standbyActive) {
-                    LandscapeStandbyScreen(uiState = uiState, onRefresh = { vm.refresh() })
+                if (standbyVisible) {
+                    LandscapeStandbyScreen(
+                        uiState = uiState,
+                        style = landscapeStandbyStyle,
+                        onRefresh = { vm.refresh() },
+                        onExitLandscape = {
+                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            portraitSession = true
+                        },
+                        onSettings = { screen = AppScreen.SETTINGS },
+                    )
                 } else {
                     // 主屏始终留在下层。进出设置/搜索只盖一层，避免拆掉 WeatherContent
                     // 后温度、图标再播一遍交错入场。
@@ -169,9 +239,23 @@ class MainActivity : ComponentActivity() {
                             viewModel = vm,
                             onSearchClick = { screen = AppScreen.SEARCH },
                             onSettingsClick = { screen = AppScreen.SETTINGS },
+                            onHistoryClick = { screen = AppScreen.HISTORY },
+                            onRadarClick = { screen = AppScreen.RADAR },
+                            onDailyForecastClick = { screen = AppScreen.DAILY_FORECAST },
+                            onTyphoonClick = { screen = AppScreen.TYPHOON },
                         )
+                        AnimatedVisibility(
+                            visible = portraitSession && screen == AppScreen.HOME,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .navigationBarsPadding()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            label = "portrait-session-notice",
+                        ) {
+                            PortraitSessionNotice(onRestore = { portraitSession = false })
+                        }
                         val overlayVisible = screen != AppScreen.HOME
-                        var overlayScreen by rememberSaveable { mutableStateOf(AppScreen.SETTINGS) }
+                        var overlayScreen by remember { mutableStateOf(AppScreen.SETTINGS) }
                         if (overlayVisible) overlayScreen = screen
                         AnimatedVisibility(
                             visible = overlayVisible,
@@ -189,6 +273,8 @@ class MainActivity : ComponentActivity() {
                                     AppScreen.HOME -> Box(Modifier.fillMaxSize())
                                     AppScreen.SETTINGS -> SettingsScreen(
                                         onBack = { screen = AppScreen.HOME },
+                                        landscapePortraitLocked = portraitSession,
+                                        onRestoreLandscapeAuto = { portraitSession = false },
                                         onLocate = { vm.locateCurrentCity() },
                                         locating = uiState.locating,
                                         locateMessage = uiState.locateMessage,
@@ -203,10 +289,36 @@ class MainActivity : ComponentActivity() {
                                         sourceLoading = uiState.loading,
                                         onAtmosphereLab = { screen = AppScreen.ATMOSPHERE_LAB },
                                         onShowWhatsNew = { showWhatsNew = true },
+                                        availableUpdate = availableUpdate,
                                     )
                                     AppScreen.ATMOSPHERE_LAB -> AtmosphereLabScreen(
                                         initialLevel = uiState.prefs.ambience,
                                         onBack = { screen = AppScreen.SETTINGS },
+                                    )
+                                    AppScreen.DAILY_FORECAST -> DailyForecastScreen(
+                                        city = uiState.selectedCity,
+                                        days = uiState.weather?.currentAndFutureDaily().orEmpty(),
+                                        yesterday = uiState.weather?.yesterday,
+                                        tempUnit = uiState.tempUnit,
+                                        windUnit = uiState.prefs.windUnit,
+                                        utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
+                                        onBack = { screen = AppScreen.HOME },
+                                    )
+                                    AppScreen.HISTORY -> HistoryScreen(
+                                        city = uiState.selectedCity,
+                                        weather = uiState.weather,
+                                        tempUnit = uiState.tempUnit,
+                                        windUnit = uiState.prefs.windUnit,
+                                        utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
+                                        onBack = { screen = AppScreen.HOME },
+                                    )
+                                    AppScreen.RADAR -> RadarScreen(
+                                        city = uiState.selectedCity,
+                                        utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
+                                        onBack = { screen = AppScreen.HOME },
+                                    )
+                                    AppScreen.TYPHOON -> TyphoonScreen(
+                                        onBack = { screen = AppScreen.HOME },
                                     )
                                     AppScreen.SEARCH -> SearchScreen(
                                         onCityPicked = { city: City ->
@@ -220,13 +332,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                if (showWhatsNew && !standbyActive) {
+                if (showWhatsNew && !standbyVisible) {
                     WhatsNewDialog(
                         onClose = {
                             markWhatsNewSeen()
                             showWhatsNew = false
                         },
                     )
+                }
                 }
             }
         }
@@ -240,7 +353,7 @@ class MainActivity : ComponentActivity() {
 
     private fun dispatchShortcut(intent: Intent?) {
         val action = intent?.action
-        if (action == ACTION_SEARCH || action == ACTION_SETTINGS || action == ACTION_REFRESH) {
+        if (action == ACTION_SEARCH || action == ACTION_SETTINGS || action == ACTION_REFRESH || action == ACTION_TYPHOON) {
             shortcutCommand.value = ShortcutCommand(action, ++shortcutSequence)
         }
     }
@@ -286,6 +399,7 @@ class MainActivity : ComponentActivity() {
         const val ACTION_REFRESH = "com.zhisheng.weather.action.REFRESH"
         const val ACTION_SEARCH = "com.zhisheng.weather.action.SEARCH"
         const val ACTION_SETTINGS = "com.zhisheng.weather.action.SETTINGS"
+        const val ACTION_TYPHOON = "com.zhisheng.weather.action.TYPHOON"
         const val PREFS_SPLASH = "zhisheng_splash"
         const val KEY_SPLASH_LIGHT = "light"
     }

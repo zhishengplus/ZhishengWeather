@@ -21,6 +21,16 @@ class ProviderSetupStateTest {
     }
 
     @Test
+    fun `amap onboarding validates web service key locally`() {
+        val empty = ProviderSetupUiState(kind = ProviderWizardKind.AMAP)
+        val ready = empty.copy(amapKey = "test-web-service-key")
+
+        assertEquals(3, empty.lastStep)
+        assertTrue(ProviderField.AMAP_KEY in validateProviderCandidate(empty))
+        assertTrue(validateProviderCandidate(ready).isEmpty())
+    }
+
+    @Test
     fun `provider back behavior is shared by gesture header and footer`() {
         val firstStep = ProviderSetupUiState(kind = ProviderWizardKind.CAIYUN)
         val laterStep = firstStep.copy(step = 2)

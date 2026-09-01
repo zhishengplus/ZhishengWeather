@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,14 +55,14 @@ import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 
-internal const val WhatsNewVersion = "0.1.3"
+internal const val WhatsNewVersion = "0.1.5-beta3"
 internal const val WhatsNewPreferenceFile = "zhisheng_whats_new"
 internal const val WhatsNewSeenKey = "last_seen_version"
 
 @Composable
 fun WhatsNewDialog(onClose: () -> Unit) {
     var page by rememberSaveable { mutableIntStateOf(0) }
-    val pageCount = 2
+    val pageCount = 5
 
     Dialog(
         onDismissRequest = onClose,
@@ -92,13 +91,13 @@ fun WhatsNewDialog(onClose: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
                         Text(
-                            "ZHISHENG WEATHER / 0.1.3",
+                            "ZHISHENG WEATHER / WHAT'S NEW",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengCyan,
                             letterSpacing = 1.3.sp,
                         )
                         Text(
-                            "更新说明",
+                            "这次更新了什么",
                             style = MaterialTheme.typography.titleLarge,
                             color = ZhishengText,
                             fontWeight = FontWeight.Bold,
@@ -147,8 +146,11 @@ fun WhatsNewDialog(onClose: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         when (currentPage) {
-                            0 -> forecastPage()
-                            else -> sourcePage()
+                            0 -> homeUpgradePage()
+                            1 -> forecastPage()
+                            2 -> sourcePage()
+                            3 -> typhoonPage()
+                            else -> qualityPage()
                         }
                     }
                 }
@@ -186,7 +188,7 @@ fun WhatsNewDialog(onClose: () -> Unit) {
                         contentAlignment = Alignment.CenterEnd,
                     ) {
                         Text(
-                            if (page < pageCount - 1) "[ 下一步 ]" else "[ 进入 0.1.3 ]",
+                            if (page < pageCount - 1) "[ 下一步 ]" else "[ 开始使用 ]",
                             style = MaterialTheme.typography.labelLarge,
                             color = if (page < pageCount - 1) ZhishengCyan else ZhishengMint,
                             fontWeight = FontWeight.Bold,
@@ -199,39 +201,68 @@ fun WhatsNewDialog(onClose: () -> Unit) {
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.forecastPage() {
-    item {
-        UpdateTitle("01//", "天气体验升级", "WHAT'S CHANGED", ZhishengOrange)
-    }
-    item {
-        EmphasisBlock(
-            "横屏、定位、预报阅读和数据展示全面升级，日常查看更准确、更清楚。",
-        )
-    }
-    item { FeatureBlock("横屏待机", "横放手机进入独立气象时钟；也可以在设置中关闭横屏，保持竖屏使用。") }
-    item { FeatureBlock("定位更精确", "可选择精确位置并尽量显示街道；无法识别时会稳妥回退到城市。") }
-    item { FeatureBlock("逐时与逐日修复", "修复预报缺失和温度曲线错位；逐日增加日号，跨月时显示月份分隔。") }
-    item { FeatureBlock("短时降水重做", "直接说明何时开始或停止，显示峰值雨势和两小时时间轴；无雨时也保持完整布局。") }
-    item { FeatureBlock("同一时刻对齐", "实况、逐时「现在」和短时降水按城市当地时间说话；正在下雨时不会再出现晴窗。") }
+    item { UpdateTitle("02//", "过去的天气也能查", "WEATHER HISTORY", ZhishengOrange) }
+    item { EmphasisBlock("昨天、过去 7 日和往年同日，各自说明日期与数据含义。") }
+    item { FeatureBlock("[新增] 过去7日", "按完整自然日列出天气、最高最低温、降水和最大风速；今天还没结束，不会提前混进统计。") }
+    item { FeatureBlock("[新增] 往年同日", "每条历史记录都标出具体年份，再与今天的预报并排比较，偏暖还是偏凉一眼就能看懂。") }
+    item { FeatureBlock("[新增] 温度对比", "各年的最高温、最低温和今天的预报落在同一条温度带上，不用在一排数字里来回找。") }
+    item { FeatureBlock("[新增] 前后查日期", "可以逐日向前、向后查看，也可以在近 5 年与近 10 年之间切换。") }
+    item { FeatureBlock("[优化] 只显示有效记录", "缺少可比温度的年份会自动略过，不再用满屏“未知／--”占位置。") }
+    item { FeatureBlock("[整理] 时空观测", "天气回看与雷达仍放在同一个首页模块里，共用开关和排序位置。") }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.homeUpgradePage() {
+    item { UpdateTitle("01//", "主页先说重点", "HOME", ZhishengMint) }
+    item { EmphasisBlock("先看接下来几小时和未来五天；需要更远的天气，再进入 15 日预报。", ZhishengMint) }
+    item { FeatureBlock("[调整] 逐时预报", "“现在”与本小时预报紧挨着显示，温度、降水概率和风速重新对齐；主页最多保留 24 个时间格，不再横着划很久。") }
+    item { FeatureBlock("[调整] 五日预报", "主页恢复紧凑的 5 天布局，日期、天气文字、降水概率和高低温放在固定位置，扫一眼就够。") }
+    item { FeatureBlock("[新增] 近15日天气", "独立页面补上昨天并压暗显示，往后可看天气、温度走势、降水和风况；天气娘会在下方用更自然的话总结变化。") }
+    item { FeatureBlock("[新增] 天气娘简报", "天气娘会按当前天气、时段和风险挑一句最值得看的提醒，不再和预警重复；不想显示形象时，也可以在设置里换成纯文字 Tips。") }
+    item { FeatureBlock("[新增] 表情与说法", "晴雨、冷热、大风、夜晚和预警都有对应表情，同类天气也准备了多种自然说法，尽量少让你反复看到同一句。") }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.sourcePage() {
-    item { UpdateTitle("02//", "数据与显示升级", "DATA + DISPLAY", ZhishengCyan) }
-    item { FeatureBlock("和风接入更可靠", "保存凭据前会验证真实天气权限；补齐昼夜预报、降水雨强和空气质量解析，手动选择后不再混入其他天气源。") }
-    item { FeatureBlock("自动优选更稳定", "自动优选以小米天气为主，只在缺少数据时补充其他来源；手动选择时保持单一来源，并标出真实时间粒度和更新时间。") }
-    item { FeatureBlock("套餐能力不浪费", "数据源返回了更长逐时预报或更多生活指数时会完整展示；没有返回的内容不会用占位信息冒充。") }
-    item { FeatureBlock("数据口径校准", "气压按地面观测口径显示，统一一小时降水与空气污染物单位，跨源对照更直观。") }
-    item { FeatureBlock("遥测可以自选", "开发者模式可自由选择显示项目，项目数量变化时会自动排满，不再留下突兀空栏。") }
-    item { FeatureBlock("生活指数更整齐", "生活指数会按返回数量自动排满；开发者模式也可以自由选择要显示的项目。") }
-    item { FeatureBlock("夜间氛围增强", "增加更明显的氛围档位，并改善夜间模式下天气效果不易看见的问题。") }
-    item { FeatureBlock("透明小组件", "桌面小组件换成分层半透明玻璃外壳，重新整理边框、字号和对齐，并补充逐时趋势与生活信息。") }
-    item { FeatureBlock("天气娘图标", "默认启用新的天气娘头像；喜欢原版时，可在设置的界面选项中随时切回经典图标。") }
-    item { FeatureBlock("真正铺满屏幕", "背景和天气氛围延伸到手势导航区域，底部不再出现割裂的黑边。") }
+    item { UpdateTitle("03//", "雷达可以直接上手", "RADAR ECHO", ZhishengCyan) }
+    item { EmphasisBlock("把地图留给地图，把播放控制收在底部。", ZhishengCyan) }
+    item { FeatureBlock("[调整] 地图手势", "单指拖动、双指缩放、双击放大，操作方式与常见地图一致，可以直接查看周边雨带。") }
+    item { FeatureBlock("[调整] 回波播放", "相邻画面平滑衔接；拖动时间轴会立即停播，方便停在某一帧细看。") }
+    item { FeatureBlock("[新增] 多个回波入口", "可以在可用的回波源之间切换，也保留中央气象台官方雷达入口，某一路暂时不可用时还有选择。") }
+    item { FeatureBlock("[说明] 无雨不等于无数据", "“附近没有明显回波”和“当地暂缺雷达覆盖”会分开提示，不会把缺少资料说成没有降水。") }
     item {
         Text(
-            "以后想再看：设置 → 关于 → 点击版本号。",
+            "这两项都是辅助判断；出行和防灾请同时关注当地气象部门预警。",
             style = MaterialTheme.typography.bodyMedium,
             color = ZhishengOrange,
             fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.typhoonPage() {
+    item { UpdateTitle("04//", "台风路径来了", "TYPHOON TRACK", ZhishengOrange) }
+    item { EmphasisBlock("实况走到哪里、强度怎样、接下来可能往哪走，都放在一张图里。") }
+    item { FeatureBlock("[新增] 国内公开资料", "路径来自浙江省水利厅台风路径实时发布系统，页面会写明来源、发布时间和当前缓存状态。") }
+    item { FeatureBlock("[新增] 路径与风圈", "地图支持拖动和双指缩放。实况、预报使用不同线型，节点颜色表示强度，风圈范围也会随位置绘出。") }
+    item { FeatureBlock("[新增] 多机构预报", "默认查看中央气象台预报，也可以切换其他机构；各家的判断分别画线，不会混成一条。") }
+    item { FeatureBlock("[说明] 资料是否新鲜", "暂时连不上时会显示最近一次有效资料并标出时间；资料较旧会直接提醒，不会当作实时路径。") }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.qualityPage() {
+    item { UpdateTitle("05//", "日常使用更顺手", "DATA / SETTINGS", ZhishengMint) }
+    item { EmphasisBlock("来源返回什么就显示什么，缺少的项目宁可留空，也不用别的数值代替。", ZhishengMint) }
+    item { FeatureBlock("[核对] 天气数据", "重新核对和风、彩云、小米与 Open-Meteo 的温度、风速、降水、气压、能见度和空气质量；时间按城市当地时区显示。") }
+    item { FeatureBlock("[整理] 设置", "设置页重新分组，常用选项更容易找到；新增日本語界面，并保留天气娘、纯文字 Tips 等显示选择。") }
+    item { FeatureBlock("[新增] 横屏气象中枢", "横屏待机默认使用新的“气象中枢”，也可以换回经典样式；横屏里能打开完整设置，也能一键回到竖屏。") }
+    item { FeatureBlock("[新增] 组件底色", "桌面组件有全透明、玻璃和不透明三档。壁纸简单时可以更轻，背景复杂时也能保持清楚。") }
+    item { FeatureBlock("[新增] 城市收藏", "在城市列表点亮星标，收藏城市就会排在前面；每组城市仍保持原来的顺序。") }
+    item { FeatureBlock("[新增] 更新提醒", "应用启动后会在后台检查一次版本。发现新版只在设置的“检查更新”旁显示红点，不弹窗，也不会自动下载。") }
+    item { FeatureBlock("[修复] 常见问题", "修正部分三星、真我设备横向冷启动误进城市选择，以及夜间图标、预警颜色、短时降水和大屏排版等问题。") }
+    item { FeatureBlock("[更新] 社区贡献者", "贡献者名单已收录 ${CommunityContributors.size} 位伙伴，完整名单可以在设置中查看。") }
+    item {
+        Text(
+            "以上是本次更新的全部内容。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = ZhishengTextTertiary,
         )
     }
 }

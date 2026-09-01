@@ -6,6 +6,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class CaiyunWeatherResponse(
     val status: String? = null,
+    val tzshift: Int? = null,
+    @SerialName("server_time") val serverTime: Long? = null,
     val result: CaiyunResult? = null,
 )
 
@@ -29,12 +31,35 @@ data class CaiyunRealtime(
     val pressure: Double? = null,
     @SerialName("apparent_temperature") val apparentTemperature: Double? = null,
     val wind: CaiyunWind? = null,
+    @SerialName("life_index") val lifeIndex: CaiyunRealtimeLifeIndex? = null,
     @SerialName("air_quality") val airQuality: CaiyunAir? = null,
     val precipitation: CaiyunRealtimePrecip? = null,
 )
 
 @Serializable
-data class CaiyunRealtimePrecip(val local: CaiyunLocalPrecip? = null)
+data class CaiyunRealtimePrecip(
+    val local: CaiyunLocalPrecip? = null,
+    val nearest: CaiyunNearestPrecip? = null,
+)
+
+@Serializable
+data class CaiyunNearestPrecip(
+    val status: String? = null,
+    val distance: Double? = null,
+    val intensity: Double? = null,
+)
+
+@Serializable
+data class CaiyunRealtimeLifeIndex(
+    val ultraviolet: CaiyunRealtimeLifeItem? = null,
+    val comfort: CaiyunRealtimeLifeItem? = null,
+)
+
+@Serializable
+data class CaiyunRealtimeLifeItem(
+    val index: Double? = null,
+    val desc: String? = null,
+)
 
 @Serializable
 data class CaiyunLocalPrecip(
@@ -84,9 +109,26 @@ data class CaiyunMinutely(
 data class CaiyunHourly(
     val status: String? = null,
     val temperature: List<CaiyunTimed>? = null,
+    @SerialName("apparent_temperature") val apparentTemperature: List<CaiyunTimed>? = null,
+    val humidity: List<CaiyunTimed>? = null,
+    val pressure: List<CaiyunTimed>? = null,
+    val visibility: List<CaiyunTimed>? = null,
+    val cloudrate: List<CaiyunTimed>? = null,
     val skycon: List<CaiyunTimedStr>? = null,
     val wind: List<CaiyunTimedWind>? = null,
     val precipitation: List<CaiyunTimed>? = null,
+    @SerialName("air_quality") val airQuality: CaiyunHourlyAir? = null,
+)
+
+@Serializable
+data class CaiyunHourlyAir(
+    val aqi: List<CaiyunTimedAqi>? = null,
+)
+
+@Serializable
+data class CaiyunTimedAqi(
+    val datetime: String? = null,
+    val value: CaiyunAqiChn? = null,
 )
 
 @Serializable
@@ -114,11 +156,20 @@ data class CaiyunTimedWind(
 data class CaiyunDaily(
     val status: String? = null,
     val temperature: List<CaiyunDailyTemp>? = null,
+    @SerialName("temperature_08h_20h") val temperatureDay: List<CaiyunDailyTemp>? = null,
+    @SerialName("temperature_20h_32h") val temperatureNight: List<CaiyunDailyTemp>? = null,
     val skycon: List<CaiyunTimedStr>? = null,
     @SerialName("skycon_08h_20h") val skyconDay: List<CaiyunTimedStr>? = null,
     @SerialName("skycon_20h_32h") val skyconNight: List<CaiyunTimedStr>? = null,
     val astro: List<CaiyunAstro>? = null,
     val precipitation: List<CaiyunDailyPrecip>? = null,
+    @SerialName("precipitation_08h_20h") val precipitationDay: List<CaiyunDailyPrecip>? = null,
+    @SerialName("precipitation_20h_32h") val precipitationNight: List<CaiyunDailyPrecip>? = null,
+    val humidity: List<CaiyunDailyMetric>? = null,
+    val cloudrate: List<CaiyunDailyMetric>? = null,
+    val wind: List<CaiyunDailyWind>? = null,
+    @SerialName("wind_08h_20h") val windDay: List<CaiyunDailyWind>? = null,
+    @SerialName("wind_20h_32h") val windNight: List<CaiyunDailyWind>? = null,
     @SerialName("life_index") val lifeIndex: CaiyunLifeIndex? = null,
 )
 
@@ -149,7 +200,25 @@ data class CaiyunDailyTemp(
 data class CaiyunDailyPrecip(
     val date: String? = null,
     val max: Double? = null,
+    val min: Double? = null,
+    val avg: Double? = null,
     val probability: Double? = null,
+)
+
+@Serializable
+data class CaiyunDailyMetric(
+    val date: String? = null,
+    val max: Double? = null,
+    val min: Double? = null,
+    val avg: Double? = null,
+)
+
+@Serializable
+data class CaiyunDailyWind(
+    val date: String? = null,
+    val max: CaiyunWind? = null,
+    val min: CaiyunWind? = null,
+    val avg: CaiyunWind? = null,
 )
 
 @Serializable

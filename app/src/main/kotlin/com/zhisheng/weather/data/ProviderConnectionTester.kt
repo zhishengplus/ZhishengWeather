@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -166,6 +167,28 @@ object ProviderConnectionTester {
             throw ce
         } catch (t: Throwable) {
             mapFailure(t, provider = "彩云天气")
+        }
+    }
+
+    suspend fun testAmap(
+        key: String,
+        onStage: (ProviderTestStage) -> Unit,
+    ): ProviderConnectionResult {
+        onStage(ProviderTestStage.VALIDATE)
+        val candidate = key.trim()
+        if (candidate.isEmpty()) return failure("凭据还不完整", "请填写高德 Web 服务 API Key")
+        onStage(ProviderTestStage.CONNECT)
+        val result = AmapApi.verifyKey(candidate)
+        onStage(ProviderTestStage.VERIFY)
+        return if (result.ok && (!result.street.isNullOrBlank() || !result.formattedAddress.isNullOrBlank())) {
+            ProviderConnectionResult(
+                ok = true,
+                title = "高德街道链路已建立",
+                detail = "已通过北京测试点完成逆地理编码；定位时将优先返回街道名称",
+            )
+        } else {
+            val code = result.infocode?.let { " · $it" }.orEmpty()
+            failure("高德验证未通过$code", result.info ?: "请核对 Key、应用类型、额度与服务状态")
         }
     }
 

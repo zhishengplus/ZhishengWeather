@@ -27,6 +27,15 @@ import java.time.format.DateTimeFormatter
 // 天气仓储：默认小米为主源，Open-Meteo 兜底；手动选择和风/彩云时保持源纯净。
 object WeatherRepository {
 
+    internal val CHINA_POLLUTANT_UNITS = mapOf(
+        "pm2p5" to "μg/m³",
+        "pm10" to "μg/m³",
+        "o3" to "μg/m³",
+        "no2" to "μg/m³",
+        "so2" to "μg/m³",
+        "co" to "mg/m³",
+    )
+
     // 只有 AUTO 允许公共源补缺；小米始终主导天气现象与降水判断。
     // 手动锁定任一来源时保持完全纯源，让设置名称与实际数据严格一致。
     suspend fun fetchWeather(city: City, pref: SourcePref = SourcePref.AUTO): WeatherData {
@@ -71,9 +80,10 @@ object WeatherRepository {
             return OpenMeteoSource.fetch(city)
         }
         val d = fetchXiaomi(city)
-        if (d.error == null && d.current != null) {
+        val checked = WeatherConsistency.sanitize(d)
+        if (checked.error == null && checked.current != null) {
             SourceHealth.recordSuccess(SourceHealth.XIAOMI)
-            return d
+            return checked
         }
         SourceHealth.recordFailure(SourceHealth.XIAOMI)
         return OpenMeteoSource.fetch(city)
@@ -210,6 +220,7 @@ object WeatherRepository {
                             dateMillis = t,
                             high = dd.temperatureMax?.value,
                             low = dd.temperatureMin?.value,
+                            average = dd.temperatureAvg?.value,
                             condition = condition,
                             profile = WeatherCondition.qwProfile(profileCode, null),
                             weatherText = qweatherDailyText(dd),
@@ -217,8 +228,23 @@ object WeatherRepository {
                                 speedKmh(dd.daytime?.wind?.speed),
                                 speedKmh(dd.nighttime?.wind?.speed),
                             ).maxOrNull(),
+                            windDirectionDeg = dd.daytime?.wind?.direction?.degree
+                                ?: dd.nighttime?.wind?.direction?.degree,
+                            windGust = listOfNotNull(
+                                speedKmh(dd.daytime?.windGustMax),
+                                speedKmh(dd.nighttime?.windGustMax),
+                            ).maxOrNull(),
                             precipProbability = qweatherDailyProbability(dd),
                             precipMm = qweatherDailyPrecipMm(dd),
+                            humidity = listOfNotNull(
+                                pct(dd.daytime?.humidity),
+                                pct(dd.nighttime?.humidity),
+                            ).takeIf { it.isNotEmpty() }?.average(),
+                            cloudCover = listOfNotNull(
+                                pct(dd.daytime?.cloudCover),
+                                pct(dd.nighttime?.cloudCover),
+                            ).takeIf { it.isNotEmpty() }?.average(),
+                            uvIndex = dd.uvIndexMax,
                             sunrise = formatClock(dd.astro?.sunrise),
                             sunset = formatClock(dd.astro?.sunset),
                             moonrise = formatClock(dd.astro?.moonrise),
@@ -249,7 +275,7 @@ object WeatherRepository {
                     humidity = pct(cur.humidity),
                     windSpeed = speedKmh(cur.wind?.speed),
                     windDirectionDeg = cur.wind?.direction?.degree,
-                    pressure = cur.pressure?.value,
+                    pressure = pressureHpa(cur.pressure),
                     uvIndex = cur.uvIndex,
                     visibility = distKm(cur.visibility),
                     dewPoint = cur.dewPoint?.value,
@@ -263,10 +289,20 @@ object WeatherRepository {
                     if (t == 0L) null else HourlyWeather(
                         timeMillis = t,
                         temperature = hh.temperature?.value,
+                        feelsLike = hh.feelsLike?.value,
                         condition = WeatherCondition.fromQw(hh.condition?.icon, hh.condition?.code),
                         profile = WeatherCondition.qwProfile(hh.condition?.icon, hh.condition?.code),
                         windSpeed = speedKmh(hh.wind?.speed),
+                        windDirectionDeg = hh.wind?.direction?.degree,
+                        windGust = speedKmh(hh.windGust),
                         precipProb = normalizeQwProbability(hh.precipitation?.probability),
+                        precipMm = precipToMm(hh.precipitation?.amount),
+                        humidity = pct(hh.humidity),
+                        pressure = pressureHpa(hh.pressure),
+                        visibility = distKm(hh.visibility),
+                        dewPoint = hh.dewPoint?.value,
+                        cloudCover = pct(hh.cloudCover),
+                        uvIndex = hh.uvIndex,
                     )
                 } ?: emptyList(),
                 daily = dailyList,
@@ -275,6 +311,7 @@ object WeatherRepository {
                         AqiInfo(
                             value = idx.aqi?.let { Math.round(it).toInt() },
                             level = idx.category ?: idx.level,
+                            standard = qweatherAqiStandard(idx.code),
                             primary = idx.primaryPollutant?.name,
                             pm25 = pollutant(air, "pm2p5"),
                             pm10 = pollutant(air, "pm10"),
@@ -282,18 +319,21 @@ object WeatherRepository {
                             no2 = pollutant(air, "no2"),
                             so2 = pollutant(air, "so2"),
                             co = pollutant(air, "co"),
+                            pollutantUnits = qweatherPollutantUnits(air),
                         )
                     }
                 } ?: s?.aqi?.let { sa ->
                     AqiInfo(
                         value = sa.aqi?.toIntOrNull(),
                         level = aqiLevel(sa.aqi?.toIntOrNull()),
+                        standard = "中国",
                         pm25 = sa.pm25,
                         pm10 = sa.pm10,
                         o3 = sa.o3,
                         no2 = sa.no2,
                         so2 = sa.so2,
                         co = sa.co,
+                        pollutantUnits = CHINA_POLLUTANT_UNITS,
                     )
                 },
                 alerts = buildList {
@@ -369,7 +409,36 @@ object WeatherRepository {
 
     private fun pollutant(air: QwAir, code: String): String? =
         air.pollutants.firstOrNull { it.code == code }
-            ?.concentration?.value?.let { if (it == it.toInt().toDouble()) it.toInt().toString() else it.toString() }
+            ?.concentration?.value
+            ?.takeIf { it.isFinite() && it >= 0.0 }
+            ?.let { if (it == it.toInt().toDouble()) it.toInt().toString() else it.toString() }
+
+    internal fun qweatherPollutantUnits(air: QwAir): Map<String, String> =
+        air.pollutants.mapNotNull { pollutant ->
+            val code = pollutant.code?.lowercase()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val unit = displayPollutantUnit(pollutant.concentration?.unit) ?: return@mapNotNull null
+            code to unit
+        }.toMap()
+
+    internal fun displayPollutantUnit(raw: String?): String? = when (
+        raw?.trim()?.lowercase()?.replace(" ", "")
+    ) {
+        "μg/m3", "µg/m3", "ug/m3", "μg/m³", "µg/m³", "ug/m³" -> "μg/m³"
+        "mg/m3", "mg/m³" -> "mg/m³"
+        "ppb" -> "ppb"
+        "ppm" -> "ppm"
+        else -> raw?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    internal fun qweatherAqiStandard(code: String?): String? = when (code?.lowercase()) {
+        "cn-mee", "cn-mee-1h" -> "中国"
+        "us-epa" -> "美国"
+        "eu-eea" -> "欧洲"
+        "jp-moe" -> "日本"
+        "qaqi" -> "QWeather"
+        null, "" -> null
+        else -> code.uppercase()
+    }
 
     internal fun qweatherLifeIndices(indices: QwIndices?): List<LifeIndexExtra> =
         indices?.daily.orEmpty().mapNotNull { item ->
@@ -408,10 +477,24 @@ object WeatherRepository {
 
     // 和风新版单位换算：优先用 API 返回的 unit 字段判定（v0.0.1：启发式会把大雾
     // 能见度 500m 误显示成 500km），unit 缺失时才退回启发式
-    private fun speedKmh(v: QwVal?): Double? = v?.value?.let {
-        when (v.unit?.lowercase()) {
-            "km/h", "kmh" -> it
-            else -> it * 3.6 // 默认 m/s
+    internal fun speedKmh(v: QwVal?): Double? = v?.value?.takeIf(Double::isFinite)?.let {
+        when (v.unit?.trim()?.lowercase()?.replace(" ", "")) {
+            "km/h", "kmh", "kph" -> it
+            "mph", "mi/h" -> it * 1.609344
+            "kn", "kt", "knot", "knots" -> it * 1.852
+            "m/s", "mps", "meter/s", "metre/s", null, "" -> it * 3.6
+            else -> null
+        }
+    }
+
+    /** 内部气压一律使用 hPa，避免 Pa/kPa/inHg 被直接当成 hPa 显示。 */
+    internal fun pressureHpa(v: QwVal?): Double? = v?.value?.takeIf(Double::isFinite)?.let {
+        when (v.unit?.trim()?.lowercase()?.replace(" ", "")) {
+            "pa", "pascal", "pascals" -> it / 100.0
+            "kpa" -> it * 10.0
+            "inhg" -> it * 33.8638866667
+            "hpa", "mb", "mbar", null, "" -> it
+            else -> null
         }
     }
 
@@ -425,10 +508,12 @@ object WeatherRepository {
 
     private fun pct(v: Double?): Double? = v?.let { if (it <= 1.0) it * 100.0 else it }
 
-    internal fun normalizeQwProbability(v: Double?): Int? = v
-        ?.takeIf(Double::isFinite)
-        ?.let { if (it <= 1.0) it * 100.0 else it }
-        ?.let { Math.round(it).toInt().coerceIn(0, 100) }
+    internal fun normalizeQwProbability(v: Double?): Int? {
+        val raw = v?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
+        val percent = if (raw <= 1.0) raw * 100.0 else raw
+        if (percent > 100.0) return null
+        return Math.round(percent).toInt()
+    }
 
     // —— 小米源兜底路径（原有逻辑） ——
     private suspend fun fetchXiaomi(city: City): WeatherData = try {
@@ -562,8 +647,12 @@ object WeatherRepository {
                     condition = profile.condition,
                     weatherText = profile.condition.label,
                     windSpeed = om.wind_speed_10m_max?.getOrNull(i),
+                    windDirectionDeg = om.wind_direction_10m_dominant?.getOrNull(i),
+                    windGust = om.wind_gusts_10m_max?.getOrNull(i),
                     precipProbability = om.precipitation_probability_max?.getOrNull(i)?.let { Math.round(it).toInt() },
                     precipMm = om.precipitation_sum?.getOrNull(i),
+                    humidity = om.relative_humidity_2m_mean?.getOrNull(i),
+                    cloudCover = om.cloud_cover_mean?.getOrNull(i),
                     sunrise = formatLocalClock(om.sunrise?.getOrNull(i)),
                     sunset = formatLocalClock(om.sunset?.getOrNull(i)),
                     profile = profile,
@@ -603,10 +692,20 @@ object WeatherRepository {
                 HourlyWeather(
                 timeMillis = local - offsetMs,
                 temperature = h.temperature_2m?.getOrNull(i),
+                feelsLike = h.apparent_temperature?.getOrNull(i),
                 // 逐时补齐同样按城市本地小时判昼夜，夜间不再整排太阳（v0.0.4）
                 condition = profile.condition,
                 windSpeed = h.wind_speed_10m?.getOrNull(i),
+                windDirectionDeg = h.wind_direction_10m?.getOrNull(i),
+                windGust = h.wind_gusts_10m?.getOrNull(i),
                 precipProb = h.precipitation_probability?.getOrNull(i)?.let { Math.round(it).toInt() },
+                precipMm = h.precipitation?.getOrNull(i),
+                humidity = h.relative_humidity_2m?.getOrNull(i),
+                pressure = h.surface_pressure?.getOrNull(i),
+                visibility = h.visibility?.getOrNull(i)?.div(1_000.0),
+                dewPoint = h.dew_point_2m?.getOrNull(i),
+                cloudCover = h.cloud_cover?.getOrNull(i),
+                uvIndex = h.uv_index?.getOrNull(i)?.let { u -> Math.round(u).toInt() },
                 profile = profile,
             )
             }
@@ -670,9 +769,11 @@ object WeatherRepository {
                             WeatherCondition.xiaomiProfile(w?.to, locationKey),
                         ).maxByOrNull { profile -> profile.condition.significanceRank },
                         weatherText = WeatherCondition.turnPhrase(w?.from, w?.to, locationKey),
-                        windSpeed = dailyWindSpeed?.getOrNull(i)?.from?.toDoubleOrNull(),
-                        precipProbability = dailyPrecip?.getOrNull(i)?.toIntOrNull()
-                            ?.takeIf { it > 0 },
+                        windSpeed = listOfNotNull(
+                            dailyWindSpeed?.getOrNull(i)?.from?.toDoubleOrNull(),
+                            dailyWindSpeed?.getOrNull(i)?.to?.toDoubleOrNull(),
+                        ).maxOrNull(),
+                        precipProbability = normalizeProviderProbability(dailyPrecip?.getOrNull(i)),
                         sunrise = formatClock(sun?.from),
                         sunset = formatClock(sun?.to),
                         moonPhase = dailyMoon?.getOrNull(i),
@@ -693,23 +794,13 @@ object WeatherRepository {
                 feelsLike = cur.feelsLike?.value?.toDoubleOrNull(),
                 condition = profile.condition,
                 weatherText = WeatherCondition.xiaomiLabel(cur.weather, locationKey),
-                humidity = cur.humidity?.value?.toDoubleOrNull(),
+                humidity = pct(cur.humidity?.value?.toDoubleOrNull()),
                 // 小米风速带 unit 字段：km/h 透传，m/s 换算（v0.0.1）
-                windSpeed = cur.wind?.speed?.let { w ->
-                    w.value?.toDoubleOrNull()?.let { v -> if (w.unit == "m/s") v * 3.6 else v }
-                },
+                windSpeed = xiaomiWindKmh(cur.wind?.speed),
                 windDirectionDeg = cur.wind?.direction?.value?.toDoubleOrNull(),
-                pressure = cur.pressure?.value?.toDoubleOrNull(),
+                pressure = xiaomiPressureHpa(cur.pressure),
                 uvIndex = cur.uvIndex?.toIntOrNull(),
-                visibility = cur.visibility?.let { v ->
-                    v.value?.toDoubleOrNull()?.let { num ->
-                        // 小米能见度按 unit 换算到 km：m 转 km，km 或缺省透传（v0.0.3）
-                        when (v.unit?.lowercase()) {
-                            "m" -> num / 1000.0
-                            else -> num
-                        }
-                    }
-                },
+                visibility = xiaomiDistanceKm(cur.visibility),
                 profile = profile,
             )
         }
@@ -745,12 +836,15 @@ object WeatherRepository {
             AqiInfo(
                 value = a.aqi?.toIntOrNull(),
                 level = aqiLevel(a.aqi?.toIntOrNull()),
+                standard = "中国",
+                primary = a.primary,
                 pm25 = a.pm25,
                 pm10 = a.pm10,
                 o3 = a.o3,
                 no2 = a.no2,
                 so2 = a.so2,
                 co = a.co,
+                pollutantUnits = CHINA_POLLUTANT_UNITS,
                 suggest = a.suggest, // v0.0.4：小米健康建议接入 AQI 卡
             )
         }
@@ -771,8 +865,8 @@ object WeatherRepository {
             daily = daily,
             aqi = aqi,
             alerts = alerts,
-            // v0.0.4：统一为本地抓取时刻（此前小米用服务器时间，与和风/OM 语义不一致）
-            updateTime = System.currentTimeMillis(),
+            // 首页“更新”反映源数据时刻，不把刚下载到的旧响应伪装成刚刚观测。
+            updateTime = xiaomiUpdateMillis(r, System.currentTimeMillis()),
             rainNowcast = xiaomiNowcast(r.minutely),
             // v0.0.6：小米 precipitation.value 为约 120 个逐分钟点；此前只接了文案和雨区距离
             rainMinutes = xiaomiMinuteSeries(r.minutely?.precipitation),
@@ -956,9 +1050,58 @@ object WeatherRepository {
         return when (v.unit?.trim()?.lowercase()?.replace(" ", "")) {
             "cm", "cm/h" -> n * 10.0
             "in", "inch", "in/h", "inch/h" -> n * 25.4
-            else -> n
+            "mm", "mm/h", null, "" -> n
+            else -> null
         }
     }
+
+    internal fun normalizeProviderProbability(raw: String?): Int? {
+        val value = raw?.trim()?.removeSuffix("%")?.toDoubleOrNull() ?: return null
+        if (!value.isFinite() || value < 0.0) return null
+        val percent = if (value <= 1.0) value * 100.0 else value
+        return Math.round(percent).toInt().takeIf { it in 0..100 }
+    }
+
+    internal fun xiaomiWindKmh(v: XiaomiUnitValue?): Double? {
+        val n = v?.value?.toDoubleOrNull()?.takeIf(Double::isFinite) ?: return null
+        return when (v.unit?.trim()?.lowercase()?.replace(" ", "")) {
+            "m/s", "mps" -> n * 3.6
+            "mph", "mi/h" -> n * 1.609344
+            "kn", "kt", "knot", "knots" -> n * 1.852
+            "km/h", "kmh", "kph", null, "" -> n
+            else -> null
+        }
+    }
+
+    internal fun xiaomiPressureHpa(v: XiaomiUnitValue?): Double? {
+        val n = v?.value?.toDoubleOrNull()?.takeIf(Double::isFinite) ?: return null
+        return when (v.unit?.trim()?.lowercase()?.replace(" ", "")) {
+            "pa" -> n / 100.0
+            "kpa" -> n * 10.0
+            "inhg" -> n * 33.8638866667
+            "hpa", "mb", "mbar", null, "" -> n
+            else -> null
+        }
+    }
+
+    internal fun xiaomiDistanceKm(v: XiaomiUnitValue?): Double? {
+        val n = v?.value?.toDoubleOrNull()?.takeIf(Double::isFinite) ?: return null
+        return when (v.unit?.trim()?.lowercase()?.replace(" ", "")) {
+            "m", "meter", "metre" -> n / 1_000.0
+            "mi", "mile", "miles" -> n * 1.609344
+            "km", null, "" -> n
+            else -> null
+        }
+    }
+
+    internal fun xiaomiUpdateMillis(r: XiaomiForecastResult, fetchedAt: Long): Long =
+        sequenceOf(
+            r.current?.pubTime,
+            r.updateTime,
+            r.forecastHourly?.temperature?.pubTime,
+            r.forecastHourly?.pubTime,
+            r.aqi?.pubTime,
+        ).map(::parseTimeMillis).firstOrNull { it > 0L } ?: fetchedAt
 
     private val formatter: DateTimeFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 

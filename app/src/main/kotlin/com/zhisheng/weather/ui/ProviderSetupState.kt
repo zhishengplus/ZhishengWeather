@@ -16,7 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-enum class ProviderWizardKind { QWEATHER, CAIYUN }
+enum class ProviderWizardKind { QWEATHER, CAIYUN, AMAP }
 
 enum class QweatherAuthMode { JWT, API_KEY }
 
@@ -30,6 +30,7 @@ internal object ProviderField {
     const val KID = "kid"
     const val API_KEY = "api_key"
     const val CAIYUN_TOKEN = "caiyun_token"
+    const val AMAP_KEY = "amap_key"
 }
 
 data class ProviderSetupUiState(
@@ -40,6 +41,7 @@ data class ProviderSetupUiState(
     val kid: String = "",
     val apiKey: String = "",
     val caiyunToken: String = "",
+    val amapKey: String = "",
     val authMode: QweatherAuthMode = QweatherAuthMode.API_KEY,
     val keys: QwGeneratedKeys? = null,
     val status: ProviderSetupStatus = ProviderSetupStatus.IDLE,
@@ -48,7 +50,11 @@ data class ProviderSetupUiState(
     val activeStage: ProviderTestStage? = null,
     val completedStages: Set<ProviderTestStage> = emptySet(),
 ) {
-    val lastStep: Int get() = if (kind == ProviderWizardKind.QWEATHER) 5 else 4
+    val lastStep: Int get() = when (kind) {
+        ProviderWizardKind.QWEATHER -> 5
+        ProviderWizardKind.CAIYUN -> 4
+        ProviderWizardKind.AMAP -> 3
+    }
     val testing: Boolean get() = status == ProviderSetupStatus.TESTING
 }
 
@@ -69,8 +75,14 @@ internal interface ProviderSetupGateway {
         onStage: (ProviderTestStage) -> Unit,
     ): ProviderConnectionResult
 
+    suspend fun testAmap(
+        key: String,
+        onStage: (ProviderTestStage) -> Unit,
+    ): ProviderConnectionResult
+
     suspend fun saveQweather(candidate: QwRuntimeCreds)
     suspend fun saveCaiyun(token: String)
+    suspend fun saveAmap(key: String)
 }
 
 private object RealProviderSetupGateway : ProviderSetupGateway {
@@ -84,8 +96,14 @@ private object RealProviderSetupGateway : ProviderSetupGateway {
         onStage: (ProviderTestStage) -> Unit,
     ) = ProviderConnectionTester.testCaiyun(token, onStage)
 
+    override suspend fun testAmap(
+        key: String,
+        onStage: (ProviderTestStage) -> Unit,
+    ) = ProviderConnectionTester.testAmap(key, onStage)
+
     override suspend fun saveQweather(candidate: QwRuntimeCreds) = SecretStore.saveQw(candidate)
     override suspend fun saveCaiyun(token: String) = SecretStore.saveCaiyun(token)
+    override suspend fun saveAmap(key: String) = SecretStore.saveAmap(key)
 }
 
 internal suspend fun <T> verifyThenPersist(
@@ -120,6 +138,11 @@ internal fun validateProviderCandidate(state: ProviderSetupUiState): Map<String,
         ProviderWizardKind.CAIYUN -> {
             if (state.caiyunToken.isBlank()) {
                 errors[ProviderField.CAIYUN_TOKEN] = "请粘贴开放平台生成的 Token"
+            }
+        }
+        ProviderWizardKind.AMAP -> {
+            if (state.amapKey.isBlank()) {
+                errors[ProviderField.AMAP_KEY] = "请粘贴应用中的 Web 服务 API Key"
             }
         }
     }
@@ -221,6 +244,7 @@ class ProviderSetupViewModel internal constructor(
     fun setKid(value: String) = edit(ProviderField.KID) { copy(kid = value) }
     fun setApiKey(value: String) = edit(ProviderField.API_KEY) { copy(apiKey = value) }
     fun setCaiyunToken(value: String) = edit(ProviderField.CAIYUN_TOKEN) { copy(caiyunToken = value) }
+    fun setAmapKey(value: String) = edit(ProviderField.AMAP_KEY) { copy(amapKey = value) }
 
     fun setAuthMode(mode: QweatherAuthMode) {
         if (state.testing) return
@@ -294,6 +318,11 @@ class ProviderSetupViewModel internal constructor(
                     candidate = state.caiyunToken.trim(),
                     verify = { gateway.testCaiyun(it, ::enterStage) },
                     persist = { token, _ -> gateway.saveCaiyun(token) },
+                )
+                ProviderWizardKind.AMAP -> verifyThenPersist(
+                    candidate = state.amapKey.trim(),
+                    verify = { gateway.testAmap(it, ::enterStage) },
+                    persist = { key, _ -> gateway.saveAmap(key) },
                 )
             }
             val allCompleted = if (result.ok && state.activeStage != null) {

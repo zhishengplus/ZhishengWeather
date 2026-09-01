@@ -18,10 +18,38 @@ class QWeatherV1MappingTest {
     }
 
     @Test
+    fun paidHourlyFieldsKeepTheirOwnUnitsAndMeanings() {
+        val hour = Json.decodeFromString<QwHourly>(
+            """{
+              "hours":[{
+                "forecastTime":"2026-08-27T00:00+08:00",
+                "feelsLike":{"value":31.2,"unit":"celsius"},
+                "humidity":0.68,
+                "windGust":{"value":42.0,"unit":"km/h"},
+                "pressure":{"value":1007.0,"unit":"hPa"},
+                "visibility":{"value":8.5,"unit":"km"},
+                "dewPoint":{"value":23.0,"unit":"celsius"},
+                "cloudCover":0.72,
+                "uvIndex":6
+              }]
+            }""".trimIndent(),
+        ).hours.single()
+
+        assertEquals(31.2, hour.feelsLike?.value ?: -1.0, 0.0001)
+        assertEquals(0.68, hour.humidity ?: -1.0, 0.0001)
+        assertEquals(42.0, hour.windGust?.value ?: -1.0, 0.0001)
+        assertEquals(1007.0, hour.pressure?.value ?: -1.0, 0.0001)
+        assertEquals(8.5, hour.visibility?.value ?: -1.0, 0.0001)
+        assertEquals(23.0, hour.dewPoint?.value ?: -1.0, 0.0001)
+        assertEquals(0.72, hour.cloudCover ?: -1.0, 0.0001)
+        assertEquals(6, hour.uvIndex)
+    }
+
+    @Test
     fun probabilityNormalizationAlsoAcceptsPercentShapedFallbacks() {
         assertEquals(31, WeatherRepository.normalizeQwProbability(31.0))
-        assertEquals(100, WeatherRepository.normalizeQwProbability(120.0))
-        assertEquals(0, WeatherRepository.normalizeQwProbability(-0.2))
+        assertNull(WeatherRepository.normalizeQwProbability(120.0))
+        assertNull(WeatherRepository.normalizeQwProbability(-0.2))
     }
 
     @Test
@@ -68,5 +96,31 @@ class QWeatherV1MappingTest {
 
         assertEquals(1.4, air.indexes.first().aqi!!, 0.0001)
         assertEquals("us-epa", WeatherRepository.preferredAirIndex(air.indexes)?.code)
+    }
+
+    @Test
+    fun qweatherUnitsAreNormalizedWithoutGuessing() {
+        assertEquals(36.0, WeatherRepository.speedKmh(QwVal(10.0, "m/s")) ?: -1.0, 0.0001)
+        assertEquals(16.09344, WeatherRepository.speedKmh(QwVal(10.0, "mph")) ?: -1.0, 0.0001)
+        assertEquals(1013.25, WeatherRepository.pressureHpa(QwVal(101_325.0, "Pa")) ?: -1.0, 0.0001)
+        assertEquals(1013.25, WeatherRepository.pressureHpa(QwVal(101.325, "kPa")) ?: -1.0, 0.0001)
+        assertNull(WeatherRepository.pressureHpa(QwVal(1013.0, "mystery")))
+    }
+
+    @Test
+    fun airQualityKeepsTheSelectedStandardAndEachPollutantUnit() {
+        val air = Json.decodeFromString<QwAir>(
+            """{"pollutants":[
+                {"code":"pm2p5","concentration":{"value":18,"unit":"ug/m3"}},
+                {"code":"o3","concentration":{"value":31,"unit":"ppb"}},
+                {"code":"co","concentration":{"value":0.4,"unit":"mg/m3"}}
+            ]}""",
+        )
+
+        assertEquals("中国", WeatherRepository.qweatherAqiStandard("cn-mee"))
+        assertEquals("美国", WeatherRepository.qweatherAqiStandard("us-epa"))
+        assertEquals("μg/m³", WeatherRepository.qweatherPollutantUnits(air)["pm2p5"])
+        assertEquals("ppb", WeatherRepository.qweatherPollutantUnits(air)["o3"])
+        assertEquals("mg/m³", WeatherRepository.qweatherPollutantUnits(air)["co"])
     }
 }

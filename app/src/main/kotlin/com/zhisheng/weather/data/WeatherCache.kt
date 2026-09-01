@@ -22,6 +22,15 @@ data class CachedWeather(
     val savedAtMillis: Long,
 )
 
+internal const val MAX_OFFLINE_WEATHER_AGE_MS = 24 * 60 * 60_000L
+
+internal fun CachedWeather.isUsableOfflineAt(nowMillis: Long): Boolean {
+    val savedAge = nowMillis - savedAtMillis
+    if (savedAge !in 0..MAX_OFFLINE_WEATHER_AGE_MS) return false
+    val providerAge = data.updateTime?.let { nowMillis - it } ?: savedAge
+    return providerAge in -5 * 60_000L..MAX_OFFLINE_WEATHER_AGE_MS
+}
+
 object WeatherCache {
 
     private val json = Json { ignoreUnknownKeys = true }

@@ -35,6 +35,14 @@ data class CaiyunRuntimeCreds(val token: String = "") {
     val ready: Boolean get() = token.isNotBlank()
 }
 
+data class AmapRuntimeCreds(val webServiceKey: String = "") {
+    val ready: Boolean get() = webServiceKey.isNotBlank()
+}
+
+data class RainviewerRuntimeCreds(val apiKey: String = "") {
+    val ready: Boolean get() = apiKey.isNotBlank()
+}
+
 data class QwResolved(
     val host: String,
     val projectId: String,
@@ -60,10 +68,16 @@ object SecretStore {
     private val KEY_QW_PRIV = stringPreferencesKey("qw_private_key")
     private val KEY_QW_API = stringPreferencesKey("qw_api_key")
     private val KEY_CAIYUN = stringPreferencesKey("caiyun_token")
+    private val KEY_AMAP = stringPreferencesKey("amap_web_service_key")
+    private val KEY_RAINVIEWER = stringPreferencesKey("rainviewer_api_key")
 
     @Volatile var qwRuntime: QwRuntimeCreds = QwRuntimeCreds()
         private set
     @Volatile var caiyunRuntime: CaiyunRuntimeCreds = CaiyunRuntimeCreds()
+        private set
+    @Volatile var amapRuntime: AmapRuntimeCreds = AmapRuntimeCreds()
+        private set
+    @Volatile var rainviewerRuntime: RainviewerRuntimeCreds = RainviewerRuntimeCreds()
         private set
 
     fun init(context: Context) {
@@ -88,6 +102,8 @@ object SecretStore {
                     ),
                 )
                 caiyunRuntime = CaiyunRuntimeCreds(prefs[KEY_CAIYUN].orEmpty().trim())
+                amapRuntime = AmapRuntimeCreds(prefs[KEY_AMAP].orEmpty().trim())
+                rainviewerRuntime = RainviewerRuntimeCreds(prefs[KEY_RAINVIEWER].orEmpty().trim())
             }
         }
     }
@@ -114,6 +130,14 @@ object SecretStore {
         store.data.map { CaiyunRuntimeCreds(it[KEY_CAIYUN].orEmpty().trim()) }.distinctUntilChanged()
     }
 
+    val amapRuntimeFlow: Flow<AmapRuntimeCreds> by lazy {
+        store.data.map { AmapRuntimeCreds(it[KEY_AMAP].orEmpty().trim()) }.distinctUntilChanged()
+    }
+
+    val rainviewerRuntimeFlow: Flow<RainviewerRuntimeCreds> by lazy {
+        store.data.map { RainviewerRuntimeCreds(it[KEY_RAINVIEWER].orEmpty().trim()) }.distinctUntilChanged()
+    }
+
     fun resolvedQw(): QwResolved {
         val rt = qwRuntime
         if (rt.ready) {
@@ -129,6 +153,8 @@ object SecretStore {
     }
 
     val caiyunReady: Boolean get() = caiyunRuntime.ready
+    val amapReady: Boolean get() = amapRuntime.ready
+    val rainviewerReady: Boolean get() = rainviewerRuntime.ready
 
     suspend fun saveQw(creds: QwRuntimeCreds) {
         val next = QwRuntimeCreds(
@@ -154,6 +180,18 @@ object SecretStore {
         caiyunRuntime = next
     }
 
+    suspend fun saveAmap(webServiceKey: String) {
+        val next = AmapRuntimeCreds(webServiceKey.trim())
+        store.edit { it[KEY_AMAP] = next.webServiceKey }
+        amapRuntime = next
+    }
+
+    suspend fun saveRainviewer(apiKey: String) {
+        val next = RainviewerRuntimeCreds(apiKey.trim())
+        store.edit { it[KEY_RAINVIEWER] = next.apiKey }
+        rainviewerRuntime = next
+    }
+
     suspend fun clearQw() {
         store.edit {
             it.remove(KEY_QW_HOST)
@@ -170,6 +208,16 @@ object SecretStore {
         caiyunRuntime = CaiyunRuntimeCreds()
     }
 
+    suspend fun clearAmap() {
+        store.edit { it.remove(KEY_AMAP) }
+        amapRuntime = AmapRuntimeCreds()
+    }
+
+    suspend fun clearRainviewer() {
+        store.edit { it.remove(KEY_RAINVIEWER) }
+        rainviewerRuntime = RainviewerRuntimeCreds()
+    }
+
     suspend fun currentQw(): QwRuntimeCreds = qwRuntimeFlow.first().also { loaded ->
         // DataStore 的首帧在 IO 协程异步到达。天气页可能先于 init() 中的 collector 发起抓取，
         // 此时必须把磁盘凭据同步进运行态，否则冷启动会误报“未配置”，手动刷新后才恢复。
@@ -178,5 +226,13 @@ object SecretStore {
 
     suspend fun currentCaiyun(): CaiyunRuntimeCreds = caiyunRuntimeFlow.first().also { loaded ->
         if (loaded != caiyunRuntime) caiyunRuntime = loaded
+    }
+
+    suspend fun currentAmap(): AmapRuntimeCreds = amapRuntimeFlow.first().also { loaded ->
+        if (loaded != amapRuntime) amapRuntime = loaded
+    }
+
+    suspend fun currentRainviewer(): RainviewerRuntimeCreds = rainviewerRuntimeFlow.first().also { loaded ->
+        if (loaded != rainviewerRuntime) rainviewerRuntime = loaded
     }
 }
