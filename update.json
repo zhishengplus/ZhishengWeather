@@ -2,7 +2,7 @@
   "versionCode": 20260901,
   "versionName": "0.1.5-beta3",
   "apkUrl": "https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta3/ZhishengWeather-v0.1.5-beta3-public.apk",
-  "sha256": "c58b74be4c2dcdf9afc8867e102407601403bae22ddb91a0b4bbc3ea7da4951a",
+  "sha256": "032190c52dba2942bf03013719605cc8bafde358739d3296330aeb3426cad313",
   "notes": "0.1.5-beta3：主页预报更紧凑，新增15日天气、过去7日与往年回看、可缩放雷达和台风路径；天气娘简报、横屏气象中枢、城市收藏、静默更新提醒与桌面组件也已重新整理。",
   "pageUrl": "https://github.com/zhishengplus/ZhishengWeather/releases/tag/v0.1.5-beta3"
 }
