@@ -51,7 +51,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -107,6 +106,7 @@ import kotlinx.coroutines.delay
 private val EnterEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private val ExitEase = CubicBezierEasing(0.7f, 0f, 0.84f, 0f)
 private const val CAIYUN_APPLICATION_MANAGE_URL = "https://platform.caiyunapp.com/application/manage"
+private const val AMAP_APPLICATION_MANAGE_URL = "https://console.amap.com/dev/key/app"
 
 @Composable
 fun ProviderWizard(kind: ProviderWizardKind, onClose: () -> Unit) {
@@ -262,8 +262,11 @@ private fun ProviderSetupPanel(
 
 @Composable
 private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onClose: () -> Unit) {
-    val title = if (state.kind == ProviderWizardKind.QWEATHER) "接入和风天气" else "接入彩云天气"
-    val provider = if (state.kind == ProviderWizardKind.QWEATHER) "QWEATHER" else "CAIYUN"
+    val (title, provider) = when (state.kind) {
+        ProviderWizardKind.QWEATHER -> "接入和风天气" to "QWEATHER"
+        ProviderWizardKind.CAIYUN -> "接入彩云天气" to "CAIYUN"
+        ProviderWizardKind.AMAP -> "接入高德街道定位" to "AMAP GEO"
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -310,10 +313,13 @@ private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onCl
 
 @Composable
 private fun StepRail(state: ProviderSetupUiState) {
-    val labels = if (state.kind == ProviderWizardKind.QWEATHER) {
-        listOf("选择路线", "创建项目", "获取凭据", "获取 Host", "真实验证", "接入完成")
-    } else {
-        listOf("准备", "进入应用管理", "打开访问控制", "复制并验证", "接入完成")
+    val labels = when (state.kind) {
+        ProviderWizardKind.QWEATHER ->
+            listOf("选择路线", "创建项目", "获取凭据", "获取 Host", "真实验证", "接入完成")
+        ProviderWizardKind.CAIYUN ->
+            listOf("准备", "进入应用管理", "打开访问控制", "复制并验证", "接入完成")
+        ProviderWizardKind.AMAP ->
+            listOf("准备", "创建 Web 应用", "复制并验证", "接入完成")
     }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -346,6 +352,7 @@ private fun ProviderStepContent(state: ProviderSetupUiState, model: ProviderSetu
     when (state.kind) {
         ProviderWizardKind.QWEATHER -> QweatherStep(state, model)
         ProviderWizardKind.CAIYUN -> CaiyunStep(state, model)
+        ProviderWizardKind.AMAP -> AmapStep(state, model)
     }
 }
 
@@ -568,6 +575,58 @@ private fun CaiyunStep(state: ProviderSetupUiState, model: ProviderSetupViewMode
             ResultBanner(state)
         }
         4 -> SuccessStep(state)
+    }
+}
+
+@Composable
+private fun AmapStep(state: ProviderSetupUiState, model: ProviderSetupViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    when (state.step) {
+        0 -> {
+            StepIntro(
+                title = "增强国内街道名称",
+                body = "高德只负责把精确坐标转换成街道名称，不接管系统定位，也不改变天气数据源。未配置、额度不足或请求失败时会自动退回系统识别。",
+            )
+            TerminalCommand("location enhance amap --web-service")
+            FactRow("调用时机", "仅在开启“街道级精确定位”并实际定位时请求")
+            FactRow("请求次数", "GPS 坐标转换 + 逆地理编码；不会随天气刷新重复调用")
+            FactRow("存储", "Web 服务 Key 仅保存在本机 no_backup 私密目录")
+        }
+        1 -> {
+            StepIntro(
+                title = "创建 Web 服务类型 Key",
+                body = "在高德开放平台创建应用，再添加“Web 服务”类型的 Key。不要填写 Android SDK Key：两种 Key 的用途和校验方式不同。",
+            )
+            ProviderLink("打开高德应用管理", "控制台 → 我的应用 → 创建新应用") {
+                openUrl(context, AMAP_APPLICATION_MANAGE_URL)
+            }
+            InstructionList(
+                "创建或打开名为“枳生天气”的应用",
+                "添加 Key，服务平台选择“Web 服务”",
+                "复制生成的 Key，回到下一步粘贴",
+                "免费额度和超额计费以高德控制台当前规则为准",
+            )
+        }
+        2 -> {
+            StepIntro(
+                title = "验证高德 Web 服务 Key",
+                body = "验证会真实请求一次北京测试点的逆地理编码。成功后才替换本机旧配置，Key 不会写入 APK 或日志。",
+            )
+            TerminalField(
+                label = "高德 Web 服务 API Key",
+                value = state.amapKey,
+                onValueChange = model::setAmapKey,
+                helper = "只接受应用中“Web 服务”类型的 Key",
+                error = state.fieldErrors[ProviderField.AMAP_KEY],
+                sensitive = true,
+                keyboardType = KeyboardType.Password,
+                enabled = !state.testing,
+            )
+            ClipboardPasteButton("从剪贴板粘贴高德 Key", model::setAmapKey)
+            ConnectionTrace(state)
+            ResultBanner(state)
+        }
+        3 -> SuccessStep(state)
     }
 }
 
@@ -955,12 +1014,25 @@ private fun ResultBanner(state: ProviderSetupUiState) {
 
 @Composable
 private fun SuccessStep(state: ProviderSetupUiState) {
-    val provider = if (state.kind == ProviderWizardKind.QWEATHER) "和风天气" else "彩云天气"
+    val (provider, command, body) = when (state.kind) {
+        ProviderWizardKind.QWEATHER -> Triple(
+            "和风天气", "qweather",
+            "连接验证和本机保存都已完成。关闭弹窗后，可以在天气来源中锁定和风天气。",
+        )
+        ProviderWizardKind.CAIYUN -> Triple(
+            "彩云天气", "caiyun",
+            "连接验证和本机保存都已完成。关闭弹窗后，可以在天气来源中锁定彩云天气。",
+        )
+        ProviderWizardKind.AMAP -> Triple(
+            "高德街道定位", "amap-geo",
+            "连接验证和本机保存都已完成。开启街道级精确定位后，高德会增强国内街道名称；失败时仍会自动回退。",
+        )
+    }
     StepIntro(
         title = "$provider 已接入",
-        body = "连接验证和本机保存都已完成。关闭弹窗后，设置页位置与滚动状态保持不变；你可以在数据源中锁定 $provider。",
+        body = body,
     )
-    TerminalCommand("provider status ${if (state.kind == ProviderWizardKind.QWEATHER) "qweather" else "caiyun"} --ready")
+    TerminalCommand("provider status $command --ready")
     ConnectionTrace(state)
     ResultBanner(state)
 }
@@ -975,7 +1047,8 @@ private fun ProviderFooter(
     modifier: Modifier = Modifier,
 ) {
     val finalInput = (state.kind == ProviderWizardKind.QWEATHER && state.step == 4) ||
-        (state.kind == ProviderWizardKind.CAIYUN && state.step == 3)
+        (state.kind == ProviderWizardKind.CAIYUN && state.step == 3) ||
+        (state.kind == ProviderWizardKind.AMAP && state.step == 2)
     val finished = state.status == ProviderSetupStatus.SUCCESS || state.step == state.lastStep
     val primaryLabel = when {
         finished -> "完成"
@@ -984,6 +1057,7 @@ private fun ProviderFooter(
             state.kind == ProviderWizardKind.QWEATHER && state.authMode == QweatherAuthMode.API_KEY ->
                 "使用 API KEY 快速接入"
             state.kind == ProviderWizardKind.CAIYUN -> "开始接入"
+            state.kind == ProviderWizardKind.AMAP -> "开始接入"
             else -> "开始高级配置"
         }
         state.kind == ProviderWizardKind.QWEATHER && state.step == 1 -> "项目已打开，去创建凭据"
@@ -993,6 +1067,7 @@ private fun ProviderFooter(
         state.kind == ProviderWizardKind.QWEATHER && state.step == 3 -> "Host 已粘贴，进入验证"
         state.kind == ProviderWizardKind.CAIYUN && state.step == 1 -> "已登录，去创建天气应用"
         state.kind == ProviderWizardKind.CAIYUN && state.step == 2 -> "应用已创建，去复制 Token"
+        state.kind == ProviderWizardKind.AMAP && state.step == 1 -> "Web 服务应用已创建，去粘贴 Key"
         else -> "进入下一步"
     }
     val primaryAction = {

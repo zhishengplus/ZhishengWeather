@@ -18,7 +18,7 @@
             <TextView android:id="@+id/w_date" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:maxLines="1" android:text="@string/widget_date_placeholder" android:textColor="@color/widget_text_secondary" android:textSize="9sp" />
             <TextView android:id="@+id/w_upd" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:maxLines="1" android:text="@string/widget_update_placeholder" android:textColor="@color/widget_text_tertiary" android:textSize="8sp" />
         </LinearLayout>
-        <TextView android:id="@+id/w_refresh" android:layout_width="44dp" android:layout_height="44dp" android:gravity="center" android:fontFamily="monospace" android:maxLines="1" android:text="↻" android:textColor="@color/widget_accent_cyan" android:textSize="18sp" android:contentDescription="@string/widget_refresh_desc" />
+        <TextView android:id="@+id/w_refresh" android:layout_width="44dp" android:layout_height="44dp" android:gravity="center" android:fontFamily="monospace" android:maxLines="1" android:text="@string/widget_refresh_glyph" android:textColor="@color/widget_accent_cyan" android:textSize="18sp" android:contentDescription="@string/widget_refresh_desc" />
     </LinearLayout>
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="center_vertical" android:orientation="horizontal">

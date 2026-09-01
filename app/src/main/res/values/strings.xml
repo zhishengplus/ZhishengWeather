@@ -16,6 +16,10 @@
     <string name="widget_icon_desc">天气图标</string>
     <string name="widget_trend_desc">未来六小时温度变化</string>
     <string name="widget_daily_range_desc">逐日最低与最高温度范围</string>
+    <string name="widget_trend_label">未来 6 小时</string>
+    <string name="widget_life_label">生活</string>
+    <string name="widget_refresh_glyph" translatable="false">↻</string>
+    <string name="widget_range_placeholder" translatable="false">--°–--°</string>
     <string name="widget_label_small">枳生天气 · 小</string>
     <string name="widget_label_medium">枳生天气 · 中</string>
     <string name="widget_label_large">枳生天气 · 大</string>

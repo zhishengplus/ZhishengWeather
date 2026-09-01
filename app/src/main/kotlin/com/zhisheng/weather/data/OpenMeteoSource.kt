@@ -51,12 +51,17 @@ object OpenMeteoSource {
                     "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                         "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day," +
                         "precipitation,weather_code,cloud_cover,surface_pressure,pressure_msl,wind_speed_10m," +
-                        "wind_direction_10m,wind_gusts_10m,visibility,dew_point_2m" +
-                        "&hourly=temperature_2m,weather_code,wind_speed_10m,precipitation_probability" +
+                        "wind_direction_10m,wind_gusts_10m,visibility,dew_point_2m,uv_index" +
+                        "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code," +
+                        "wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation_probability," +
+                        "precipitation,surface_pressure,visibility,dew_point_2m,cloud_cover,uv_index" +
                         "&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max," +
-                        "precipitation_probability_max,precipitation_sum,sunrise,sunset,uv_index_max" +
+                        "wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max," +
+                        "precipitation_sum,sunrise,sunset,uv_index_max,relative_humidity_2m_mean,cloud_cover_mean" +
                         "&minutely_15=precipitation" +
-                        "&forecast_days=16&forecast_hours=24&timezone=auto"
+                        // 页面只需要未来两小时。若不限制，forecast_days=16 会连带下载最多
+                        // 16 天的 15 分钟数组，徒增首开耗时与流量。
+                        "&forecast_days=16&forecast_hours=24&forecast_minutely_15=9&timezone=auto"
                 )
             }
             val aqiDeferred = async {
@@ -97,7 +102,9 @@ object OpenMeteoSource {
                     // 遥测的“气压”统一使用站点/地面气压。金川等高海拔地区若误用
                     // pressure_msl，会比彩云和小米的站点气压高约 170 hPa，看起来像源在打架。
                     pressure = it.surface_pressure ?: it.pressure_msl,
-                    uvIndex = m.daily?.uv_index_max?.firstOrNull()?.let { u -> Math.round(u).toInt() },
+                    // 当前紫外线必须使用当前时刻值；daily.uv_index_max 是全天峰值，
+                    // 夜间拿它冒充实况会显示“紫外线很强”。
+                    uvIndex = it.uv_index?.let { u -> Math.round(u).toInt() },
                     visibility = it.visibility?.let { v -> v / 1000.0 },
                     dewPoint = it.dew_point_2m,
                     cloudCover = it.cloud_cover,
@@ -120,9 +127,19 @@ object OpenMeteoSource {
                         HourlyWeather(
                         timeMillis = e,
                         temperature = h.temperature_2m?.getOrNull(i),
+                        feelsLike = h.apparent_temperature?.getOrNull(i),
                         condition = profile.condition,
                         windSpeed = h.wind_speed_10m?.getOrNull(i),
+                        windDirectionDeg = h.wind_direction_10m?.getOrNull(i),
+                        windGust = h.wind_gusts_10m?.getOrNull(i),
                         precipProb = h.precipitation_probability?.getOrNull(i)?.let { p -> Math.round(p).toInt() },
+                        precipMm = h.precipitation?.getOrNull(i),
+                        humidity = h.relative_humidity_2m?.getOrNull(i),
+                        pressure = h.surface_pressure?.getOrNull(i),
+                        visibility = h.visibility?.getOrNull(i)?.div(1_000.0),
+                        dewPoint = h.dew_point_2m?.getOrNull(i),
+                        cloudCover = h.cloud_cover?.getOrNull(i),
+                        uvIndex = h.uv_index?.getOrNull(i)?.let { u -> Math.round(u).toInt() },
                         profile = profile,
                     )
                     }
@@ -146,9 +163,13 @@ object OpenMeteoSource {
                             condition = profile.condition,
                             weatherText = profile.condition.label,
                             windSpeed = d.wind_speed_10m_max?.getOrNull(i),
+                            windDirectionDeg = d.wind_direction_10m_dominant?.getOrNull(i),
+                            windGust = d.wind_gusts_10m_max?.getOrNull(i),
                             precipProbability = d.precipitation_probability_max?.getOrNull(i)
                                 ?.let { p -> Math.round(p).toInt() },
                             precipMm = d.precipitation_sum?.getOrNull(i),
+                            humidity = d.relative_humidity_2m_mean?.getOrNull(i),
+                            cloudCover = d.cloud_cover_mean?.getOrNull(i),
                             sunrise = clockOf(d.sunrise?.getOrNull(i)),
                             sunset = clockOf(d.sunset?.getOrNull(i)),
                             profile = profile,
@@ -159,13 +180,16 @@ object OpenMeteoSource {
                 }?.take(15)
             } ?: emptyList()
 
-            // 15 分钟粒度降水：取当前之后 2 小时（8 段），与和风分钟降水卡语义对齐
+            // Open-Meteo 的 15 分钟降水时间戳是“前 15 分钟累计”的区间终点。
+            // 内部改存区间起点，否则整条雨带和开始时间都会被画晚约 15 分钟。
+            // 请求 9 点，丢掉已经结束的当前桶后仍覆盖完整 2 小时。
             val precip = m.minutely_15?.let { mm ->
                 mm.time?.mapIndexedNotNull { i, t ->
-                    val e = epochOf(t) ?: return@mapIndexedNotNull null
-                    if (e < nowMs - 900_000L) null
+                    val intervalEnd = epochOf(t) ?: return@mapIndexedNotNull null
+                    val intervalStart = intervalEnd - 15 * 60_000L
+                    if (intervalEnd <= nowMs) null
                     // minutely_15.precipitation 是 15 分钟累计毫米；统一换成 mm/h。
-                    else MinutePrecip(e, com.zhisheng.weather.model.Nowcast.accumulatedMmToRate(
+                    else MinutePrecip(intervalStart, com.zhisheng.weather.model.Nowcast.accumulatedMmToRate(
                         mm.precipitation?.getOrNull(i)?.toFloat() ?: 0f,
                         15,
                     ))
@@ -176,6 +200,7 @@ object OpenMeteoSource {
                 AqiInfo(
                     value = a.us_aqi?.let { Math.round(it).toInt() },
                     level = WeatherRepository.usAqiLevel(a.us_aqi?.let { Math.round(it).toInt() }),
+                    standard = "美国",
                     pm25 = a.pm2_5?.let { fmt1(it) },
                     pm10 = a.pm10?.let { fmt1(it) },
                     o3 = a.ozone?.let { fmt1(it) },
@@ -184,6 +209,7 @@ object OpenMeteoSource {
                     // Open-Meteo 所有气体浓度均为 µg/m³；应用其余天气源的 CO 按 mg/m³
                     // 展示，因此需除以 1000。此前 142 µg/m³ 被直接显示成 142。
                     co = a.carbon_monoxide?.let { fmtCoMg(it) },
+                    pollutantUnits = WeatherRepository.CHINA_POLLUTANT_UNITS,
                 )
             }
 
@@ -193,7 +219,7 @@ object OpenMeteoSource {
                 daily = daily,
                 aqi = aqiInfo,
                 alerts = emptyList(), // 公共源不提供官方预警
-                updateTime = System.currentTimeMillis(),
+                updateTime = epochOf(cur?.time) ?: System.currentTimeMillis(),
                 // 不编 rainNowcast：接口没有短时降水文案。主屏一句话走分钟序列/温差。
                 rainMinutes = if (precip.size >= 2) precip else emptyList(),
                 rainMeta = precip.takeIf { it.size >= 2 }?.let {
@@ -265,6 +291,7 @@ data class OmFull(
 
 @Serializable
 data class OmCurrentFull(
+    val time: String? = null,
     val temperature_2m: Double? = null,
     val relative_humidity_2m: Double? = null,
     val apparent_temperature: Double? = null,
@@ -280,6 +307,7 @@ data class OmCurrentFull(
     val wind_gusts_10m: Double? = null,
     val visibility: Double? = null,
     val dew_point_2m: Double? = null,
+    val uv_index: Double? = null,
 )
 
 @Serializable
@@ -289,11 +317,15 @@ data class OmDailyFull(
     val temperature_2m_min: List<Double?>? = null,
     val weather_code: List<Int?>? = null,
     val wind_speed_10m_max: List<Double?>? = null,
+    val wind_gusts_10m_max: List<Double?>? = null,
+    val wind_direction_10m_dominant: List<Double?>? = null,
     val precipitation_probability_max: List<Double?>? = null,
     val precipitation_sum: List<Double?>? = null,
     val sunrise: List<String>? = null,
     val sunset: List<String>? = null,
     val uv_index_max: List<Double?>? = null,
+    val relative_humidity_2m_mean: List<Double?>? = null,
+    val cloud_cover_mean: List<Double?>? = null,
 )
 
 @Serializable

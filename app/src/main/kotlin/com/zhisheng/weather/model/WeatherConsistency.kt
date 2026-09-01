@@ -22,14 +22,127 @@ object WeatherConsistency {
         data: WeatherData,
         nowMillis: Long = System.currentTimeMillis(),
     ): WeatherData {
-        if (data.error != null) return dropPastHourly(data, nowMillis)
-        var d = dropPastHourly(data, nowMillis)
+        val sane = sanitize(data, nowMillis)
+        if (sane.error != null) return dropPastHourly(sane, nowMillis)
+        var d = dropPastHourly(sane, nowMillis)
         if (d.current == null) return d
         d = ensureCurrentHour(d, nowMillis)
         d = syncCurrentWithNowcast(d, nowMillis)
         d = overlayCurrentOntoNowHour(d, nowMillis)
         d = reconcileNowcastText(d, nowMillis)
         return d
+    }
+
+    /**
+     * 最后一层数据闸门：供应商偶发的 NaN、负降水、越界百分比或重复乱序时间点
+     * 不得直接进入图表。这里只丢弃不可能值，不用“看起来合理”的数字替换源数据。
+     */
+    internal fun sanitize(
+        data: WeatherData,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): WeatherData {
+        val current = data.current?.let { cur ->
+            cur.copy(
+                temperature = cur.temperature.inRange(-110.0, 70.0),
+                feelsLike = cur.feelsLike.inRange(-130.0, 90.0),
+                humidity = cur.humidity.inRange(0.0, 100.0),
+                windSpeed = cur.windSpeed.inRange(0.0, 500.0),
+                windDirectionDeg = cur.windDirectionDeg.asDirection(),
+                pressure = cur.pressure.inRange(250.0, 1_100.0),
+                uvIndex = cur.uvIndex?.takeIf { it in 0..50 },
+                visibility = cur.visibility.inRange(0.0, 1_000.0),
+                dewPoint = cur.dewPoint.inRange(-120.0, 80.0),
+                cloudCover = cur.cloudCover.inRange(0.0, 100.0),
+                windGust = cur.windGust.inRange(0.0, 600.0),
+                precipMm = cur.precipMm.inRange(0.0, 1_000.0),
+            )
+        }?.takeIf { cur ->
+            cur.temperature != null || cur.feelsLike != null || cur.condition?.takeIf { it != WeatherCondition.UNKNOWN } != null ||
+                cur.weatherText?.trim()?.takeIf { it.isNotEmpty() && it != "未知" && it != "--" } != null ||
+                cur.humidity != null || cur.windSpeed != null ||
+                cur.pressure != null || cur.visibility != null || cur.precipMm != null
+        }
+        val hourly = data.hourly.asSequence()
+            .filter { it.timeMillis > 0L }
+            .distinctBy(HourlyWeather::timeMillis)
+            .sortedBy(HourlyWeather::timeMillis)
+            .map { hour ->
+                hour.copy(
+                    temperature = hour.temperature.inRange(-110.0, 70.0),
+                    feelsLike = hour.feelsLike.inRange(-130.0, 90.0),
+                    windSpeed = hour.windSpeed.inRange(0.0, 500.0),
+                    windDirectionDeg = hour.windDirectionDeg.asDirection(),
+                    windGust = hour.windGust.inRange(0.0, 600.0),
+                    precipProb = hour.precipProb?.takeIf { it in 0..100 },
+                    precipMm = hour.precipMm.inRange(0.0, 1_000.0),
+                    humidity = hour.humidity.inRange(0.0, 100.0),
+                    pressure = hour.pressure.inRange(250.0, 1_100.0),
+                    visibility = hour.visibility.inRange(0.0, 1_000.0),
+                    dewPoint = hour.dewPoint.inRange(-120.0, 80.0),
+                    cloudCover = hour.cloudCover.inRange(0.0, 100.0),
+                    uvIndex = hour.uvIndex?.takeIf { it in 0..50 },
+                    aqi = hour.aqi?.takeIf { it in 0..1_000 },
+                )
+            }
+            .toList()
+        val daily = data.daily.asSequence()
+            .filter { it.dateMillis > 0L }
+            .distinctBy { cityDate(it.dateMillis, data.utcOffsetSeconds) }
+            .sortedBy(DailyWeather::dateMillis)
+            .map { day ->
+                val rawHigh = day.high.inRange(-110.0, 70.0)
+                val rawLow = day.low.inRange(-110.0, 70.0)
+                val high = if (rawHigh != null && rawLow != null) maxOf(rawHigh, rawLow) else rawHigh
+                val low = if (rawHigh != null && rawLow != null) minOf(rawHigh, rawLow) else rawLow
+                day.copy(
+                    high = high,
+                    low = low,
+                    average = day.average.inRange(-110.0, 70.0),
+                    windSpeed = day.windSpeed.inRange(0.0, 500.0),
+                    windDirectionDeg = day.windDirectionDeg.asDirection(),
+                    windGust = day.windGust.inRange(0.0, 600.0),
+                    precipProbability = day.precipProbability?.takeIf { it in 0..100 },
+                    precipMm = day.precipMm.inRange(0.0, 5_000.0),
+                    humidity = day.humidity.inRange(0.0, 100.0),
+                    cloudCover = day.cloudCover.inRange(0.0, 100.0),
+                    uvIndex = day.uvIndex?.takeIf { it in 0..50 },
+                )
+            }
+            .toList()
+        val minutes = data.rainMinutes.asSequence()
+            .filter { it.timeMillis > 0L && it.precip.isFinite() && it.precip in 0f..1_000f }
+            .distinctBy(MinutePrecip::timeMillis)
+            .sortedBy(MinutePrecip::timeMillis)
+            .toList()
+        val aqi = data.aqi?.let { air ->
+            air.copy(
+                value = air.value?.takeIf { it in 0..1_000 },
+                level = air.level.cleanText(),
+                standard = air.standard.cleanText(),
+                primary = air.primary.cleanText(),
+                pm25 = air.pm25.cleanMeasurement(),
+                pm10 = air.pm10.cleanMeasurement(),
+                o3 = air.o3.cleanMeasurement(),
+                no2 = air.no2.cleanMeasurement(),
+                so2 = air.so2.cleanMeasurement(),
+                co = air.co.cleanMeasurement(),
+                suggest = air.suggest.cleanText(),
+            )
+        }
+        val validTimeRange = 946_684_800_000L..(nowMillis + 5 * 60_000L)
+        return data.copy(
+            current = current,
+            hourly = hourly,
+            daily = daily,
+            rainMinutes = minutes,
+            rainMeta = data.rainMeta?.takeIf {
+                minutes.isNotEmpty() && it.intervalMinutes in 1..180 && it.horizonMinutes in 1..1_440
+            },
+            rainDistanceKm = data.rainDistanceKm.inRange(0.0, 20_000.0),
+            aqi = aqi,
+            updateTime = data.updateTime?.takeIf { it in validTimeRange },
+            utcOffsetSeconds = data.utcOffsetSeconds?.takeIf { it in -18 * 3_600..18 * 3_600 },
+        )
     }
 
     // 与逐时 UI 共用同一格「现在」：优先包含当前时刻的小时格（10:50 属于 10:00），
@@ -135,5 +248,20 @@ object WeatherConsistency {
             return data.copy(rainNowcast = null)
         }
         return data
+    }
+
+    private fun Double?.inRange(min: Double, max: Double): Double? =
+        this?.takeIf { it.isFinite() && it in min..max }
+
+    private fun Double?.asDirection(): Double? = this
+        ?.takeIf(Double::isFinite)
+        ?.let { ((it % 360.0) + 360.0) % 360.0 }
+
+    private fun String?.cleanText(): String? = this?.trim()?.takeIf(String::isNotEmpty)
+
+    private fun String?.cleanMeasurement(): String? {
+        val raw = this?.trim() ?: return null
+        val value = raw.toDoubleOrNull() ?: return null
+        return raw.takeIf { value.isFinite() && value >= 0.0 }
     }
 }

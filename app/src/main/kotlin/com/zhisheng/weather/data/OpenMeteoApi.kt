@@ -1,6 +1,7 @@
 package com.zhisheng.weather.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -27,6 +28,8 @@ object OpenMeteoApi {
                 if (!resp.isSuccessful) return@withContext null
                 json.decodeFromString<OpenMeteoResult>(resp.body?.string() ?: return@withContext null)
             }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (_: Exception) {
             null
         }
@@ -37,13 +40,17 @@ object OpenMeteoApi {
     suspend fun fetchHourly(lat: Double, lon: Double): OpenMeteoHourlyResponse? = withContext(Dispatchers.IO) {
         try {
             val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                "&hourly=temperature_2m,weather_code,wind_speed_10m,precipitation_probability" +
+                "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code," +
+                "wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation_probability," +
+                "precipitation,surface_pressure,visibility,dew_point_2m,cloud_cover,uv_index" +
                 "&forecast_hours=24&timezone=auto"
             val request = Request.Builder().url(url).build()
             okHttp.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 json.decodeFromString<OpenMeteoHourlyResponse>(resp.body?.string() ?: return@withContext null)
             }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (_: Exception) {
             null
         }
@@ -55,12 +62,16 @@ object OpenMeteoApi {
         try {
             val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                 "&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max," +
-                "precipitation_probability_max,precipitation_sum,sunrise,sunset&forecast_days=16&timezone=auto"
+                "wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max," +
+                "precipitation_sum,sunrise,sunset,relative_humidity_2m_mean,cloud_cover_mean" +
+                "&forecast_days=16&timezone=auto"
             val request = Request.Builder().url(url).build()
             okHttp.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 json.decodeFromString<OpenMeteoDailyResult>(resp.body?.string() ?: return@withContext null)
             }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (_: Exception) {
             null
         }
@@ -91,10 +102,14 @@ data class OpenMeteoDaily(
     val temperature_2m_min: List<Double?>? = null,
     val weather_code: List<Int?>? = null,
     val wind_speed_10m_max: List<Double?>? = null,
+    val wind_gusts_10m_max: List<Double?>? = null,
+    val wind_direction_10m_dominant: List<Double?>? = null,
     val precipitation_probability_max: List<Double?>? = null,
     val precipitation_sum: List<Double?>? = null,
     val sunrise: List<String>? = null,
     val sunset: List<String>? = null,
+    val relative_humidity_2m_mean: List<Double?>? = null,
+    val cloud_cover_mean: List<Double?>? = null,
 )
 
 @Serializable
@@ -107,7 +122,17 @@ data class OpenMeteoHourlyResponse(
 data class OpenMeteoHourly(
     val time: List<String>? = null,
     val temperature_2m: List<Double?>? = null,
+    val apparent_temperature: List<Double?>? = null,
+    val relative_humidity_2m: List<Double?>? = null,
     val weather_code: List<Int?>? = null,
     val wind_speed_10m: List<Double?>? = null,
+    val wind_direction_10m: List<Double?>? = null,
+    val wind_gusts_10m: List<Double?>? = null,
     val precipitation_probability: List<Double?>? = null,
+    val precipitation: List<Double?>? = null,
+    val surface_pressure: List<Double?>? = null,
+    val visibility: List<Double?>? = null,
+    val dew_point_2m: List<Double?>? = null,
+    val cloud_cover: List<Double?>? = null,
+    val uv_index: List<Double?>? = null,
 )

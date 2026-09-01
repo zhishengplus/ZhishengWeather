@@ -63,8 +63,22 @@ class HomeCitySwitchRegressionTest {
     @Test
     fun focusedCardUsesExplicitVendorIndependentGlowLayers() {
         val source = homeSource()
-        assertTrue(source.contains("scaleX = 1.045f"))
-        assertTrue(source.contains("border(7.dp, ZhishengCyan.copy(alpha = 0.09f)"))
+        assertTrue(source.contains("scaleXValue = scale * 1.045f"))
+        assertTrue(source.contains("ZhishengCyan.copy(alpha = 0.09f)"))
         assertTrue(source.contains("label = \"city-card-edge-pulse\""))
+    }
+
+    @Test
+    fun cityDeckCardsKeepRoundedOutlineWhileSliding() {
+        val source = homeSource()
+        assertTrue(source.contains("clip = true"))
+        assertTrue(source.contains("compositingStrategy = CompositingStrategy.Offscreen"))
+        assertTrue(source.contains(".clip(innerShape)"))
+        assertTrue(source.contains(".background(borderColor)"))
+        assertFalse(source.contains("border(7.dp, ZhishengCyan.copy(alpha = 0.09f)"))
+        assertFalse(
+            "Hairline Modifier.border on a rotated layer stair-steps; use a filled inset ring instead",
+            source.contains("width = if (focused) 2.dp else 1.dp"),
+        )
     }
 }

@@ -143,7 +143,10 @@ class NowcastTest {
                 DailyWeather(dateMillis = t0 + 86_400_000L, high = 22.0, low = 14.0),
             ),
         )
-        assertEquals("明天会比今天低 6°，今晚把外套备好。", Nowcast.briefingLine(data, "c", t0))
+        val briefing = Nowcast.briefing(data, "c", t0)!!
+        assertEquals(BriefingKind.TEMPERATURE, briefing.kind)
+        assertEquals(BriefingEmote.COLD, briefing.emote)
+        assertTrue(briefing.text.contains("6°"))
     }
 
     @Test
@@ -158,7 +161,10 @@ class NowcastTest {
             ),
             utcOffsetSeconds = offset,
         )
-        assertEquals("明天会比今天低 6°，今晚把外套备好。", Nowcast.briefingLine(data, "c", now))
+        val briefing = Nowcast.briefing(data, "c", now)!!
+        assertEquals(BriefingKind.TEMPERATURE, briefing.kind)
+        assertEquals(BriefingEmote.COLD, briefing.emote)
+        assertTrue(briefing.text.contains("6°"))
     }
 
     @Test
@@ -180,7 +186,7 @@ class NowcastTest {
                 AlertInfo(title = "暴雨红色预警", severity = AlertLevel.RED),
             ),
         )
-        assertEquals("红色预警生效中，低洼路段和积水区域请谨慎通行。", Nowcast.briefingLine(data, "c", t0))
+        assertEquals("红色预警生效中，避开低洼路段和积水区域，驾车不要贸然涉水。", Nowcast.briefingLine(data, "c", t0))
     }
 
     @Test
@@ -197,7 +203,7 @@ class NowcastTest {
 
         val briefing = Nowcast.briefing(data, "c", t0)!!
 
-        assertEquals("黄色预警生效中，山区、沟谷和陡坡附近请多留意。", briefing.text)
+        assertEquals("黄色预警生效中，尽量远离山区沟谷和陡坡，注意落石、滑坡等风险。", briefing.text)
         assertEquals(BriefingKind.ALERT, briefing.kind)
         assertEquals(BriefingEmote.ALERT, briefing.emote)
         assertEquals(AlertLevel.YELLOW, briefing.alertLevel)
@@ -213,6 +219,22 @@ class NowcastTest {
         assertEquals(BriefingKind.AMBIENT, first.kind)
         assertEquals(first.text, second.text)
         assertEquals(BriefingEmote.NIGHT, first.emote)
+    }
+
+    @Test
+    fun hotWeatherCopyIsNaturalAndDoesNotUseTheReportedForcedMetaphor() {
+        val now = java.time.Instant.parse("2026-08-31T08:28:00Z").toEpochMilli()
+        val data = WeatherData(
+            current = CurrentWeather(temperature = 31.0, condition = WeatherCondition.CLEAR),
+            utcOffsetSeconds = 8 * 3_600,
+        )
+
+        val text = Nowcast.briefing(data, "c", now)!!.text
+
+        assertTrue(listOf("热", "气温", "补水", "轻装", "透气").any(text::contains))
+        assertFalse(text.contains("发烫"))
+        assertFalse(text.contains("走慢一点"))
+        assertFalse(text.contains("正在营业"))
     }
 
     @Test

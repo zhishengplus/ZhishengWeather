@@ -59,6 +59,16 @@ data class HourlyWeather(
     val precipProb: Int? = null,
     val aqi: Int? = null,
     val profile: WeatherProfile? = null,
+    val feelsLike: Double? = null,
+    val windDirectionDeg: Double? = null,
+    val windGust: Double? = null,
+    val precipMm: Double? = null,
+    val humidity: Double? = null,
+    val pressure: Double? = null,
+    val visibility: Double? = null,
+    val dewPoint: Double? = null,
+    val cloudCover: Double? = null,
+    val uvIndex: Int? = null,
 )
 
 @Serializable
@@ -90,6 +100,9 @@ data class TyphoonInfo(
     val ename: String? = null,
     val type: String? = null,
     val windSpeed: Double? = null,
+    val id: String? = null,
+    val active: Boolean = true,
+    val source: String? = null,
 )
 
 @Serializable
@@ -109,12 +122,21 @@ data class DailyWeather(
     // 白天转夜间文案（「晴转雷阵雨」）；仅有一种现象时与 condition.label 相同
     val weatherText: String? = null,
     val profile: WeatherProfile? = null,
+    val average: Double? = null,
+    val windDirectionDeg: Double? = null,
+    val windGust: Double? = null,
+    val humidity: Double? = null,
+    val cloudCover: Double? = null,
+    val uvIndex: Int? = null,
 )
 
 @Serializable
 data class AqiInfo(
     val value: Int? = null,
     val level: String? = null,
+    // AQI 不是全球统一口径。中国、美标、欧洲及供应商自有指数的数值不可直接横比，
+    // 因此把实际采用的标准与污染物单位一起带到展示层。
+    val standard: String? = null,
     val primary: String? = null,
     val pm25: String? = null,
     val pm10: String? = null,
@@ -122,6 +144,7 @@ data class AqiInfo(
     val no2: String? = null,
     val so2: String? = null,
     val co: String? = null,
+    val pollutantUnits: Map<String, String> = emptyMap(),
     // 健康建议文案（小米 suggest，v0.0.4 接入；其余源为空）
     val suggest: String? = null,
 )

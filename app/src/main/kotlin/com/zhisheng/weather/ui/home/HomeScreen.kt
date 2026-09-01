@@ -4,6 +4,9 @@
  */
 package com.zhisheng.weather.ui.home
 
+import com.zhisheng.weather.ui.Text
+import com.zhisheng.weather.i18n.uiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -41,12 +44,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -55,6 +62,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
@@ -67,7 +75,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -80,6 +87,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,13 +97,17 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -122,6 +134,7 @@ import com.zhisheng.weather.model.DailyWeather
 import com.zhisheng.weather.model.HourlyWeather
 import com.zhisheng.weather.model.Nowcast
 import com.zhisheng.weather.model.HeroTemps
+import com.zhisheng.weather.model.phaseAwareCondition
 import com.zhisheng.weather.model.TyphoonInfo
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.WeatherConsistency
@@ -129,6 +142,7 @@ import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.model.YesterdayInfo
 import com.zhisheng.weather.R
 import com.zhisheng.weather.data.HomeModule
+import com.zhisheng.weather.data.DailyForecastLayout
 import com.zhisheng.weather.data.LifeIndexMetric
 import com.zhisheng.weather.data.TelemetryMetric
 import com.zhisheng.weather.ui.Fmt
@@ -190,6 +204,8 @@ fun HomeScreen(
     onSettingsClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onRadarClick: () -> Unit,
+    onDailyForecastClick: () -> Unit,
+    onTyphoonClick: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -240,6 +256,7 @@ fun HomeScreen(
         drawerContent = {
             CityDrawer(
                 uiState = uiState,
+                onBack = { scope.launch { drawerState.close() } },
                 onSelect = { key ->
                     viewModel.selectCity(key)
                     scope.launch { drawerState.close() }
@@ -261,18 +278,19 @@ fun HomeScreen(
                 level = uiState.prefs.ambience,
                 night = night,
             )
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                 TopBar(
                     cityName = uiState.selectedCity?.displayName ?: "枳生天气",
                     loading = uiState.loading,
                     onMenu = { scope.launch { drawerState.open() } },
                     onRefresh = { viewModel.refresh() },
                     onSettings = onSettingsClick,
+                    modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth(),
                 )
                 PullToRefreshBox(
                     isRefreshing = uiState.loading,
                     onRefresh = { viewModel.refresh() },
-                    modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                    modifier = Modifier.widthIn(max = 720.dp).fillMaxSize().navigationBarsPadding(),
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         // 0.0.9-debug：cities 占位期（citiesLoaded=false）不判空态，
@@ -325,6 +343,8 @@ fun HomeScreen(
                                             listState = weatherListState,
                                             onHistoryClick = onHistoryClick,
                                             onRadarClick = onRadarClick,
+                                            onDailyForecastClick = onDailyForecastClick,
+                                            onTyphoonClick = onTyphoonClick,
                                         )
                                     }
                                 }
@@ -386,43 +406,37 @@ fun HomeScreen(
                                 cityDeckPinned = false
                                 cityDeckExpansion = 0f
                                 pinnedThisGesture = false
-                                cityDeckVisible = uiState.cities.size > 1
-                                if (cityDeckVisible) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                }
+                                // 横向滑动主页不再直接亮出/切换城市。只有明确向上推过阈值
+                                // 才展开卡组，避免用户在底部空白处左右滑时误触。
+                                cityDeckVisible = false
                             },
                             onDrag = { change, dragAmount ->
-                                change.consume()
-                                if (cityDeckVisible) {
-                                    cityDeckDrag += dragAmount.x
-                                    cityDeckVerticalDrag += dragAmount.y
-                                    cityDeckPosition = clampCityDeckPosition(
-                                        cityDeckStart - cityDeckDrag / stepPx,
-                                        uiState.cities.size,
-                                    )
-                                    if (!pinnedThisGesture) {
-                                        cityDeckExpansion = (-cityDeckVerticalDrag / pinThresholdPx)
-                                            .coerceIn(0f, 0.76f)
-                                        val upwardIntent = -cityDeckVerticalDrag >= abs(cityDeckDrag) * 1.10f
-                                        if (cityDeckVerticalDrag <= -pinThresholdPx && upwardIntent) {
-                                            pinnedThisGesture = true
-                                            cityDeckPinned = true
-                                            cityDeckExpansion = 1f
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        }
+                                cityDeckDrag += dragAmount.x
+                                cityDeckVerticalDrag += dragAmount.y
+                                cityDeckPosition = clampCityDeckPosition(
+                                    cityDeckStart - cityDeckDrag / stepPx,
+                                    uiState.cities.size,
+                                )
+                                if (!pinnedThisGesture) {
+                                    cityDeckExpansion = (-cityDeckVerticalDrag / pinThresholdPx)
+                                        .coerceIn(0f, 0.76f)
+                                    val upwardIntent = -cityDeckVerticalDrag >= abs(cityDeckDrag) * 1.10f
+                                    if (cityDeckVerticalDrag <= -pinThresholdPx && upwardIntent) {
+                                        change.consume()
+                                        pinnedThisGesture = true
+                                        cityDeckVisible = true
+                                        cityDeckPinned = true
+                                        cityDeckExpansion = 1f
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     }
                                 }
                             },
                             onDragEnd = {
                                 cityDeckPosition = cityDeckPosition.roundToInt().toFloat()
                                 if (!pinnedThisGesture) {
-                                    val target = uiState.cities.getOrNull(cityDeckPosition.roundToInt())
                                     cityDeckVisible = false
                                     cityDeckPinned = false
                                     cityDeckExpansion = 0f
-                                    if (target != null && target.locationKey != uiState.selectedCity?.locationKey) {
-                                        viewModel.selectCity(target.locationKey)
-                                    }
                                 }
                             },
                             onDragCancel = {
@@ -745,61 +759,74 @@ private fun CityDeckOverlay(
                         val focused = index == selected
                         val cardShape = RoundedCornerShape(18.dp)
                         val cardGlow = if (focused) ZhishengCyan else ZhishengMint
+                        val cardAlpha = (1f - distance * 0.14f).coerceAtLeast(0.38f)
+                        val tiltY = relative.coerceIn(-2f, 2f) * (-4f + 3f * expanded)
+                        val borderWidth = if (focused) 2.dp else 1.dp
+                        val borderColor = if (focused) ZhishengCyan else ZhishengCardBorder
+                        val innerShape = RoundedCornerShape(18.dp - borderWidth)
                         Box(
                             modifier = Modifier
                                 .align(Alignment.Center)
                                 .zIndex(10f - distance)
                                 .width(236.dp)
-                                .height(306.dp)
-                                .graphicsLayer {
-                                    translationX = x
-                                    rotationZ = rotation
-                                    scaleX = scale
-                                    scaleY = scale
-                                    alpha = (1f - distance * 0.14f).coerceAtLeast(0.38f)
-                                    cameraDistance = 18f * density
-                                    rotationY = relative.coerceIn(-2f, 2f) * (-4f + 3f * expanded)
-                                },
+                                .height(306.dp),
                         ) {
                             if (focused) {
-                                // 显式绘制两层放大光晕：不依赖不同厂商对彩色系统阴影的实现。
-                                // 低频轻呼吸只作用于当前卡，其他卡仍保持安静。
+                                // 放大后的实心圆角层当光晕：旋转时跟卡片同一套 outline clip，避免细线边框阶梯锯齿。
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .graphicsLayer {
-                                            scaleX = 1.045f
-                                            scaleY = 1.034f
-                                            alpha = edgeGlowPulse
+                                            cityCardLayer(
+                                                x = x,
+                                                rotation = rotation,
+                                                scaleXValue = scale * 1.045f,
+                                                scaleYValue = scale * 1.034f,
+                                                alphaValue = edgeGlowPulse * cardAlpha,
+                                                tiltY = tiltY,
+                                                shape = cardShape,
+                                            )
                                         }
-                                        .border(7.dp, ZhishengCyan.copy(alpha = 0.09f), cardShape),
+                                        .background(ZhishengCyan.copy(alpha = 0.09f), cardShape),
                                 )
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .graphicsLayer {
-                                            scaleX = 1.022f
-                                            scaleY = 1.017f
-                                            alpha = edgeGlowPulse
+                                            cityCardLayer(
+                                                x = x,
+                                                rotation = rotation,
+                                                scaleXValue = scale * 1.022f,
+                                                scaleYValue = scale * 1.017f,
+                                                alphaValue = edgeGlowPulse * cardAlpha,
+                                                tiltY = tiltY,
+                                                shape = cardShape,
+                                            )
                                         }
-                                        .border(4.dp, ZhishengCyan.copy(alpha = 0.16f), cardShape),
+                                        .background(ZhishengCyan.copy(alpha = 0.16f), cardShape),
                                 )
                             }
                             Column(
                                 modifier = Modifier
                                 .fillMaxSize()
-                                .shadow(
-                                    elevation = if (focused) 24.dp else 8.dp,
-                                    shape = cardShape,
-                                    ambientColor = cardGlow.copy(alpha = if (focused) 0.30f else 0.08f),
-                                    spotColor = cardGlow.copy(alpha = if (focused) 0.22f else 0.05f),
-                                )
-                                .background(ZhishengSurface, cardShape)
-                                .border(
-                                    width = if (focused) 2.dp else 1.dp,
-                                    color = if (focused) ZhishengCyan else ZhishengCardBorder,
-                                    shape = cardShape,
-                                )
+                                .graphicsLayer {
+                                    cityCardLayer(
+                                        x = x,
+                                        rotation = rotation,
+                                        scaleXValue = scale,
+                                        scaleYValue = scale,
+                                        alphaValue = cardAlpha,
+                                        tiltY = tiltY,
+                                        shape = cardShape,
+                                    )
+                                    shadowElevation = if (focused) 24.dp.toPx() else 8.dp.toPx()
+                                    ambientShadowColor = cardGlow.copy(alpha = if (focused) 0.30f else 0.08f)
+                                    spotShadowColor = cardGlow.copy(alpha = if (focused) 0.22f else 0.05f)
+                                }
+                                .background(borderColor)
+                                .padding(borderWidth)
+                                .clip(innerShape)
+                                .background(ZhishengSurface)
                                 .clickable(
                                     enabled = pinned,
                                     role = Role.Button,
@@ -879,8 +906,9 @@ private fun CityDeckOverlay(
 
 // —— 扫描线氛围层（3dp 周期，不拦截触摸）——
 // 深色 = CRT 扫描线（白 2.5%）；浅色 = 纸面细纹（墨线 2%，v0.0.5）
+// 雷达页同样使用本层，保持整机同一台「屏幕」的观感（v0.1.5）
 @Composable
-private fun Scanlines() {
+internal fun Scanlines() {
     val lineColor = LocalZhishengPalette.current.run {
         if (isLight) text.copy(alpha = 0.02f) else Color.White.copy(alpha = 0.025f)
     }
@@ -904,17 +932,17 @@ private fun TopBar(
     onMenu: () -> Unit,
     onRefresh: () -> Unit,
     onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .statusBarsPadding()
             .height(56.dp)
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onMenu, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Filled.Menu, contentDescription = "城市列表", tint = ZhishengTextSecondary, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.Menu, contentDescription = uiText("城市列表"), tint = ZhishengTextSecondary, modifier = Modifier.size(22.dp))
         }
         Column(Modifier.weight(1f).padding(start = 4.dp)) {
             Text(
@@ -954,7 +982,7 @@ private fun TopBar(
             )
         }
         IconButton(onClick = onSettings, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Filled.Settings, contentDescription = "设置", tint = ZhishengTextSecondary, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.Settings, contentDescription = uiText("设置"), tint = ZhishengTextSecondary, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -991,6 +1019,8 @@ private fun WeatherContent(
     listState: LazyListState,
     onHistoryClick: () -> Unit = {},
     onRadarClick: () -> Unit = {},
+    onDailyForecastClick: () -> Unit = {},
+    onTyphoonClick: () -> Unit = {},
 ) {
     // 入场动画总开关：状态提升到 LazyColumn 之上，只驱动一次交错入场（v0.0.1 修复快滑闪卡）
     var entered by remember { mutableStateOf(false) }
@@ -1014,7 +1044,9 @@ private fun WeatherContent(
     val showAqi = prefs.showAqi && data.aqi != null
     val showIndices = prefs.showIndices && lifeIndexItems(data, prefs.lifeIndexMetrics).isNotEmpty()
     val showYesterday = prefs.showYesterday && data.yesterday != null
-    val showTy = showTyphoon && data.typhoons.isNotEmpty()
+    // 台风路径使用独立国内权威数据源，不能再被当前天气供应商是否附带
+    // typhoon 字段决定入口是否出现。用户关闭模块时才隐藏。
+    val showTy = showTyphoon
 
     LazyColumn(
         state = listState,
@@ -1048,19 +1080,26 @@ private fun WeatherContent(
             item(key = "module_${module.key}") {
                 Stagger(animationIndex, entered) { m ->
                     when (module) {
-                        HomeModule.HOURLY -> HourlySection(data.hourly, unit, prefs.windUnit, data.utcOffsetSeconds, m)
+                        HomeModule.HOURLY -> HourlySection(data, unit, prefs.windUnit, data.utcOffsetSeconds, m)
                         HomeModule.PRECIP -> PrecipCard(data, m)
                         HomeModule.SPACETIME -> SpacetimeObservatory(
                             modifier = m,
                             onHistoryClick = onHistoryClick,
                             onRadarClick = onRadarClick,
                         )
-                        HomeModule.DAILY -> DailySection(currentDaily, unit, prefs.windUnit, data.utcOffsetSeconds, m)
+                        HomeModule.DAILY -> DailySection(
+                            currentDaily,
+                            unit,
+                            prefs.windUnit,
+                            data.utcOffsetSeconds,
+                            m,
+                            onDailyForecastClick,
+                        )
                         HomeModule.TELEMETRY -> data.current?.let { TelemetryGrid(it, todayDaily, unit, prefs, m) }
                         HomeModule.AQI -> data.aqi?.let { AqiCard(it, m) }
                         HomeModule.INDICES -> IndicesRow(data, prefs.lifeIndexMetrics, m)
                         HomeModule.YESTERDAY -> data.yesterday?.let { YesterdayCard(it, todayDaily, unit, m) }
-                        HomeModule.TYPHOON -> TyphoonCard(data.typhoons, m)
+                        HomeModule.TYPHOON -> TyphoonCard(data.typhoons, m, onTyphoonClick)
                     }
                 }
             }
@@ -1210,7 +1249,10 @@ private fun HeroSection(
                         style = Stroke(1f),
                     )
                 }
-                WeatherIcon(cur.condition, Modifier.size(76.dp))
+                WeatherIcon(
+                    phaseAwareCondition(cur.condition, data, System.currentTimeMillis()),
+                    Modifier.size(76.dp),
+                )
             }
         }
         Nowcast.briefing(data, unit, System.currentTimeMillis())?.let { briefing ->
@@ -1232,7 +1274,7 @@ private fun HeroSection(
                         )
                     }
                     .semantics(mergeDescendants = true) {
-                        contentDescription = "天气娘提示：${briefing.text}"
+                        contentDescription = uiText("天气娘提示：${briefing.text}")
                     },
             ) {
                 Image(
@@ -1467,8 +1509,8 @@ private fun SpacetimeObservatory(
     ) {
         WeatherToolEntry(
             index = "01",
-            title = "往年同日",
-            subtitle = "5/10 年对照",
+            title = "天气回看",
+            subtitle = "过去7天 · 往年同日",
             modifier = Modifier.weight(1f),
             onClick = onHistoryClick,
         )
@@ -1577,60 +1619,149 @@ private fun Modifier.drawCornerBrackets(color: Color) = this.then(
 // 「左邻中点→本格中心→右邻中点」的连续折线 + 渐隐面积填充，跨格严丝合缝。
 @Composable
 private fun HourlySection(
-    hourly: List<HourlyWeather>,
+    data: WeatherData,
     unit: String,
     windUnit: String,
     utcOffsetSeconds: Int?,
     modifier: Modifier,
 ) {
+    val nowMs = System.currentTimeMillis()
+    val displayItems = hourlyDisplayItems(data.current, data.hourly, nowMs)
+    val hourly = displayItems.map { it.weather }
     val temps = hourly.mapNotNull { h -> conv(h.temperature, unit) }
     val minT = temps.minOrNull() ?: 0.0
     val maxT = temps.maxOrNull() ?: 1.0
+    // sp 会随系统字体缩放，逐时格宽也必须同步放大；否则首列的 26° / 56%
+    // 会从 LazyRow 视口两侧溢出后被裁掉（部分 vivo / OriginOS 设备可复现）。
+    val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.5f)
+    val hourlyItemWidth = 54.dp * fontScale
     // 0.0.9-debug 修复：原实现每格独立用 ±40 分钟双向容差判「现在」，
     // :20-:40 之间上一整点与下一整点同时命中，两格都标「现在」并高亮。
     // 改为在父层算唯一「现在」格：优先取包含当前时刻的小时格（10:50 属于
     // 10:00 格），找不到（该格已被 dropPastHourly 裁掉）再退回 40 分钟
     // 窗口内最近的一格；均无则不标。
-    val nowMs = System.currentTimeMillis()
-    val nowIdx = WeatherConsistency.currentHourIndex(hourly, nowMs)
+    val showPrecipProbability = hourly.any { (it.precipProb ?: 0) > 0 }
+    val outlookText = hourlyOutlookText(data.current, data.hourly, nowMs)
     HudCard(modifier = modifier.fillMaxWidth()) {
         Column {
+            Text(
+                text = outlookText,
+                style = MaterialTheme.typography.labelMedium,
+                color = ZhishengTextTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(14.dp))
             // key=时间戳：数据刷新时按身份复用 item，不整列重绑（v0.0.1）
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                itemsIndexed(hourly, key = { _, h -> h.timeMillis }) { i, h ->
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                itemsIndexed(displayItems, key = { i, item ->
+                    if (item.isNow) "now-${item.weather.timeMillis}" else "hour-$i-${item.weather.timeMillis}"
+                }) { i, item ->
+                    val h = item.weather
                     HourlyItem(
                         h = h,
+                        visualCondition = phaseAwareCondition(h.condition, data, h.timeMillis),
                         prev = hourly.getOrNull(i - 1),
                         next = hourly.getOrNull(i + 1),
                         unit = unit,
                         minT = minT,
                         maxT = maxT,
-                        isNow = i == nowIdx,
-                        windUnit = windUnit,
+                        isNow = item.isNow,
+                        showPrecipProbability = showPrecipProbability,
                         utcOffsetSeconds = utcOffsetSeconds,
+                        itemWidth = hourlyItemWidth,
                     )
                 }
             }
-            // 图例：底部两行数字分别是降水概率与风速，去掉每格的 km/h 后在此说明一次
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (hourly.any { it.precipProb != null && it.precipProb > 0 }) {
-                    Box(Modifier.size(width = 6.dp, height = 2.dp).background(ZhishengCyan))
-                    Spacer(Modifier.width(5.dp))
-                    Text("降水概率", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-                    Spacer(Modifier.width(14.dp))
-                }
-                Box(Modifier.size(width = 6.dp, height = 2.dp).background(ZhishengTextTertiary))
-                Spacer(Modifier.width(5.dp))
-                Text(Fmt.windUnitLabel(windUnit), style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${hourly.size}H",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZhishengTextTertiary,
-                )
+        }
+    }
+}
+
+internal data class HourlyDisplayItem(
+    val weather: HourlyWeather,
+    val isNow: Boolean,
+)
+
+/** 当前小时整点预报在左，实时观测紧随其后，再连接未来整点，和数据含义一一对应。 */
+internal fun hourlyDisplayItems(
+    current: CurrentWeather?,
+    hourly: List<HourlyWeather>,
+    nowMillis: Long,
+): List<HourlyDisplayItem> {
+    if (hourly.isEmpty()) {
+        return current?.let {
+            listOf(HourlyDisplayItem(currentAsHourly(it, null, nowMillis), isNow = true))
+        }.orEmpty()
+    }
+    val currentHourIndex = WeatherConsistency.currentHourIndex(hourly, nowMillis)
+    if (current == null || currentHourIndex < 0) {
+        return hourly.map { HourlyDisplayItem(it, isNow = false) }
+    }
+
+    val visibleHours = hourly.drop(currentHourIndex)
+    val anchor = visibleHours.first()
+    return buildList {
+        visibleHours.forEachIndexed { index, hour ->
+            add(HourlyDisplayItem(hour, isNow = false))
+            if (index == 0) {
+                add(HourlyDisplayItem(currentAsHourly(current, anchor, nowMillis), isNow = true))
             }
         }
+    }
+}
+
+private fun currentAsHourly(
+    current: CurrentWeather,
+    anchor: HourlyWeather?,
+    nowMillis: Long,
+): HourlyWeather = HourlyWeather(
+    timeMillis = nowMillis,
+    temperature = current.temperature,
+    condition = current.condition,
+    windSpeed = current.windSpeed,
+    precipProb = anchor?.precipProb,
+    aqi = anchor?.aqi,
+    profile = current.profile ?: anchor?.profile,
+    feelsLike = current.feelsLike,
+    windDirectionDeg = current.windDirectionDeg,
+    windGust = current.windGust,
+    precipMm = current.precipMm,
+    humidity = current.humidity,
+    pressure = current.pressure,
+    visibility = current.visibility,
+    dewPoint = current.dewPoint,
+    cloudCover = current.cloudCover,
+    uvIndex = current.uvIndex,
+)
+
+/**
+ * 逐时卡片的第一句话只使用已经进入统一模型的数据，避免把分钟降水与逐时概率混为一谈。
+ * 30% 是“可能有降水”的提示阈值；低于阈值时使用“暂无明显”而不是绝对的“无降水”。
+ */
+internal fun hourlyOutlookText(
+    current: CurrentWeather?,
+    hourly: List<HourlyWeather>,
+    nowMillis: Long,
+): String {
+    val rainingNow = current?.condition?.isPrecipitation == true ||
+        (current?.precipMm ?: 0.0) > 0.05
+    if (rainingNow) return "当前有降水，注意路面湿滑"
+
+    val horizon = hourly
+        .filter { it.timeMillis >= nowMillis - 60 * 60 * 1000L }
+        .take(12)
+    val rainSignal = horizon.any {
+        it.condition?.isPrecipitation == true ||
+            (it.precipMm ?: 0.0) > 0.05 ||
+            (it.precipProb ?: 0) >= 30
+    }
+    return if (rainSignal) {
+        "未来短时内可能有降水"
+    } else {
+        "未来短时内暂无明显降水"
     }
 }
 
@@ -1673,43 +1804,34 @@ internal fun tempDelta(todayHigh: Double?, yesterdayHigh: Double?, unit: String)
 @Composable
 private fun HourlyItem(
     h: HourlyWeather,
+    visualCondition: WeatherCondition?,
     prev: HourlyWeather?,
     next: HourlyWeather?,
     unit: String,
     minT: Double,
     maxT: Double,
     isNow: Boolean,
-    windUnit: String,
+    showPrecipProbability: Boolean,
     utcOffsetSeconds: Int?,
+    itemWidth: androidx.compose.ui.unit.Dp,
 ) {
-    val itemW = 54.dp
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(itemW),
+        modifier = Modifier.width(itemWidth),
     ) {
-        Text(
-            text = if (isNow) "现在" else Fmt.hour(h.timeMillis, utcOffsetSeconds),
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isNow) ZhishengMint else ZhishengTextTertiary,
-        )
-        Spacer(Modifier.height(6.dp))
-        // 条件缺失时 WeatherIcon 不绘制内容，但图标槽仍必须保留；否则该格后续的
-        // 温度与 Canvas 会整体上移，连续曲线在格子边界出现“飞线”。
-        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-            WeatherIcon(h.condition, Modifier.fillMaxSize())
-        }
-        Spacer(Modifier.height(2.dp))
-        // 温度读数放在曲线正上方，视线不用来回跳
+        // 小米式的阅读顺序：温度与曲线在上，天气、风力、时间依次向下；
+        // 颜色和 HUD 细节仍沿用枳生终端，而不是复制其蓝色卡片。
         Text(
             text = Fmt.temp(h.temperature, unit)?.let { "$it°" } ?: "--",
             style = MaterialTheme.typography.titleSmall,
             color = ZhishengText,
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(2.dp))
         // 连续曲线：左半段接上一格中点，右半段接下一格中点（颜色提前取值，Canvas lambda 非 composable）
         val curveMint = ZhishengMint
         val curveBg = ZhishengBg
-        Canvas(modifier = Modifier.fillMaxWidth().height(30.dp)) {
+        val curveText = ZhishengText
+        Canvas(modifier = Modifier.fillMaxWidth().height(34.dp)) {
             val range = (maxT - minT).coerceAtLeast(1.0).toFloat()
             val top = 4f
             val usable = size.height - top - 4f
@@ -1746,24 +1868,60 @@ private fun HourlyItem(
             }
             drawPath(line, curveMint.copy(alpha = 0.75f), style = Stroke(1.6f))
 
-            // 「现在」格用实心亮点强调，其余用小空心点
+            // 「现在」使用白色定位点，像仪表游标一样穿透黑色卡片；其余点保持克制。
             if (isNow) {
-                drawCircle(curveMint, 3.2f, pCur)
+                drawCircle(curveMint.copy(alpha = 0.45f), 5.2f, pCur)
+                drawCircle(curveText, 3.2f, pCur)
+                var dashY = pCur.y + 7f
+                while (dashY < size.height) {
+                    drawCircle(curveMint.copy(alpha = 0.45f), 0.9f, Offset(cx, dashY))
+                    dashY += 4f
+                }
             } else {
                 drawCircle(curveBg, 2.6f, pCur)
                 drawCircle(curveMint.copy(alpha = 0.85f), 2.6f, pCur, style = Stroke(1.2f))
             }
         }
-        Spacer(Modifier.height(3.dp))
+        // 天气图标槽始终保留；当前格从曲线向图标延伸一段微型虚线，强化“现在”的定位。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(34.dp)
+                .drawBehind {
+                    if (isNow) {
+                        val cx = size.width / 2f
+                        var y = 0f
+                        val stop = (size.height - 24.dp.toPx()) / 2f
+                        while (y < stop) {
+                            drawCircle(curveMint.copy(alpha = 0.38f), 0.9f, Offset(cx, y))
+                            y += 4f
+                        }
+                    }
+                },
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                WeatherIcon(visualCondition, Modifier.fillMaxSize())
+            }
+        }
+        if (showPrecipProbability) {
+            Text(
+                text = Fmt.probability(h.precipProb) ?: " ",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZhishengCyan,
+            )
+        }
+        Spacer(Modifier.height(2.dp))
         Text(
-            text = Fmt.probability(h.precipProb) ?: " ",
-            style = MaterialTheme.typography.labelSmall,
-            color = ZhishengCyan,
-        )
-        Text(
-            text = Fmt.windValue(h.windSpeed, windUnit) ?: " ",
+            text = Fmt.windForce(h.windSpeed) ?: "--",
             style = MaterialTheme.typography.labelSmall,
             color = ZhishengTextTertiary,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = if (isNow) "现在" else Fmt.hour(h.timeMillis, utcOffsetSeconds),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isNow) ZhishengMint else ZhishengTextTertiary,
         )
     }
 }
@@ -1832,67 +1990,45 @@ private fun PrecipCard(data: WeatherData, modifier: Modifier) {
                     else "$statusText，$peakLabel"
                 },
         ) {
-            Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
+            // 干燥时只有“结论 + 来源”有用：不再用 2H、CLEAR 和一条空时间轴
+            // 重复表达同一件事。出现降水时才展开峰值、曲线和三点时间刻度。
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(
                     Modifier
                         .width(3.dp)
                         .fillMaxHeight()
+                        .heightIn(min = if (dry) 38.dp else 44.dp)
                         .background(if (dry) ZhishengMint else ZhishengOrange),
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (dry) "CLEAR WINDOW" else "SHORT-TERM PRECIP",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ZhishengTextTertiary,
-                        letterSpacing = 1.2.sp,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
                         statusText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (dry) ZhishengMint else ZhishengOrange,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        if (dry) sourceLine else peakLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (dry) ZhishengTextTertiary else ZhishengCyan,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (!dry) {
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        peakLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ZhishengCyan,
-                        maxLines = 1,
-                    )
-                } else {
-                    Spacer(Modifier.width(14.dp))
-                    Column(
-                        modifier = Modifier.width(76.dp),
-                        horizontalAlignment = Alignment.End,
-                    ) {
-                        Text(
-                            "2H",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = ZhishengMint,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp,
-                        )
-                        Text(
-                            "CLEAR SIGNAL",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZhishengTextTertiary,
-                            maxLines = 1,
-                            letterSpacing = 0.5.sp,
-                        )
-                    }
-                }
             }
-            Spacer(Modifier.height(6.dp))
-            Canvas(Modifier.fillMaxWidth().height(if (dry) 10.dp else 28.dp)) {
+            if (!dry) {
+                Spacer(Modifier.height(6.dp))
+                Canvas(Modifier.fillMaxWidth().height(26.dp)) {
                 val baseline = size.height - 1.dp.toPx()
                 drawLine(barBorder, Offset(0f, baseline), Offset(size.width, baseline), 1.dp.toPx())
-                if (!dry && minutes.isNotEmpty() && chartCeiling > 0f) {
+                if (minutes.isNotEmpty() && chartCeiling > 0f) {
                     val horizonMs = horizonMinutes * Nowcast.MINUTE_MS
                     val bucketWidth = (size.width * intervalMinutes / horizonMinutes.toFloat())
                         .coerceIn(1.dp.toPx(), 18.dp.toPx())
@@ -1910,7 +2046,7 @@ private fun PrecipCard(data: WeatherData, modifier: Modifier) {
                             )
                         }
                     }
-                } else if (!dry && currentRate != null) {
+                } else if (currentRate != null) {
                     // 分钟接口没有有效曲线时，只画一个“现在”的实况柱，不把它延伸到未来。
                     val hgt = (size.height * 0.68f).coerceAtLeast(2.dp.toPx())
                     drawRect(
@@ -1919,31 +2055,511 @@ private fun PrecipCard(data: WeatherData, modifier: Modifier) {
                         size = androidx.compose.ui.geometry.Size(5.dp.toPx(), hgt),
                     )
                 }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                listOf("现在", "30", "60", "90", "120 分钟").forEachIndexed { index, label ->
-                    Text(
-                        label,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (index == 0) {
-                            if (dry) ZhishengMint else ZhishengOrange
-                        } else ZhishengTextTertiary,
-                        textAlign = when (index) {
-                            0 -> TextAlign.Start
-                            4 -> TextAlign.End
-                            else -> TextAlign.Center
-                        },
-                    )
                 }
+                val tickLabels = listOf("现在", "${horizonMinutes / 2}", "$horizonMinutes 分钟")
+                Row(Modifier.fillMaxWidth()) {
+                    tickLabels.forEachIndexed { index, label ->
+                        Text(
+                            label,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (index == 0) ZhishengOrange else ZhishengTextTertiary,
+                            textAlign = when (index) {
+                                0 -> TextAlign.Start
+                                tickLabels.lastIndex -> TextAlign.End
+                                else -> TextAlign.Center
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(sourceLine, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
             }
-            Spacer(Modifier.height(if (dry) 2.dp else 5.dp))
-            Text(sourceLine, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
         }
     }
 }
 
-// —— 逐日：全周归一化温度区间条 ——
+// —— 逐日：日间在上、双温轨迹居中、夜间在下 ——
+@Composable
+private fun DailySection(
+    daily: List<DailyWeather>,
+    unit: String,
+    windUnit: String,
+    utcOffsetSeconds: Int?,
+    layout: DailyForecastLayout,
+    modifier: Modifier,
+) {
+    if (layout == DailyForecastLayout.CLASSIC) {
+        DailyClassicForecast(daily, unit, windUnit, utcOffsetSeconds, modifier)
+        return
+    }
+    var expanded by rememberSaveable(layout.key) { mutableStateOf(false) }
+    val hybridLayout = layout == DailyForecastLayout.COLLAPSIBLE
+    val showCompactRows = hybridLayout && !expanded
+    val canSwitch = hybridLayout && daily.size > 3
+
+    HudCard(modifier = modifier.fillMaxWidth()) {
+        Column {
+            if (showCompactRows) {
+                DailyCompactPreview(
+                    daily = daily,
+                    unit = unit,
+                    utcOffsetSeconds = utcOffsetSeconds,
+                    onDayClick = { if (canSwitch) expanded = true },
+                )
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("日间", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    Spacer(Modifier.weight(1f))
+                    Box(Modifier.size(6.dp).background(ZhishengOrange, RectangleShape))
+                    Spacer(Modifier.width(4.dp))
+                    Text("高温", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.size(6.dp).background(ZhishengCyan, RectangleShape))
+                    Spacer(Modifier.width(4.dp))
+                    Text("低温", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    Spacer(Modifier.weight(1f))
+                    Text("夜间", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                }
+                HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.65f), thickness = 1.dp)
+                DailyForecastStrip(daily, unit, windUnit, utcOffsetSeconds)
+            }
+            if (canSwitch) {
+                HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.65f), thickness = 1.dp)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clickable(role = Role.Button) { expanded = !expanded }
+                        .semantics {
+                            contentDescription = if (expanded) "返回三天横排预报" else "展开上下式逐日预报"
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (expanded) "[ 返回三天横排 ]" else "[ 展开上下式 · ${daily.size} 天 ]",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ZhishengMint,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (expanded) "↑" else "↓",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ZhishengCyan,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyClassicForecast(
+    daily: List<DailyWeather>,
+    unit: String,
+    windUnit: String,
+    utcOffsetSeconds: Int?,
+    modifier: Modifier,
+) {
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    var expandedMillis by remember { mutableStateOf<Long?>(null) }
+    val canExpand = daily.size > 5
+
+    HudCard(modifier = modifier.fillMaxWidth()) {
+        Column {
+            DailyCompactPreview(
+                daily = daily,
+                unit = unit,
+                utcOffsetSeconds = utcOffsetSeconds,
+                visibleCount = if (showAll) daily.size else 5,
+                expandedMillis = expandedMillis,
+                windUnit = windUnit,
+                onDayClick = { day ->
+                    expandedMillis = if (expandedMillis == day.dateMillis) null else day.dateMillis
+                },
+            )
+            if (canExpand) {
+                HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.65f), thickness = 1.dp)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clickable(role = Role.Button) {
+                            showAll = !showAll
+                            if (!showAll && expandedMillis !in daily.take(5).map(DailyWeather::dateMillis)) {
+                                expandedMillis = null
+                            }
+                        }
+                        .semantics {
+                            contentDescription = if (showAll) "收起到前五天天气" else "展开后续逐日天气"
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (showAll) "[ 收起至前 5 天 ]" else "[ 展开后续 ${daily.size - 5} 天 ]",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ZhishengMint,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (showAll) "↑" else "↓",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ZhishengCyan,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyCompactPreview(
+    daily: List<DailyWeather>,
+    unit: String,
+    utcOffsetSeconds: Int?,
+    visibleCount: Int = 3,
+    expandedMillis: Long? = null,
+    windUnit: String = "kmh",
+    onDayClick: (DailyWeather) -> Unit,
+) {
+    val visible = daily.take(visibleCount)
+    val lows = daily.mapNotNull { conv(it.low, unit) }
+    val highs = daily.mapNotNull { conv(it.high, unit) }
+    val weekMin = lows.minOrNull() ?: 0.0
+    val weekMax = highs.maxOrNull() ?: 1.0
+
+    Column {
+        visible.forEachIndexed { index, d ->
+            val isToday = Fmt.dailyDayLabel(d.dateMillis, utcOffsetSeconds = utcOffsetSeconds) == "今天"
+            if (index > 0 && Fmt.isDifferentMonth(visible[index - 1].dateMillis, d.dateMillis, utcOffsetSeconds)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        Fmt.month(d.dateMillis, utcOffsetSeconds),
+                        modifier = Modifier.width(50.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZhishengCyan,
+                        textAlign = TextAlign.Center,
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = ZhishengCyan.copy(alpha = 0.35f),
+                        thickness = 1.dp,
+                    )
+                }
+            }
+            Column(
+                Modifier.fillMaxWidth().clickable(role = Role.Button) { onDayClick(d) },
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                Column(
+                    modifier = Modifier.width(50.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = Fmt.dailyDayLabel(d.dateMillis, utcOffsetSeconds = utcOffsetSeconds),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (isToday) ZhishengMint else ZhishengText,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = Fmt.dayOfMonth(d.dateMillis, utcOffsetSeconds),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isToday) ZhishengMint.copy(alpha = 0.8f) else ZhishengTextTertiary,
+                        maxLines = 1,
+                    )
+                }
+                WeatherIcon(d.condition, Modifier.size(22.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = Fmt.probability(d.precipProbability) ?: "  ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZhishengCyan,
+                    modifier = Modifier.width(30.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
+                )
+                Text(
+                    Fmt.temp(d.low, unit)?.let { "$it°" } ?: "--",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = ZhishengTextTertiary,
+                    modifier = Modifier.width(34.dp),
+                    textAlign = TextAlign.End,
+                )
+                BoxWithConstraints(
+                    Modifier.padding(horizontal = 8.dp).weight(1f).height(4.dp)
+                        .background(ZhishengTextTertiary.copy(alpha = 0.3f), RectangleShape),
+                ) {
+                    val (lo, _, w) = tempBarParams(d.low, d.high, weekMin, weekMax, unit)
+                    Box(
+                        Modifier
+                            .offset(x = maxWidth * lo)
+                            .width(maxWidth * w)
+                            .fillMaxHeight()
+                            .background(tempColor(d.low), RectangleShape),
+                    )
+                }
+                    Text(
+                        Fmt.temp(d.high, unit)?.let { "$it°" } ?: "--",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = ZhishengText,
+                        modifier = Modifier.width(34.dp),
+                        textAlign = TextAlign.End,
+                    )
+                }
+                if (expandedMillis == d.dateMillis) {
+                    DailyExpanded(d, windUnit)
+                }
+            }
+            if (index < visible.lastIndex) {
+                HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.5f), thickness = 1.dp)
+            }
+        }
+    }
+}
+
+private data class DailyDayNightVisual(
+    val dayLabel: String,
+    val nightLabel: String,
+    val dayCondition: WeatherCondition,
+    val nightCondition: WeatherCondition,
+)
+
+private fun dailyDayNightVisual(daily: DailyWeather): DailyDayNightVisual {
+    val fallback = daily.condition ?: WeatherCondition.UNKNOWN
+    val text = daily.weatherText?.trim().orEmpty().ifBlank { fallback.label }
+    val parts = text.split("转", limit = 2).map(String::trim)
+    val dayLabel = parts.firstOrNull().orEmpty().ifBlank { fallback.label }
+    val nightLabel = parts.getOrNull(1).orEmpty().ifBlank { dayLabel }
+    return DailyDayNightVisual(
+        dayLabel = dayLabel,
+        nightLabel = nightLabel,
+        dayCondition = forecastConditionForLabel(dayLabel, night = false, fallback),
+        nightCondition = forecastConditionForLabel(nightLabel, night = true, fallback),
+    )
+}
+
+private fun forecastConditionForLabel(
+    label: String,
+    night: Boolean,
+    fallback: WeatherCondition,
+): WeatherCondition = when {
+    "雷" in label -> WeatherCondition.THUNDERSTORM
+    "冰雹" in label -> WeatherCondition.HAIL
+    "雨夹雪" in label -> WeatherCondition.SLEET
+    "冻" in label && "雨" in label -> WeatherCondition.FREEZING_RAIN
+    "雪" in label -> WeatherCondition.SNOW
+    "小雨" in label || "毛毛雨" in label -> WeatherCondition.DRIZZLE
+    "雨" in label -> WeatherCondition.RAIN
+    "雾" in label -> WeatherCondition.FOG
+    "霾" in label -> WeatherCondition.HAZE
+    "沙" in label || "尘" in label -> WeatherCondition.SAND
+    "风" in label -> WeatherCondition.WIND
+    "阴" in label -> WeatherCondition.OVERCAST
+    "云" in label -> if (night) WeatherCondition.PARTLY_CLOUDY_NIGHT else WeatherCondition.PARTLY_CLOUDY
+    "晴" in label -> if (night) WeatherCondition.CLEAR_NIGHT else WeatherCondition.CLEAR
+    night && fallback == WeatherCondition.CLEAR -> WeatherCondition.CLEAR_NIGHT
+    night && fallback == WeatherCondition.PARTLY_CLOUDY -> WeatherCondition.PARTLY_CLOUDY_NIGHT
+    else -> fallback
+}
+
+@Composable
+private fun DailyForecastStrip(
+    days: List<DailyWeather>,
+    unit: String,
+    windUnit: String,
+    utcOffsetSeconds: Int?,
+) {
+    if (days.isEmpty()) return
+    val palette = LocalZhishengPalette.current
+    val scrollState = rememberScrollState()
+    val stripHeight = 326.dp
+    val chartTop = 118.dp
+    val chartBottom = 216.dp
+    val converted = days.flatMap { listOfNotNull(conv(it.low, unit), conv(it.high, unit)) }
+    val minimum = (converted.minOrNull() ?: 0.0) - 1.0
+    val maximum = (converted.maxOrNull() ?: minimum + 1.0) + 1.0
+    val span = (maximum - minimum).coerceAtLeast(1.0)
+    fun yOffset(value: Double): androidx.compose.ui.unit.Dp {
+        val ratio = ((value - minimum) / span).toFloat().coerceIn(0f, 1f)
+        return chartBottom - (chartBottom - chartTop) * ratio
+    }
+
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columnWidth = if (days.size <= 3) maxWidth / days.size else 88.dp
+        val totalWidth = columnWidth * days.size
+        Box(
+            Modifier.fillMaxWidth().height(stripHeight).horizontalScroll(scrollState),
+        ) {
+            Canvas(Modifier.width(totalWidth).height(stripHeight)) {
+                val columnPx = columnWidth.toPx()
+                val chartTopPx = chartTop.toPx()
+                val chartBottomPx = chartBottom.toPx()
+                fun x(index: Int): Float = columnPx * (index + 0.5f)
+                fun y(value: Double): Float = chartBottomPx -
+                    ((value - minimum) / span).toFloat() * (chartBottomPx - chartTopPx)
+
+                val todayIndex = days.indexOfFirst {
+                    Fmt.dailyDayLabel(it.dateMillis, utcOffsetSeconds = utcOffsetSeconds) == "今天"
+                }
+                if (todayIndex >= 0) {
+                    drawRect(
+                        palette.mint.copy(alpha = 0.055f),
+                        topLeft = Offset(columnPx * todayIndex, 0f),
+                        size = Size(columnPx, size.height),
+                    )
+                }
+                repeat(days.size + 1) { index ->
+                    drawLine(
+                        palette.cardBorder.copy(alpha = 0.7f),
+                        Offset(columnPx * index, 0f),
+                        Offset(columnPx * index, size.height),
+                        1f,
+                    )
+                }
+                repeat(3) { guide ->
+                    val guideY = chartTopPx + guide * (chartBottomPx - chartTopPx) / 2f
+                    drawLine(
+                        palette.cardBorder.copy(alpha = 0.85f),
+                        Offset(0f, guideY),
+                        Offset(size.width, guideY),
+                        1f,
+                    )
+                }
+
+                fun drawSeries(selector: (DailyWeather) -> Double?, color: Color) {
+                    val path = Path()
+                    var drawing = false
+                    days.forEachIndexed { index, day ->
+                        val value = selector(day)?.let { conv(it, unit) }
+                        if (value == null) {
+                            drawing = false
+                        } else if (!drawing) {
+                            path.moveTo(x(index), y(value))
+                            drawing = true
+                        } else {
+                            path.lineTo(x(index), y(value))
+                        }
+                    }
+                    drawPath(
+                        path,
+                        color.copy(alpha = 0.82f),
+                        style = Stroke(width = 2.6f, cap = StrokeCap.Round),
+                    )
+                    days.forEachIndexed { index, day ->
+                        selector(day)?.let { raw ->
+                            conv(raw, unit)?.let { value ->
+                                drawCircle(color, radius = 4.1f, center = Offset(x(index), y(value)))
+                            }
+                        }
+                    }
+                }
+                drawSeries(DailyWeather::high, palette.orange)
+                drawSeries(DailyWeather::low, palette.cyan)
+            }
+
+            Row(Modifier.width(totalWidth).height(stripHeight)) {
+                days.forEach { d ->
+                    val visual = dailyDayNightVisual(d)
+                    val isToday = Fmt.dailyDayLabel(d.dateMillis, utcOffsetSeconds = utcOffsetSeconds) == "今天"
+                    Box(Modifier.width(columnWidth).height(stripHeight)) {
+                        Text(
+                            Fmt.dailyDayLabel(d.dateMillis, utcOffsetSeconds = utcOffsetSeconds),
+                            modifier = Modifier.align(Alignment.TopCenter).offset(y = 9.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (isToday) ZhishengMint else ZhishengTextSecondary,
+                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                        )
+                        Text(
+                            Fmt.dayOfMonth(d.dateMillis, utcOffsetSeconds),
+                            modifier = Modifier.align(Alignment.TopCenter).offset(y = 31.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZhishengTextTertiary,
+                            maxLines = 1,
+                        )
+                        WeatherIcon(
+                            visual.dayCondition,
+                            Modifier.align(Alignment.TopCenter).offset(y = 52.dp).size(29.dp),
+                        )
+                        Text(
+                            visual.dayLabel,
+                            modifier = Modifier.align(Alignment.TopCenter).offset(y = 84.dp).padding(horizontal = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZhishengTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        d.high?.let { raw ->
+                            conv(raw, unit)?.let { value ->
+                                Text(
+                                    "${Fmt.temp(raw, unit)}°",
+                                    modifier = Modifier.align(Alignment.TopCenter).offset(y = yOffset(value) - 20.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = ZhishengOrange,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        d.low?.let { raw ->
+                            conv(raw, unit)?.let { value ->
+                                Text(
+                                    "${Fmt.temp(raw, unit)}°",
+                                    modifier = Modifier.align(Alignment.TopCenter).offset(y = yOffset(value) + 6.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = ZhishengCyan,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        WeatherIcon(
+                            visual.nightCondition,
+                            Modifier.align(Alignment.TopCenter).offset(y = 237.dp).size(27.dp),
+                        )
+                        Text(
+                            visual.nightLabel,
+                            modifier = Modifier.align(Alignment.TopCenter).offset(y = 266.dp).padding(horizontal = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZhishengTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            Fmt.probability(d.precipProbability)?.let { "降水 $it" } ?: "降水 --",
+                            modifier = Modifier.align(Alignment.TopCenter).offset(y = 286.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (d.precipProbability != null) ZhishengCyan else ZhishengTextTertiary,
+                            maxLines = 1,
+                        )
+                        Text(
+                            d.windSpeed?.let { "风 ${Fmt.wind(it, windUnit)}" } ?: "风 --",
+                            modifier = Modifier.align(Alignment.TopCenter).offset(y = 305.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZhishengTextTertiary,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// —— 逐日：首页只承担快速扫读，完整 15 日信息进入独立页面 ——
 @Composable
 private fun DailySection(
     daily: List<DailyWeather>,
@@ -1951,19 +2567,23 @@ private fun DailySection(
     windUnit: String,
     utcOffsetSeconds: Int?,
     modifier: Modifier,
+    onView15Days: () -> Unit,
 ) {
     val lows = daily.mapNotNull { conv(it.low, unit) }
     val highs = daily.mapNotNull { conv(it.high, unit) }
     val weekMin = lows.minOrNull() ?: 0.0
     val weekMax = highs.maxOrNull() ?: 1.0
     var expandedMillis by remember { mutableStateOf<Long?>(null) }
+    val visibleDays = daily.take(5)
+    val detailDayCount = daily.take(15).size
+    val detailLabel = if (detailDayCount >= 15) "查看近15日天气" else "查看未来${detailDayCount}日天气"
 
     HudCard(modifier = modifier.fillMaxWidth()) {
         Column {
-            daily.forEachIndexed { index, d ->
+            visibleDays.forEachIndexed { index, d ->
                 val expanded = expandedMillis == d.dateMillis
                 val isToday = Fmt.dailyDayLabel(d.dateMillis, utcOffsetSeconds = utcOffsetSeconds) == "今天"
-                if (index > 0 && Fmt.isDifferentMonth(daily[index - 1].dateMillis, d.dateMillis, utcOffsetSeconds)) {
+                if (index > 0 && Fmt.isDifferentMonth(visibleDays[index - 1].dateMillis, d.dateMillis, utcOffsetSeconds)) {
                     Row(
                         Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2011,12 +2631,14 @@ private fun DailySection(
                         WeatherIcon(d.condition, Modifier.size(22.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = Fmt.probability(d.precipProbability) ?: "  ",
+                            text = d.weatherText?.trim()?.takeIf(String::isNotBlank)
+                                ?: d.condition?.label
+                                ?: "未知",
                             style = MaterialTheme.typography.labelSmall,
-                            color = ZhishengCyan,
-                            modifier = Modifier.width(30.dp),
+                            color = ZhishengTextSecondary,
+                            modifier = Modifier.width(58.dp),
                             maxLines = 1,
-                            overflow = TextOverflow.Clip,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             Fmt.temp(d.low, unit)?.let { "$it°" } ?: "--",
@@ -2053,9 +2675,27 @@ private fun DailySection(
                         DailyExpanded(d, windUnit)
                     }
                 }
-                if (index < daily.size - 1) {
+                if (index < visibleDays.lastIndex) {
                     HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.5f), thickness = 1.dp)
                 }
+            }
+            HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.72f), thickness = 1.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClick = onView15Days)
+                    .semantics { contentDescription = detailLabel }
+                    .padding(horizontal = 16.dp, vertical = 7.dp)
+                    .height(38.dp)
+                    .border(1.dp, ZhishengCardBorder.copy(alpha = 0.78f), RectangleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    detailLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ZhishengText,
+                    fontWeight = FontWeight.Medium,
+                )
             }
         }
     }
@@ -2080,6 +2720,14 @@ private fun DailyExpanded(d: DailyWeather, windUnit: String) {
             d.sunset?.let {
                 Text("日落 $it", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange)
             }
+        }
+        Fmt.probability(d.precipProbability)?.let { probability ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "降水概率 $probability",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZhishengCyan,
+            )
         }
         d.precipMm?.takeIf { it > 0.0 }?.let { mm ->
             Spacer(Modifier.height(4.dp))
@@ -2140,7 +2788,7 @@ private fun TelemetryGrid(
         TelemetryMetric.DEW_POINT to Triple("露点", "DEW", cur.dewPoint?.let { "${Fmt.temp(it, unit)}°" }),
         TelemetryMetric.CLOUD_COVER to Triple("云量", "CLOUD", cur.cloudCover?.let { "${it.roundToInt()}%" }),
         TelemetryMetric.WIND_GUST to Triple("阵风", "GUST", Fmt.wind(cur.windGust, prefs.windUnit)),
-        TelemetryMetric.PRECIPITATION to Triple("1时降水", "PRECIP", cur.precipMm?.let { String.format(Locale.US, "%.1f mm/h", it) }),
+        TelemetryMetric.PRECIPITATION to Triple("当前雨强", "PRECIP", cur.precipMm?.let { String.format(Locale.US, "%.1f mm/h", it) }),
     ).filter { (metric, _) -> metric in prefs.telemetryMetrics }
         .mapNotNull { (_, item) ->
             val (cn, en, value) = item
@@ -2270,73 +2918,43 @@ private fun TeleCell(
 private fun WindCompass(degrees: Double) {
     val ring = ZhishengCardBorder
     val north = ZhishengOrange
-    val vector = ZhishengCyan
-    val surface = ZhishengSurface
-    val shadow = ZhishengBg.copy(alpha = 0.92f)
-    val rimHighlight = ZhishengTextTertiary.copy(alpha = 0.65f)
-    val needleHighlight = ZhishengText.copy(alpha = 0.55f)
-    val hubHighlight = ZhishengText.copy(alpha = 0.7f)
+    val needle = ZhishengCyan
+    val hubFill = ZhishengSurface
     Box(
         Modifier
-            .size(38.dp)
-            .semantics { contentDescription = "风向 ${degrees.roundToInt()} 度" },
+            // 与 titleMedium 行高对齐，湿度/风向这一行才不会比气压紫外线更高。
+            .size(22.dp)
+            .semantics { contentDescription = uiText("风向 ${degrees.roundToInt()} 度") },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val ovalLeft = 2.dp.toPx()
-            val ovalTop = 10.dp.toPx()
-            val ovalSize = androidx.compose.ui.geometry.Size(size.width - 4.dp.toPx(), 22.dp.toPx())
-            // 扁椭圆底座 + 上缘高光 / 下缘阴影，制造悬浮罗盘的纵深。
-            drawOval(shadow, Offset(ovalLeft, ovalTop + 2.dp.toPx()), ovalSize)
-            drawOval(surface, Offset(ovalLeft, ovalTop), ovalSize)
-            drawOval(ring, Offset(ovalLeft, ovalTop), ovalSize, style = Stroke(1.2.dp.toPx()))
-            drawArc(
-                color = rimHighlight,
-                startAngle = 195f,
-                sweepAngle = 150f,
-                useCenter = false,
-                topLeft = Offset(ovalLeft + 1.dp.toPx(), ovalTop + 1.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(ovalSize.width - 2.dp.toPx(), ovalSize.height - 2.dp.toPx()),
-                style = Stroke(0.8.dp.toPx()),
-            )
-            val c = Offset(size.width / 2f, ovalTop + ovalSize.height / 2f)
-            drawLine(north, Offset(c.x, ovalTop - 2.dp.toPx()), Offset(c.x, ovalTop + 3.dp.toPx()), 1.8.dp.toPx())
-            drawCircle(ring, 3.8.dp.toPx(), c, style = Stroke(1.dp.toPx()))
+            val c = center
+            val r = size.minDimension / 2f - 0.8.dp.toPx()
+            val tick = 2.2.dp.toPx()
+            drawCircle(ring, r, c, style = Stroke(1.dp.toPx()))
+            drawLine(north, Offset(c.x, c.y - r), Offset(c.x, c.y - r + tick), 1.6.dp.toPx(), cap = StrokeCap.Round)
+            val pip = 1.5.dp.toPx()
+            drawLine(ring, Offset(c.x + r, c.y), Offset(c.x + r - pip, c.y), 1.dp.toPx())
+            drawLine(ring, Offset(c.x, c.y + r), Offset(c.x, c.y + r - pip), 1.dp.toPx())
+            drawLine(ring, Offset(c.x - r, c.y), Offset(c.x - r + pip, c.y), 1.dp.toPx())
         }
         // 指针与文字共用同一“来向”角度：北=0°向上、东=90°向右，不再额外翻转 180°。
         Canvas(Modifier.fillMaxSize().rotate(degrees.toFloat())) {
-            val c = Offset(size.width / 2f, 21.dp.toPx())
-            val headY = 3.dp.toPx()
-            val tailY = 30.dp.toPx()
-            val depth = Offset(1.4.dp.toPx(), 1.6.dp.toPx())
-            drawLine(shadow, Offset(c.x, tailY) + depth, Offset(c.x, headY + 6.dp.toPx()) + depth, 4.4.dp.toPx())
-            drawLine(vector.copy(alpha = 0.45f), Offset(c.x, tailY), Offset(c.x, headY + 6.dp.toPx()), 4.dp.toPx())
-            drawLine(vector, Offset(c.x - 0.7.dp.toPx(), tailY), Offset(c.x - 0.7.dp.toPx(), headY + 6.dp.toPx()), 1.7.dp.toPx())
-            val headShadow = Path().apply {
-                moveTo(c.x + depth.x, headY + depth.y)
-                lineTo(c.x - 5.dp.toPx() + depth.x, headY + 8.dp.toPx() + depth.y)
-                lineTo(c.x + 5.dp.toPx() + depth.x, headY + 8.dp.toPx() + depth.y)
+            val c = center
+            val dart = Path().apply {
+                moveTo(c.x, 2.2.dp.toPx())
+                lineTo(c.x - 2.6.dp.toPx(), 8.4.dp.toPx())
+                lineTo(c.x - 0.6.dp.toPx(), 8.4.dp.toPx())
+                lineTo(c.x - 0.6.dp.toPx(), size.height - 3.4.dp.toPx())
+                lineTo(c.x, size.height - 2.2.dp.toPx())
+                lineTo(c.x + 0.6.dp.toPx(), size.height - 3.4.dp.toPx())
+                lineTo(c.x + 0.6.dp.toPx(), 8.4.dp.toPx())
+                lineTo(c.x + 2.6.dp.toPx(), 8.4.dp.toPx())
                 close()
             }
-            drawPath(headShadow, shadow)
-            val head = Path().apply {
-                moveTo(c.x, headY)
-                lineTo(c.x - 5.dp.toPx(), headY + 8.dp.toPx())
-                lineTo(c.x + 5.dp.toPx(), headY + 8.dp.toPx())
-                close()
-            }
-            drawPath(head, vector)
-            drawLine(
-                needleHighlight,
-                Offset(c.x - 1.5.dp.toPx(), headY + 2.dp.toPx()),
-                Offset(c.x - 3.6.dp.toPx(), headY + 6.5.dp.toPx()),
-                0.8.dp.toPx(),
-            )
-            drawCircle(shadow, 3.7.dp.toPx(), Offset(c.x, tailY) + depth)
-            drawCircle(north, 3.2.dp.toPx(), Offset(c.x, tailY))
-            drawCircle(shadow, 3.8.dp.toPx(), c)
-            drawCircle(vector, 3.2.dp.toPx(), c)
-            drawCircle(hubHighlight, 1.dp.toPx(), Offset(c.x - 0.8.dp.toPx(), c.y - 0.8.dp.toPx()))
+            drawPath(dart, needle)
+            drawCircle(hubFill, 1.7.dp.toPx(), c)
+            drawCircle(needle, 1.7.dp.toPx(), c, style = Stroke(0.9.dp.toPx()))
         }
     }
 }
@@ -2386,7 +3004,12 @@ private fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(aqi.level ?: "空气质量", style = MaterialTheme.typography.titleMedium, color = aqiColor(aqi.value), fontWeight = FontWeight.Bold)
-                    Text("AQI // AIR QUALITY INDEX", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary, letterSpacing = 1.sp)
+                    Text(
+                        "AQI${aqi.standard?.let { " · $it" }.orEmpty()} // AIR QUALITY INDEX",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZhishengTextTertiary,
+                        letterSpacing = 0.7.sp,
+                    )
                 }
                 Spacer(Modifier.weight(1f))
                 aqi.primary?.let {
@@ -2405,15 +3028,15 @@ private fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PollutantChip("PM2.5", aqi.pm25, Modifier.weight(1f))
-                PollutantChip("PM10", aqi.pm10, Modifier.weight(1f))
-                PollutantChip("O3", aqi.o3, Modifier.weight(1f))
+                PollutantChip("PM2.5", aqi.pm25, aqi.pollutantUnits["pm2p5"], Modifier.weight(1f))
+                PollutantChip("PM10", aqi.pm10, aqi.pollutantUnits["pm10"], Modifier.weight(1f))
+                PollutantChip("O3", aqi.o3, aqi.pollutantUnits["o3"], Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PollutantChip("NO2", aqi.no2, Modifier.weight(1f))
-                PollutantChip("SO2", aqi.so2, Modifier.weight(1f))
-                PollutantChip("CO", aqi.co, Modifier.weight(1f))
+                PollutantChip("NO2", aqi.no2, aqi.pollutantUnits["no2"], Modifier.weight(1f))
+                PollutantChip("SO2", aqi.so2, aqi.pollutantUnits["so2"], Modifier.weight(1f))
+                PollutantChip("CO", aqi.co, aqi.pollutantUnits["co"], Modifier.weight(1f))
             }
             // 健康建议（v0.0.4：小米 suggest 接入，其余源无此行）
             aqi.suggest?.takeIf { it.isNotBlank() }?.let {
@@ -2425,17 +3048,21 @@ private fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
 }
 
 @Composable
-private fun PollutantChip(name: String, value: String?, modifier: Modifier = Modifier) {
-    Row(
+private fun PollutantChip(name: String, value: String?, unit: String?, modifier: Modifier = Modifier) {
+    Column(
         modifier
             .clip(RectangleShape)
             .background(ZhishengCard)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 9.dp, vertical = 7.dp),
     ) {
         Text(name, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-        Spacer(Modifier.weight(1f))
-        Text(value ?: "--", style = MaterialTheme.typography.titleSmall, color = ZhishengText)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(value ?: "--", style = MaterialTheme.typography.titleSmall, color = ZhishengText, maxLines = 1)
+            if (value != null && !unit.isNullOrBlank()) {
+                Spacer(Modifier.width(3.dp))
+                Text(unit, fontSize = 8.sp, color = ZhishengTextTertiary, maxLines = 1)
+            }
+        }
     }
 }
 
@@ -2461,6 +3088,27 @@ internal data class LifeIndexUi(
 internal fun clampCityDeckPosition(position: Float, cityCount: Int): Float {
     if (cityCount <= 0) return 0f
     return position.coerceIn(0f, (cityCount - 1).toFloat())
+}
+
+private fun GraphicsLayerScope.cityCardLayer(
+    x: Float,
+    rotation: Float,
+    scaleXValue: Float,
+    scaleYValue: Float,
+    alphaValue: Float,
+    tiltY: Float,
+    shape: Shape,
+) {
+    translationX = x
+    rotationZ = rotation
+    scaleX = scaleXValue
+    scaleY = scaleYValue
+    alpha = alphaValue
+    cameraDistance = 18f * density
+    rotationY = tiltY
+    this.shape = shape
+    clip = true
+    compositingStrategy = CompositingStrategy.Offscreen
 }
 
 internal fun lifeIndexItems(data: WeatherData, selected: Set<LifeIndexMetric>): List<LifeIndexUi> = buildList {
@@ -2590,10 +3238,26 @@ private fun YesterdayCard(y: YesterdayInfo, today: DailyWeather?, unit: String, 
 
 // —— 台风 ——
 @Composable
-private fun TyphoonCard(typhoons: List<TyphoonInfo>, modifier: Modifier) {
-    HudCard(modifier = modifier.fillMaxWidth()) {
+private fun TyphoonCard(typhoons: List<TyphoonInfo>, modifier: Modifier, onClick: () -> Unit) {
+    HudCard(
+        modifier = modifier.fillMaxWidth()
+            .clickable(role = Role.Button, onClickLabel = "查看台风路径", onClick = onClick),
+    ) {
         Column {
-            typhoons.forEachIndexed { i, t ->
+            if (typhoons.isEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("西北太平洋台风路径", style = MaterialTheme.typography.titleSmall, color = ZhishengText)
+                        Text(
+                            "实况节点 · 强度变化 · 多机构预报",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZhishengTextTertiary,
+                        )
+                    }
+                    Text("查看  →", style = MaterialTheme.typography.labelMedium, color = ZhishengMint, fontWeight = FontWeight.Bold)
+                }
+            }
+            typhoons.forEach { t ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                     Text(
                         t.type ?: "TY",
@@ -2612,6 +3276,15 @@ private fun TyphoonCard(typhoons: List<TyphoonInfo>, modifier: Modifier) {
                         Text("${it.roundToInt()}m/s", style = MaterialTheme.typography.labelMedium, color = ZhishengCyan)
                     }
                 }
+            }
+            if (typhoons.isNotEmpty()) {
+                Text(
+                    "查看实时路径与官方预报  →",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZhishengMint,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.End).padding(top = 5.dp),
+                )
             }
         }
     }
@@ -2802,6 +3475,7 @@ private fun ErrorState(message: String, onSearchClick: () -> Unit) {
 @Composable
 private fun CityDrawer(
     uiState: HomeUiState,
+    onBack: () -> Unit,
     onSelect: (String) -> Unit,
     onRemove: (String) -> Unit,
     onAddCity: () -> Unit,
@@ -2814,54 +3488,84 @@ private fun CityDrawer(
             .navigationBarsPadding()
             .padding(horizontal = 16.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = uiText("返回"),
+                    tint = ZhishengText,
+                )
+            }
             Text("00//", style = MaterialTheme.typography.titleSmall, color = ZhishengOrange, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(6.dp))
             Text("城市", style = MaterialTheme.typography.titleMedium, color = ZhishengText, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
             Text("CITY LIST", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary, letterSpacing = 1.5.sp)
         }
-        if (uiState.cities.isEmpty()) {
-            Text("还没有保存的城市", style = MaterialTheme.typography.bodySmall, color = ZhishengTextTertiary)
-        }
-        uiState.cities.forEachIndexed { i, city ->
-            val selected = city.locationKey == uiState.selectedCity?.locationKey
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RectangleShape)
-                    .background(if (selected) ZhishengCard else Color.Transparent)
-                    .clickable { onSelect(city.locationKey) }
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "%02d".format(i + 1),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (selected) ZhishengOrange else ZhishengTextTertiary,
-                )
-                Spacer(Modifier.width(10.dp))
-                if (selected) {
-                    Box(Modifier.size(width = 3.dp, height = 14.dp).background(ZhishengMint))
-                    Spacer(Modifier.width(8.dp))
-                }
-                // 城市名 + 归属地：同名城市（金川区@金昌 vs 金川县@阿坝）必须可区分（v0.0.1）
-                Column(Modifier.weight(1f)) {
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 4.dp),
+        ) {
+            if (uiState.cities.isEmpty()) {
+                item {
                     Text(
-                        city.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (selected) ZhishengMint else ZhishengText,
+                        "还没有保存的城市",
+                        modifier = Modifier.padding(vertical = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ZhishengTextTertiary,
                     )
-                    if (city.contextLabel.isNotBlank()) {
+                }
+            }
+            itemsIndexed(
+                items = uiState.cities,
+                key = { _, city -> city.locationKey },
+            ) { i, city ->
+                val selected = city.locationKey == uiState.selectedCity?.locationKey
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RectangleShape)
+                        .background(if (selected) ZhishengCard else Color.Transparent)
+                        .clickable { onSelect(city.locationKey) }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "%02d".format(i + 1),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) ZhishengOrange else ZhishengTextTertiary,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    if (selected) {
+                        Box(Modifier.size(width = 3.dp, height = 14.dp).background(ZhishengMint))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    // 城市名 + 归属地：同名城市（金川区@金昌 vs 金川县@阿坝）必须可区分（v0.0.1）
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            city.contextLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZhishengTextTertiary,
+                            city.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (selected) ZhishengMint else ZhishengText,
+                        )
+                        if (city.contextLabel.isNotBlank()) {
+                            Text(
+                                city.contextLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZhishengTextTertiary,
+                            )
+                        }
+                    }
+                    IconButton(onClick = { onRemove(city.locationKey) }, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = uiText("删除${city.displayName}"),
+                            tint = ZhishengTextTertiary,
+                            modifier = Modifier.size(16.dp),
                         )
                     }
-                }
-                IconButton(onClick = { onRemove(city.locationKey) }, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "删除${city.displayName}", tint = ZhishengTextTertiary, modifier = Modifier.size(16.dp))
                 }
             }
         }

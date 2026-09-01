@@ -15,16 +15,18 @@ import androidx.compose.animation.togetherWith
 
 // 主屏空间位置：搜索在左（城市抽屉/添加城市），设置在右上角，实验室在设置更里一层。
 internal enum class AppScreen {
-    HOME, SEARCH, HISTORY, RADAR, SETTINGS, ATMOSPHERE_LAB
+    HOME, SEARCH, DAILY_FORECAST, HISTORY, RADAR, TYPHOON, SETTINGS, ATMOSPHERE_LAB
 }
 
 internal fun AppScreen.navSlot(): Int = when (this) {
     AppScreen.SEARCH -> 0
     AppScreen.HOME -> 1
-    AppScreen.HISTORY -> 2
-    AppScreen.RADAR -> 3
-    AppScreen.SETTINGS -> 4
-    AppScreen.ATMOSPHERE_LAB -> 5
+    AppScreen.DAILY_FORECAST -> 2
+    AppScreen.HISTORY -> 3
+    AppScreen.RADAR -> 4
+    AppScreen.TYPHOON -> 5
+    AppScreen.SETTINGS -> 6
+    AppScreen.ATMOSPHERE_LAB -> 7
 }
 
 internal fun overlayEnter(screen: AppScreen): EnterTransition {

@@ -58,8 +58,16 @@ data class QwHour(
     val forecastTime: String? = null,
     val condition: QwCondition? = null,
     val temperature: QwVal? = null,
+    val feelsLike: QwVal? = null,
+    val humidity: Double? = null,
     val wind: QwWind? = null,
+    val windGust: QwVal? = null,
     val precipitation: QwPrecip? = null,
+    val pressure: QwVal? = null,
+    val visibility: QwVal? = null,
+    val dewPoint: QwVal? = null,
+    val cloudCover: Double? = null,
+    val uvIndex: Int? = null,
 )
 
 @Serializable
@@ -78,7 +86,10 @@ data class QwAstro(
 data class QwDayPeriod(
     val condition: QwCondition? = null,
     val wind: QwWind? = null,
+    val windGustMax: QwVal? = null,
     val precipitation: QwPrecip? = null,
+    val humidity: Double? = null,
+    val cloudCover: Double? = null,
 )
 
 @Serializable
@@ -87,6 +98,8 @@ data class QwDay(
     val astro: QwAstro? = null,
     val temperatureMax: QwVal? = null,
     val temperatureMin: QwVal? = null,
+    val temperatureAvg: QwVal? = null,
+    val uvIndexMax: Int? = null,
     val daytime: QwDayPeriod? = null,
     val nighttime: QwDayPeriod? = null,
 )

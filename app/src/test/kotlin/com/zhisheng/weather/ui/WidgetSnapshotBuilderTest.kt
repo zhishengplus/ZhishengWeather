@@ -11,6 +11,15 @@ import org.junit.Test
 class WidgetSnapshotBuilderTest {
 
     @Test
+    fun pendingSnapshotKeepsOnlyTheNewCityIdentity() {
+        val pending = com.zhisheng.weather.data.WidgetSnapshot(city = "上海·浦东", updateMillis = 0L)
+        assertEquals("上海·浦东", pending.city)
+        assertEquals(null, pending.temp)
+        assertTrue(pending.hours.isEmpty())
+        assertTrue(pending.days.isEmpty())
+    }
+
+    @Test
     fun lifeTipsPreferUsefulRealValuesAndStayCompact() {
         val data = WeatherData(
             current = CurrentWeather(uvIndex = 6),

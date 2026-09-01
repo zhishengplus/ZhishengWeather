@@ -12,6 +12,7 @@ import com.zhisheng.weather.data.SettingsRepository
 import com.zhisheng.weather.data.SourcePref
 import com.zhisheng.weather.data.TelemetryMetric
 import com.zhisheng.weather.data.WeatherCache
+import com.zhisheng.weather.data.isUsableOfflineAt
 import com.zhisheng.weather.data.WeatherRepository
 import com.zhisheng.weather.model.City
 import com.zhisheng.weather.model.WeatherConsistency
@@ -244,8 +245,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 }
                 if (result.current == null) {
                     // 失败兜底：只复用同一数据源的缓存。换源失败时不能把上一源的卡片当成当前结果。
+                    val cacheNow = System.currentTimeMillis()
                     val cached = WeatherCache.load(getApplication(), target.locationKey)
                         ?.takeIf { requestedSource.matches(it.data.dataSource) }
+                        ?.takeIf { it.isUsableOfflineAt(cacheNow) }
                     if (cached != null) {
                         result = WeatherConsistency.align(cached.data)
                         _staleAge.value = System.currentTimeMillis() - cached.savedAtMillis
@@ -277,20 +280,40 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             _weather.value = null
             _weatherCityKey.value = null
         }
-        viewModelScope.launch { CityRepository.selectCity(locationKey) }
+        viewModelScope.launch {
+            cities.value.firstOrNull { it.locationKey == locationKey }?.let {
+                WidgetSnapshotBuilder.markCityPending(getApplication(), it)
+            }
+            CityRepository.selectCity(locationKey)
+        }
     }
 
     fun addCityAndSelect(city: City) {
         _locateMessage.value = null
         viewModelScope.launch {
+            // 先把桌面组件切到新城市的刷新态，再开始拉取；否则这个异步写入可能
+            // 晚于 refresh 成功回写，把刚拿到的新天气重新覆盖为空快照。
+            WidgetSnapshotBuilder.markCityPending(getApplication(), city)
             CityRepository.addCity(city)
+            lastFetchedKey = city.locationKey
+            refresh(city)
         }
-        lastFetchedKey = city.locationKey
-        refresh(city)
     }
 
     fun removeCity(locationKey: String) {
-        viewModelScope.launch { CityRepository.removeCity(locationKey) }
+        viewModelScope.launch {
+            if (selectedCity.value?.locationKey == locationKey) {
+                val replacement = cities.value.firstOrNull { it.locationKey != locationKey }
+                if (replacement != null) {
+                    WidgetSnapshotBuilder.markCityPending(getApplication(), replacement)
+                } else {
+                    // 最后一座城市被删掉后，桌面组件也必须同步清空；继续显示旧城市
+                    // 会让用户误以为那仍是当前选择的数据。
+                    WidgetSnapshotBuilder.markNoCity(getApplication())
+                }
+            }
+            CityRepository.removeCity(locationKey)
+        }
     }
 
     // —— 定位（v0.0.2）——
@@ -336,6 +359,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         lastFetchedKey = r.city.locationKey
                         // 定位结果需要覆盖同城旧坐标与街道；手动搜索城市仍保持原有去重行为。
                         CityRepository.addOrUpdateLocatedCity(r.city)
+                        WidgetSnapshotBuilder.markCityPending(getApplication(), r.city)
                         refresh(r.city)
                     }
                     is LocationSource.Result.Failed -> {

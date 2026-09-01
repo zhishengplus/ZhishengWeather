@@ -1,6 +1,10 @@
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
+/* Hallmark · component: landscape standby settings entry · genre: atmospheric
+ * theme: existing Zhisheng terminal · states: default · focus · active · enabled · contrast: pass
+ */
 package com.zhisheng.weather.ui
 
-import android.provider.Settings
+import android.provider.Settings as AndroidSettings
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -27,8 +31,11 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,11 +48,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zhisheng.weather.BuildConfig
+import com.zhisheng.weather.data.LandscapeStandbyStyle
+import com.zhisheng.weather.i18n.uiText
+import com.zhisheng.weather.model.phaseAwareCondition
 import com.zhisheng.weather.ui.components.WeatherAmbience
 import com.zhisheng.weather.ui.components.WeatherIcon
 import com.zhisheng.weather.ui.components.isNightAt
@@ -70,7 +82,28 @@ import kotlinx.coroutines.delay
 @Composable
 fun LandscapeStandbyScreen(
     uiState: HomeUiState,
+    style: LandscapeStandbyStyle,
     onRefresh: () -> Unit,
+    onExitLandscape: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    when (style) {
+        LandscapeStandbyStyle.CLASSIC -> ClassicLandscapeStandbyScreen(
+            uiState, onRefresh, onExitLandscape, onSettings,
+        )
+        LandscapeStandbyStyle.WEATHER_CORE -> LandscapeWeatherCoreScreen(
+            uiState, onRefresh, onExitLandscape, onSettings,
+        )
+    }
+}
+
+/** 已发布并获得用户认可的经典横屏终端；作为独立实现长期保留。 */
+@Composable
+private fun ClassicLandscapeStandbyScreen(
+    uiState: HomeUiState,
+    onRefresh: () -> Unit,
+    onExitLandscape: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     val data = uiState.weather
     val current = data?.current
@@ -123,7 +156,7 @@ fun LandscapeStandbyScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "ZHISHENG AMBIENT TERMINAL / 0.1.3",
+                                "ZHISHENG AMBIENT TERMINAL / ${BuildConfig.VERSION_NAME}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = ZhishengTextTertiary,
                                 letterSpacing = 2.sp,
@@ -180,30 +213,55 @@ fun LandscapeStandbyScreen(
                         .padding(18.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        WeatherIcon(current?.condition, Modifier.size(weatherIconSize))
-                        Column(horizontalAlignment = Alignment.End) {
-                            Row(verticalAlignment = Alignment.Top) {
-                                Text(
-                                    Fmt.temp(current?.temperature, uiState.tempUnit) ?: "--",
-                                    fontSize = (clockSize.value * 0.43f).sp,
-                                    lineHeight = (clockSize.value * 0.46f).sp,
-                                    color = ZhishengText,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text("°", style = MaterialTheme.typography.headlineMedium, color = ZhishengOrange)
-                            }
-                            Text(
-                                current?.weatherText ?: current?.condition?.label ?: "等待天气数据",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = ZhishengCyan,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                    Box(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(end = 122.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            WeatherIcon(
+                                data?.let { phaseAwareCondition(current?.condition, it, nowMillis) }
+                                    ?: current?.condition,
+                                Modifier.size(weatherIconSize),
                             )
+                            Column(horizontalAlignment = Alignment.End) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Text(
+                                        Fmt.temp(current?.temperature, uiState.tempUnit) ?: "--",
+                                        fontSize = (clockSize.value * 0.43f).sp,
+                                        lineHeight = (clockSize.value * 0.46f).sp,
+                                        color = ZhishengText,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text("°", style = MaterialTheme.typography.headlineMedium, color = ZhishengOrange)
+                                }
+                                Text(
+                                    current?.weatherText ?: current?.condition?.label ?: "等待天气数据",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = ZhishengCyan,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.align(Alignment.TopEnd),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            StandbyPortraitButton(onClick = onExitLandscape)
+                            IconButton(
+                                onClick = onSettings,
+                                modifier = Modifier.size(44.dp)
+                                    .background(ZhishengBg.copy(alpha = 0.72f))
+                                    .border(1.dp, ZhishengCardBorder),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = uiText("设置"),
+                                    tint = ZhishengOrange,
+                                    modifier = Modifier.size(21.dp),
+                                )
+                            }
                         }
                     }
 
@@ -261,6 +319,30 @@ fun LandscapeStandbyScreen(
 }
 
 @Composable
+internal fun StandbyPortraitButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(44.dp)
+            .background(ZhishengBg.copy(alpha = 0.72f))
+            .border(1.dp, ZhishengCardBorder)
+            .clickable(
+                role = Role.Button,
+                onClickLabel = uiText("回到竖屏"),
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "↥  ${uiText("竖屏")}",
+            style = MaterialTheme.typography.labelMedium,
+            color = ZhishengCyan,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
 private fun StandbyDatum(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
@@ -273,7 +355,11 @@ private fun StandbySignalField() {
     val context = LocalContext.current
     val animate = remember {
         runCatching {
-            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+            AndroidSettings.Global.getFloat(
+                context.contentResolver,
+                AndroidSettings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            ) > 0f
         }.getOrDefault(true)
     }
     val transition = rememberInfiniteTransition(label = "standby-scan")

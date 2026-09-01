@@ -169,6 +169,24 @@ object LocationSource {
         xiaomiReverse(lat, lon) ?: qweatherReverse(lat, lon)
 
     private suspend fun reverseStreet(context: Context, lat: Double, lon: Double, cityName: String): String? {
+        // 开发者自行配置高德 Web 服务 Key 后，优先用国内街道数据增强名称。
+        // 高德请求包含官方 GPS 坐标转换；超时、额度或鉴权失败全部退回系统 Geocoder。
+        if (SettingsRepository.amapUnlocked()) {
+            val key = SecretStore.currentAmap().webServiceKey
+            val amapStreet = withTimeoutOrNull(7_000L) {
+                AmapApi.reverseStreetFromWgs84(key, lat, lon, cityName).street
+            }
+            if (!amapStreet.isNullOrBlank()) return amapStreet
+        }
+        return systemReverseStreet(context, lat, lon, cityName)
+    }
+
+    private suspend fun systemReverseStreet(
+        context: Context,
+        lat: Double,
+        lon: Double,
+        cityName: String,
+    ): String? {
         if (!Geocoder.isPresent()) return null
         val address = withTimeoutOrNull(4_000L) {
             geocodeAddress(context, lat, lon)

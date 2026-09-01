@@ -11,6 +11,7 @@ import com.zhisheng.weather.data.LifeIndexMetric
 import com.zhisheng.weather.model.City
 import com.zhisheng.weather.model.WeatherConsistency
 import com.zhisheng.weather.model.WeatherData
+import com.zhisheng.weather.model.phaseAwareCondition
 import com.zhisheng.weather.widget.ZhishengWidgetProvider
 import kotlinx.coroutines.flow.first
 import kotlin.math.roundToInt
@@ -18,6 +19,19 @@ import kotlin.math.roundToInt
 // 小组件快照构建：从 WeatherData 组装 WidgetSnapshot 并落盘 + 刷新桌面。
 // v0.0.4 从 WeatherViewModel 提取为共享逻辑——后台刷新 Worker 与主 App 抓取共用同一份实现。
 object WidgetSnapshotBuilder {
+
+    suspend fun markNoCity(context: Context) {
+        WidgetCache.save(context, WidgetSnapshot())
+        ZhishengWidgetProvider.refreshAll(context)
+    }
+
+    suspend fun markCityPending(context: Context, city: City) {
+        WidgetCache.save(
+            context,
+            WidgetSnapshot(city = city.displayName, updateMillis = 0L),
+        )
+        ZhishengWidgetProvider.refreshAll(context)
+    }
 
     suspend fun save(context: Context, city: City, data: WeatherData) {
         val unit = SettingsRepository.tempUnit.first()
@@ -48,9 +62,10 @@ object WidgetSnapshotBuilder {
                         ?: today?.precipProbability
                     )?.takeIf { it in 1..100 },
                 text = data.current?.weatherText ?: data.current?.condition?.label.orEmpty(),
-                conditionName = data.current?.condition?.name.orEmpty(),
+                conditionName = phaseAwareCondition(data.current?.condition, data, nowMillis)?.name.orEmpty(),
                 aqi = data.aqi?.value,
                 aqiLevel = data.aqi?.level.orEmpty(),
+                aqiStandard = data.aqi?.standard.orEmpty(),
                 updateMillis = data.updateTime ?: System.currentTimeMillis(),
                 source = data.dataSource.orEmpty(),
                 utcOffsetSeconds = data.utcOffsetSeconds,
@@ -59,7 +74,7 @@ object WidgetSnapshotBuilder {
                     WidgetHour(
                         label = Fmt.hour(h.timeMillis, data.utcOffsetSeconds),
                         temp = t(h.temperature),
-                        conditionName = h.condition?.name.orEmpty(),
+                        conditionName = phaseAwareCondition(h.condition, data, h.timeMillis)?.name.orEmpty(),
                     )
                 },
                 lifeTips = widgetLifeTips(data, selectedLifeIndices, showLifeIndices),

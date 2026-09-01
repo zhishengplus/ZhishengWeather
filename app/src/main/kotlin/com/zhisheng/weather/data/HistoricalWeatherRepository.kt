@@ -4,7 +4,10 @@ import android.content.Context
 import com.zhisheng.weather.model.City
 import com.zhisheng.weather.model.HistoricalDay
 import com.zhisheng.weather.model.HistoricalReview
+import com.zhisheng.weather.model.RecentWeatherWeek
 import com.zhisheng.weather.model.historicalTargetDates
+import com.zhisheng.weather.model.normalized
+import com.zhisheng.weather.model.normalizeRecentWeatherDays
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -47,6 +50,9 @@ private object HistoricalWeatherSource {
             // ERA5-Land 单模型不提供 weather_code/风速等多项日变量，
             // 强制它会让页面只剩「未知 / --」；Best Match 按年份选择完整数据集。
             .addQueryParameter("models", "best_match")
+            .addQueryParameter("temperature_unit", "celsius")
+            .addQueryParameter("wind_speed_unit", "kmh")
+            .addQueryParameter("precipitation_unit", "mm")
             .addQueryParameter("timezone", "auto")
             .build()
         try {
@@ -64,7 +70,54 @@ private object HistoricalWeatherSource {
                     precipitationMm = daily.precipitation_sum?.firstOrNull(),
                     windMaxKmh = daily.wind_speed_10m_max?.firstOrNull(),
                     gustMaxKmh = daily.wind_gusts_10m_max?.firstOrNull(),
-                ).takeIf(HistoricalDay::hasUsableWeather)
+                // 历史页的核心任务是做温度对照。只有现象码、没有任何温度的空壳记录
+                // 不进入列表，避免再次出现整屏「未知 / --」。
+                ).normalized(date)
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+private object RecentWeatherSource {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    suspend fun fetch(city: City, expectedEndDate: LocalDate): RecentWeatherWeek? = withContext(Dispatchers.IO) {
+        val url = "https://api.open-meteo.com/v1/forecast".toHttpUrl().newBuilder()
+            .addQueryParameter("latitude", city.latitude.toString())
+            .addQueryParameter("longitude", city.longitude.toString())
+            .addQueryParameter(
+                "daily",
+                "weather_code,temperature_2m_max,temperature_2m_min,temperature_2m_mean," +
+                    "precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max",
+            )
+            // 只取已经结束的七个自然日，避免把今天尚未完成的高低温混进回顾。
+            .addQueryParameter("past_days", "7")
+            .addQueryParameter("forecast_days", "0")
+            .addQueryParameter("temperature_unit", "celsius")
+            .addQueryParameter("wind_speed_unit", "kmh")
+            .addQueryParameter("precipitation_unit", "mm")
+            .addQueryParameter("timezone", "auto")
+            .build()
+        try {
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                val raw = response.body?.string()
+                if (!response.isSuccessful || raw.isNullOrBlank()) return@withContext null
+                val daily = json.decodeFromString<ArchiveResponse>(raw).daily ?: return@withContext null
+                val rawDays = daily.time.indices.mapNotNull { index ->
+                    daily.toHistoricalDay(index, daily.time[index], model = "RECENT-ARCHIVE")
+                }
+                // 即便服务端忽略 forecast_days=0 或跨时区多回了一天，也只允许
+                // 用户所选城市“昨天”结束的七个完整自然日进入页面。
+                val days = normalizeRecentWeatherDays(rawDays, expectedEndDate)
+                RecentWeatherWeek(days).takeIf { it.days.isNotEmpty() }
             }
         } catch (ce: CancellationException) {
             throw ce
@@ -102,6 +155,15 @@ object HistoricalWeatherRepository {
         HistoricalReview(referenceDate, days, targets.size)
     }
 
+    suspend fun loadPastWeek(city: City, today: LocalDate): RecentWeatherWeek {
+        check(::directory.isInitialized) { "HistoricalWeatherRepository.init must be called first" }
+        val expectedEndDate = today.minusDays(1)
+        readPastWeek(city, expectedEndDate)?.let { return it }
+        val week = RecentWeatherSource.fetch(city, expectedEndDate) ?: error("Recent weather is unavailable")
+        writePastWeek(city, expectedEndDate, week)
+        return week
+    }
+
     private suspend fun loadDay(city: City, date: LocalDate): HistoricalDay? {
         read(city, date)?.let { return it.day }
         return HistoricalWeatherSource.fetch(city, date)?.also { write(city, date, it) }
@@ -110,7 +172,9 @@ object HistoricalWeatherRepository {
     private suspend fun read(city: City, date: LocalDate): HistoryCacheEntry? = withContext(Dispatchers.IO) {
         runCatching {
             val file = cacheFile(city, date)
-            if (!file.isFile) null else json.decodeFromString<HistoryCacheEntry>(file.readText())
+            if (!file.isFile) null else json.decodeFromString<HistoryCacheEntry>(file.readText()).let { entry ->
+                entry.day.normalized(date)?.let { entry.copy(day = it) }
+            }
         }.getOrNull()
     }
 
@@ -128,9 +192,43 @@ object HistoricalWeatherRepository {
         Unit
     }
 
+    private suspend fun readPastWeek(city: City, endDate: LocalDate): RecentWeatherWeek? = withContext(Dispatchers.IO) {
+        runCatching {
+            val file = pastWeekCacheFile(city, endDate)
+            if (!file.isFile) null
+            else json.decodeFromString<PastWeekCacheEntry>(file.readText()).let {
+                normalizeRecentWeatherDays(it.days, endDate).takeIf { days -> days.isNotEmpty() }
+                    ?.let(::RecentWeatherWeek)
+            }
+        }.getOrNull()
+    }
+
+    private suspend fun writePastWeek(
+        city: City,
+        endDate: LocalDate,
+        week: RecentWeatherWeek,
+    ) = withContext(Dispatchers.IO) {
+        runCatching {
+            directory.mkdirs()
+            val target = pastWeekCacheFile(city, endDate)
+            val temp = File(directory, target.name + ".tmp")
+            temp.writeText(json.encodeToString(PastWeekCacheEntry(week.days, System.currentTimeMillis())))
+            if (!temp.renameTo(target)) {
+                target.writeText(temp.readText())
+                temp.delete()
+            }
+        }
+        Unit
+    }
+
     private fun cacheFile(city: City, date: LocalDate): File {
-        // v2 使旧 ERA5-Land 空字段缓存自动失效。
-        val raw = String.format(Locale.US, "best-match-v2|%.4f|%.4f|%s", city.latitude, city.longitude, date)
+        // v4 加入异常值/日期一致性闸门，避免沿用早期被污染的多年平均缓存。
+        val raw = String.format(Locale.US, "best-match-v4|%.4f|%.4f|%s", city.latitude, city.longitude, date)
+        return File(directory, sha256(raw) + ".json")
+    }
+
+    private fun pastWeekCacheFile(city: City, endDate: LocalDate): File {
+        val raw = String.format(Locale.US, "past-week-v2|%.4f|%.4f|%s", city.latitude, city.longitude, endDate)
         return File(directory, sha256(raw) + ".json")
     }
 
@@ -142,6 +240,12 @@ object HistoricalWeatherRepository {
 @Serializable
 private data class HistoryCacheEntry(
     val day: HistoricalDay,
+    val fetchedAt: Long,
+)
+
+@Serializable
+private data class PastWeekCacheEntry(
+    val days: List<HistoricalDay>,
     val fetchedAt: Long,
 )
 
@@ -159,3 +263,16 @@ private data class ArchiveDaily(
     val wind_speed_10m_max: List<Double?>? = null,
     val wind_gusts_10m_max: List<Double?>? = null,
 )
+
+private fun ArchiveDaily.toHistoricalDay(index: Int, fallbackDate: String, model: String = "BEST-MATCH"): HistoricalDay? =
+    HistoricalDay(
+        date = time.getOrNull(index) ?: fallbackDate,
+        weatherCode = weather_code?.getOrNull(index),
+        high = temperature_2m_max?.getOrNull(index),
+        low = temperature_2m_min?.getOrNull(index),
+        mean = temperature_2m_mean?.getOrNull(index),
+        precipitationMm = precipitation_sum?.getOrNull(index),
+        windMaxKmh = wind_speed_10m_max?.getOrNull(index),
+        gustMaxKmh = wind_gusts_10m_max?.getOrNull(index),
+        model = model,
+    ).normalized()

@@ -15,10 +15,13 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
+import com.zhisheng.weather.i18n.uiText
 import com.zhisheng.weather.MainActivity
 import com.zhisheng.weather.R
 import com.zhisheng.weather.data.WidgetCache
 import com.zhisheng.weather.data.WidgetSnapshot
+import com.zhisheng.weather.data.SettingsRepository
+import com.zhisheng.weather.data.WidgetBackgroundMode
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.conditionIconRes
 import com.zhisheng.weather.ui.Fmt
@@ -27,6 +30,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+
+internal fun widgetAqiText(snap: WidgetSnapshot): String? {
+    val value = snap.aqi ?: return null
+    val standard = when (snap.aqiStandard) {
+        "中国" -> "国标"
+        "美国" -> "美标"
+        "欧洲" -> "欧标"
+        "日本" -> "日标"
+        "QWeather" -> "QAQI"
+        else -> snap.aqiStandard
+    }
+    return listOf("AQI $value", snap.aqiLevel, standard)
+        .filter(String::isNotBlank)
+        .joinToString(" · ")
+}
 
 // 磷光腕表玻璃桌面小组件（0.1.3）
 // 五个 Provider = 桌面选择器里五个独立条目（4x1 / 2x2 / 4x2 / 2x4 / 4x4）；
@@ -58,11 +77,12 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                     val snap = runCatching { WidgetCache.load(context) }.getOrNull()
                     val light = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) !=
                         Configuration.UI_MODE_NIGHT_YES
-                    val feedback = build(context, manager, widgetId, snap, light).apply {
-                        setTextViewText(R.id.w_refresh, "…")
+                    val backgroundMode = SettingsRepository.widgetBackgroundMode.first()
+                    val feedback = build(context, manager, widgetId, snap, light, backgroundMode).apply {
+                        setLocalizedTextViewText(R.id.w_refresh, "…")
                         setContentDescription(R.id.w_refresh, context.getString(R.string.widget_refreshing))
                         if (forcedLayout != R.layout.widget_small && forcedLayout != R.layout.widget_nano) {
-                            setTextViewText(R.id.w_upd, context.getString(R.string.widget_refreshing))
+                            setLocalizedTextViewText(R.id.w_upd, context.getString(R.string.widget_refreshing))
                         }
                     }
                     // MIUI 会合并局部 RemoteViews 更新；完整重绘后稍作停留才能形成肉眼可见反馈。
@@ -74,7 +94,7 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                     val latest = runCatching { WidgetCache.load(context) }.getOrNull()
                     manager.updateAppWidget(
                         widgetId,
-                        build(context, manager, widgetId, latest, light),
+                        build(context, manager, widgetId, latest, light, backgroundMode),
                     )
                 } finally {
                     pending.finish()
@@ -106,9 +126,10 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                 // App 切浅色时小组件保持系统外观，与选择器深色预览一致（用户反馈后调整）
                 val light = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) !=
                     Configuration.UI_MODE_NIGHT_YES
+                val backgroundMode = SettingsRepository.widgetBackgroundMode.first()
                 ids.forEach { id ->
                     runCatching {
-                        val views = build(context, manager, id, snap, light)
+                        val views = build(context, manager, id, snap, light, backgroundMode)
                         manager.updateAppWidget(id, views)
                     }.onFailure {
                         // 单个实例失败不阻断其他尺寸，同时留下可诊断日志。
@@ -127,6 +148,7 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
         id: Int,
         snap: WidgetSnapshot?,
         light: Boolean,
+        backgroundMode: WidgetBackgroundMode,
     ): RemoteViews {
         val opts = manager.getAppWidgetOptions(id)
         val minW = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 110)
@@ -144,6 +166,7 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
         val spacious = layout == R.layout.widget_large
         val v = RemoteViews(context.packageName, layout)
         if (light) applyLightSkin(context, v) // XML 默认深色磷光，浅色按资源表整体换肤（v0.0.5）
+        applyBackgroundMode(v, light, backgroundMode)
 
         // 整块点击进 App
         val intent = Intent(context, MainActivity::class.java)
@@ -168,21 +191,35 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
             ),
         )
 
-        v.setTextViewText(
+        v.setLocalizedTextViewText(
             R.id.w_date,
             Fmt.date(System.currentTimeMillis(), snap?.utcOffsetSeconds),
         )
         // 2x2 布局已移除 w_upd 控件（主动舍弃更新时间，v0.0.4）；其余档位正常显示
         if (hasUpdate) v.setViewVisibility(R.id.w_upd, View.VISIBLE)
 
-        if (snap == null || snap.temp == null) {
+        val snapshotExpired = snap?.let {
+            it.temp != null && it.updateMillis > 0L &&
+                System.currentTimeMillis() - it.updateMillis >= 24 * 60 * 60_000L
+        } == true
+        if (snap == null || snap.temp == null || snapshotExpired) {
             // 空态兜底文案资源化（v0.0.4）
-            v.setTextViewText(R.id.w_city, context.getString(R.string.widget_name))
-            v.setTextViewText(R.id.w_temp, context.getString(R.string.widget_value_placeholder))
-            v.setTextViewText(R.id.w_range, context.getString(R.string.widget_sync_hint))
-            v.setTextViewText(R.id.w_details, context.getString(R.string.widget_details_placeholder))
+            v.setLocalizedTextViewText(
+                R.id.w_city,
+                snap?.city?.takeIf(String::isNotBlank) ?: context.getString(R.string.widget_name),
+            )
+            v.setLocalizedTextViewText(R.id.w_temp, context.getString(R.string.widget_value_placeholder))
+            v.setLocalizedTextViewText(
+                R.id.w_range,
+                when {
+                    snapshotExpired -> context.getString(R.string.widget_stale_expired)
+                    snap?.city.isNullOrBlank() -> context.getString(R.string.widget_sync_hint)
+                    else -> context.getString(R.string.widget_refreshing)
+                },
+            )
+            v.setLocalizedTextViewText(R.id.w_details, context.getString(R.string.widget_details_placeholder))
             if (hasUpdate) {
-                v.setTextViewText(R.id.w_upd, context.getString(R.string.widget_update_placeholder))
+                v.setLocalizedTextViewText(R.id.w_upd, context.getString(R.string.widget_update_placeholder))
             }
             if (hasHourly) {
                 listOf(R.id.h1_i, R.id.h2_i, R.id.h3_i, R.id.h4_i)
@@ -199,7 +236,7 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
             return v
         }
 
-        v.setTextViewText(
+        v.setLocalizedTextViewText(
             R.id.w_city,
             widgetCityLabel(
                 raw = snap.city,
@@ -208,8 +245,8 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                     layout == R.layout.widget_tower,
             ).ifBlank { context.getString(R.string.widget_name) },
         )
-        v.setTextViewText(R.id.w_temp, "${snap.temp}°")
-        v.setTextViewText(
+        v.setLocalizedTextViewText(R.id.w_temp, "${snap.temp}°")
+        v.setLocalizedTextViewText(
             R.id.w_range,
             buildString {
                 if (snap.text.isNotBlank()) append(snap.text)
@@ -232,21 +269,21 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
         } else {
             coreDetails
         }
-        v.setTextViewText(
+        v.setLocalizedTextViewText(
             R.id.w_details,
             details.ifBlank { "体感-- · 湿度--" },
         )
         if (layout == R.layout.widget_tower) {
             val aux = buildList {
-                snap.aqi?.let { add("AQI $it ${snap.aqiLevel}".trim()) }
+                widgetAqiText(snap)?.let(::add)
                 snap.rainChance?.let { add("降水 $it%") }
                 snap.windText.takeIf(String::isNotBlank)?.let { add("风 ${it.replace(" ", "")}") }
             }.joinToString("\n")
-            v.setTextViewText(R.id.w_aux, aux)
+            v.setLocalizedTextViewText(R.id.w_aux, aux)
             v.setViewVisibility(R.id.w_aux, if (aux.isBlank()) View.GONE else View.VISIBLE)
         }
         if (hasUpdate) {
-            v.setTextViewText(
+            v.setLocalizedTextViewText(
                 R.id.w_upd,
                 listOfNotNull(sourceShort(snap.source), updateLabel(context, snap))
                     .joinToString(" · ")
@@ -264,12 +301,12 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
             hourIds.forEachIndexed { i, (tId, iId, vId) ->
                 val h = snap.hours.getOrNull(i)
                 if (h == null) {
-                    v.setTextViewText(tId, "")
-                    v.setTextViewText(vId, "")
+                    v.setLocalizedTextViewText(tId, "")
+                    v.setLocalizedTextViewText(vId, "")
                     v.setViewVisibility(iId, View.INVISIBLE)
                 } else {
-                    v.setTextViewText(tId, h.label)
-                    v.setTextViewText(vId, h.temp?.let { "$it°" } ?: "--")
+                    v.setLocalizedTextViewText(tId, h.label)
+                    v.setLocalizedTextViewText(vId, h.temp?.let { "$it°" } ?: "--")
                     v.setImageViewResource(iId, iconRes(h.conditionName))
                     applyIconTone(context, v, iId, h.conditionName, light)
                     v.setViewVisibility(iId, View.VISIBLE)
@@ -283,7 +320,7 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
             if (trend != null) {
                 v.setViewVisibility(R.id.w_trend_section, View.VISIBLE)
                 v.setImageViewBitmap(R.id.w_temp_trend, trend)
-                v.setTextViewText(
+                v.setLocalizedTextViewText(
                     R.id.w_trend_range,
                     "${trendHours.first().temp}° → ${trendHours.last().temp}°",
                 )
@@ -295,7 +332,7 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                 v.setViewVisibility(R.id.w_life_section, View.GONE)
             } else {
                 v.setViewVisibility(R.id.w_life_section, View.VISIBLE)
-                v.setTextViewText(
+                v.setLocalizedTextViewText(
                     R.id.w_life_line,
                     snap.lifeTips.joinToString("  ·  ") { "${it.label} ${it.value}" },
                 )
@@ -324,8 +361,8 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                     v.setViewVisibility(dayRowIds[i], View.GONE)
                 } else {
                     v.setViewVisibility(dayRowIds[i], View.VISIBLE)
-                    v.setTextViewText(tId, d.label)
-                    v.setTextViewText(
+                    v.setLocalizedTextViewText(tId, d.label)
+                    v.setLocalizedTextViewText(
                         vId,
                         if (d.high != null && d.low != null) "${d.low}° ~ ${d.high}°" else "--",
                     )
@@ -349,12 +386,12 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
                 }
             }
             val status = buildList {
-                snap.aqi?.let { add("AQI $it ${snap.aqiLevel}".trim()) }
+                widgetAqiText(snap)?.let(::add)
                 snap.rainChance?.let { add("降水 $it%") }
             }.joinToString("  ·  ")
             if (status.isNotBlank()) {
                 v.setViewVisibility(R.id.w_aqi, View.VISIBLE)
-                v.setTextViewText(R.id.w_aqi, status)
+                v.setLocalizedTextViewText(R.id.w_aqi, status)
             } else {
                 v.setViewVisibility(R.id.w_aqi, View.GONE)
             }
@@ -392,6 +429,15 @@ open class ZhishengWidgetProvider : AppWidgetProvider() {
         v.setInt(R.id.widget_rule_bar, "setBackgroundResource", R.drawable.widget_rule_light)
         v.setInt(R.id.widget_rule_bar_2, "setBackgroundResource", R.drawable.widget_rule_light)
         v.setImageViewResource(R.id.widget_live_dot, R.drawable.widget_live_dot_light)
+    }
+
+    private fun applyBackgroundMode(v: RemoteViews, light: Boolean, mode: WidgetBackgroundMode) {
+        val background = when (mode) {
+            WidgetBackgroundMode.TRANSPARENT -> R.drawable.widget_bg_transparent
+            WidgetBackgroundMode.GLASS -> if (light) R.drawable.widget_bg_light else R.drawable.widget_bg
+            WidgetBackgroundMode.OPAQUE -> if (light) R.drawable.widget_bg_opaque_light else R.drawable.widget_bg_opaque
+        }
+        v.setInt(R.id.widget_root, "setBackgroundResource", background)
     }
 
     // 小尺寸只显示第一级地名（例如“金川区”），避免完整行政区划把地名本身挤没。
@@ -613,4 +659,8 @@ class ZhishengWidgetNano : ZhishengWidgetProvider() {
 
 class ZhishengWidgetTower : ZhishengWidgetProvider() {
     override val forcedLayout = R.layout.widget_tower
+}
+
+private fun RemoteViews.setLocalizedTextViewText(viewId: Int, text: CharSequence) {
+    setTextViewText(viewId, uiText(text.toString()))
 }

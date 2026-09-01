@@ -198,6 +198,40 @@ class WeatherRepositoryTest {
         assertEquals(12.0, WeatherRepository.precipToMm(QwVal(1.2, "cm"))!!, 0.0001)
         assertEquals(5.0, WeatherRepository.precipToMm(QwVal(5.0, "mm"))!!, 0.0001)
         assertNull(WeatherRepository.precipToMm(QwVal(-1.0, "mm")))
+        assertNull(WeatherRepository.precipToMm(QwVal(5.0, "unknown")))
+    }
+
+    @Test
+    fun providerProbabilityAcceptsRatioPercentAndPercentSign() {
+        assertEquals(40, WeatherRepository.normalizeProviderProbability("0.4"))
+        assertEquals(40, WeatherRepository.normalizeProviderProbability("40"))
+        assertEquals(40, WeatherRepository.normalizeProviderProbability("40%"))
+        assertNull(WeatherRepository.normalizeProviderProbability("140"))
+        assertNull(WeatherRepository.normalizeProviderProbability("unknown"))
+    }
+
+    @Test
+    fun xiaomiCurrentUnitsAreNormalizedToTheInternalContract() {
+        assertEquals(36.0, WeatherRepository.xiaomiWindKmh(XiaomiUnitValue("m/s", "10")) ?: -1.0, 0.0001)
+        assertEquals(18.0, WeatherRepository.xiaomiWindKmh(XiaomiUnitValue("km/h", "18")) ?: -1.0, 0.0001)
+        assertEquals(1013.25, WeatherRepository.xiaomiPressureHpa(XiaomiUnitValue("Pa", "101325")) ?: -1.0, 0.0001)
+        assertEquals(8.5, WeatherRepository.xiaomiDistanceKm(XiaomiUnitValue("m", "8500")) ?: -1.0, 0.0001)
+        assertNull(WeatherRepository.xiaomiPressureHpa(XiaomiUnitValue("unknown", "1013")))
+    }
+
+    @Test
+    fun xiaomiUpdateUsesProviderObservationTimeBeforeDownloadTime() {
+        val fetchedAt = java.time.Instant.parse("2026-08-31T02:00:00Z").toEpochMilli()
+        val result = XiaomiForecastResult(
+            current = XiaomiCurrent(pubTime = "2026-08-31T09:45:00+08:00"),
+            updateTime = "2026-08-31T09:40:00+08:00",
+        )
+
+        assertEquals(
+            java.time.Instant.parse("2026-08-31T01:45:00Z").toEpochMilli(),
+            WeatherRepository.xiaomiUpdateMillis(result, fetchedAt),
+        )
+        assertEquals(fetchedAt, WeatherRepository.xiaomiUpdateMillis(XiaomiForecastResult(), fetchedAt))
     }
 
     @Test
