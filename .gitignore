@@ -50,6 +50,9 @@ shots/
 artifacts/
 backups/
 assets/branding/character_design/
+assets/branding/weather_girl_emotes_sheet.png
+*调研报告.md
+ARCHIVE.txt
 DEBUG_AUDIT_*.md
 fetch_caiyun_docs.ps1
 scripts/update_contributors_from_xlsx.py
