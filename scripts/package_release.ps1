@@ -1,16 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.3',
+    [string]$Version = '0.1.5-beta3',
     [switch]$IncludeDevelopmentBuilds
 )
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$packageProfile = if ($IncludeDevelopmentBuilds) { 'all' } else { 'github' }
+$packageProfile = if ($IncludeDevelopmentBuilds) { 'all' } else { 'public' }
 $DistDir = Join-Path $ProjectRoot "dist\$packageProfile-v$Version"
 
-if ($Version -notmatch '^\d+\.\d+\.\d+$') {
-    throw "Version must use x.y.z format: $Version"
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw "Version must use x.y.z or x.y.z-prerelease format: $Version"
 }
 
 $gradleFile = Join-Path $ProjectRoot 'app\build.gradle.kts'
@@ -62,7 +62,7 @@ if (-not $IncludeDevelopmentBuilds) {
     if (-not $manifest.apkUrl.EndsWith("/$publicFile")) {
         throw "update.json apkUrl does not point to $publicFile"
     }
-    if ($manifest.sha256 -ne $hashes[$publicFile]) {
+    if (-not $manifest.sha256.Equals($hashes[$publicFile], [StringComparison]::OrdinalIgnoreCase)) {
         throw 'update.json sha256 does not match the packaged public APK'
     }
 }

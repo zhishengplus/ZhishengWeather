@@ -111,7 +111,7 @@ object CityRepository {
 
     // 已保存城市
     val cities: Flow<List<City>> by lazy {
-        store.data.map { prefs -> prefs.cities() }
+        store.data.map { prefs -> favoriteCitiesFirst(prefs.cities()) }
     }
 
     val selectedCity: Flow<City?> by lazy {
@@ -138,7 +138,12 @@ object CityRepository {
         store.edit { prefs ->
             val list = prefs.cities().toMutableList()
             val existing = list.indexOfFirst { it.locationKey == city.locationKey }
-            if (existing >= 0) list[existing] = city else list.add(city)
+            if (existing >= 0) {
+                // 自动定位会刷新街道和坐标，但不能顺手清掉用户已经点亮的收藏。
+                list[existing] = mergeLocatedCity(list[existing], city)
+            } else {
+                list.add(city)
+            }
             val encoded = json.encodeToString(cityListSerializer, list)
             prefs[KEY_CITIES] = encoded
             prefs[KEY_CITIES_BACKUP] = encoded
@@ -154,8 +159,19 @@ object CityRepository {
             prefs[KEY_CITIES] = encoded
             prefs[KEY_CITIES_BACKUP] = encoded // 双写备份（v0.0.4）
             if (prefs[KEY_SELECTED] == locationKey) {
-                prefs[KEY_SELECTED] = list.firstOrNull()?.locationKey.orEmpty()
+                prefs[KEY_SELECTED] = favoriteCitiesFirst(list).firstOrNull()?.locationKey.orEmpty()
             }
+        }
+    }
+
+    suspend fun toggleFavorite(locationKey: String) {
+        store.edit { prefs ->
+            val list = prefs.cities().map { city ->
+                if (city.locationKey == locationKey) city.copy(isFavorite = !city.isFavorite) else city
+            }
+            val encoded = json.encodeToString(cityListSerializer, list)
+            prefs[KEY_CITIES] = encoded
+            prefs[KEY_CITIES_BACKUP] = encoded
         }
     }
 
@@ -194,3 +210,10 @@ object CityRepository {
 
     private fun Preferences.cities(): List<City> = decodeCities().list
 }
+
+/** 收藏城市固定在前；两个分组内部保持用户原有次序，不暗中重排。 */
+internal fun favoriteCitiesFirst(cities: List<City>): List<City> =
+    cities.filter(City::isFavorite) + cities.filterNot(City::isFavorite)
+
+internal fun mergeLocatedCity(existing: City, located: City): City =
+    located.copy(isFavorite = existing.isFavorite)

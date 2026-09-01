@@ -16,8 +16,9 @@ class HourlyLayoutTest {
         assertTrue(home.contains("visualCondition = phaseAwareCondition(h.condition, data, h.timeMillis)"))
         assertTrue(home.contains("WeatherConsistency.currentHourIndex(hourly, nowMillis)"))
         assertTrue(home.contains("LocalDensity.current.fontScale.coerceIn(1f, 1.5f)"))
-        assertTrue(home.contains("contentPadding = PaddingValues(horizontal = 4.dp)"))
-        assertTrue(home.contains("hourlyOutlookText(data.current, data.hourly, nowMs)"))
+        assertTrue(home.contains("contentPadding = PaddingValues(start = 0.dp, end = 4.dp)"))
+        assertTrue(home.contains("displayItems.dropWhile { !it.isNow }"))
+        assertTrue(home.contains("hourlyTrendText(trendHours, nowMs, unit)"))
         assertTrue(home.contains("hourlyDisplayItems(data.current, data.hourly, nowMs)"))
         assertTrue(home.contains("Fmt.windForce(h.windSpeed)"))
         assertFalse(home.contains("\u0024{hourly.size}小时"))
@@ -25,5 +26,6 @@ class HourlyLayoutTest {
         assertFalse(home.contains("viewModel.selectCity(target.locationKey)"))
         assertTrue(home.contains("statusText,"))
         assertTrue(home.contains("if (dry) sourceLine else peakLabel"))
+        assertTrue(home.contains("modifier = Modifier.width(72.dp)"))
     }
 }

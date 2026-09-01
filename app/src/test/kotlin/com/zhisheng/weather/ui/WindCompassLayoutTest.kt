@@ -18,6 +18,7 @@ class WindCompassLayoutTest {
         assertFalse(compass.contains("38.dp"))
         assertFalse(compass.contains("drawOval"))
         assertTrue(compass.contains("drawPath(dart, needle)"))
-        assertTrue(compass.contains("北=0°向上"))
+        assertTrue(compass.contains("rememberWorldHeadingDegrees"))
+        assertTrue(compass.contains("windNeedleScreenRotation"))
     }
 }

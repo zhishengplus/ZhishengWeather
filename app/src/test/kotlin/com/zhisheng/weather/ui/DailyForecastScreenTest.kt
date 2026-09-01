@@ -110,6 +110,21 @@ class DailyForecastScreenTest {
     }
 
     @Test
+    fun `rain and freezing rain never produce a snow claim`() {
+        val days = listOf(
+            DailyWeather(0L, high = 8.0, low = 1.0, condition = WeatherCondition.RAIN, weatherText = "中雨"),
+            DailyWeather(86_400_000L, high = 7.0, low = 0.0, condition = WeatherCondition.FREEZING_RAIN, weatherText = "冻雨"),
+            DailyWeather(172_800_000L, high = 9.0, low = 2.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
+        )
+
+        val digest = buildForecastDigest(days, "c", 0, seedKey = "rain-only")
+
+        assertFalse(digest.headline.contains("雪"))
+        assertFalse(digest.overview.contains("雪"))
+        assertEquals("3 日", digest.rainValue)
+    }
+
+    @Test
     fun `home exposes one five-day route and settings no longer exposes layout choices`() {
         val root = File(requireNotNull(System.getProperty("user.dir")))
         val home = File(root, "src/main/kotlin/com/zhisheng/weather/ui/home/HomeScreen.kt").readText()
@@ -125,9 +140,11 @@ class DailyForecastScreenTest {
         assertFalse(settings.contains("完整上下"))
         assertFalse(settings.contains("经典横排"))
         assertTrue(forecast.contains("枳生天气娘 · 未来\${digest.dayCount}日"))
-        assertTrue(forecast.contains(".align(Alignment.TopStart)"))
+        assertTrue(forecast.contains(".align(Alignment.CenterStart)"))
         assertTrue(forecast.contains(".size(128.dp)"))
         assertTrue(forecast.contains(".alpha(if (isYesterday) 0.58f else 1f)"))
+        assertTrue(forecast.contains("Column(verticalArrangement = Arrangement.spacedBy(8.dp))"))
+        assertTrue(forecast.contains("maxLines = 2"))
         assertTrue(forecast.contains("yesterdayForecastDay"))
         assertFalse(forecast.contains("SIGNAL TRACK"))
         assertFalse(forecast.contains("FORECAST SYNTHESIS"))

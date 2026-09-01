@@ -43,6 +43,17 @@ class HomeCitySwitchRegressionTest {
     }
 
     @Test
+    fun longPressShowsDeckAndReleaseSelectsFocusedCity() {
+        val source = homeSource()
+        assertTrue(source.contains("detectDragGesturesAfterLongPress"))
+        assertTrue(source.contains("cityDeckVisible = true"))
+        assertTrue(source.contains("val targetKey = uiState.cities"))
+        assertTrue(source.contains("viewModel.selectCity(targetKey)"))
+        assertTrue(source.contains("松手切换；向上推可展开卡组"))
+        assertFalse(source.contains("普通的主页横向滑动仍不会触发城市切换。\n                                cityDeckVisible = false"))
+    }
+
+    @Test
     fun sensorSeparatesScrollBreathFromHeldScan() {
         val source = homeSource()
         assertTrue(source.contains("active = cityDeckVisible && !cityDeckPinned"))

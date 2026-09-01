@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.zhisheng.weather.data.AmbienceLevel
 import com.zhisheng.weather.data.CityRepository
 import com.zhisheng.weather.data.HomeModule
+import com.zhisheng.weather.data.HomeBriefingStyle
 import com.zhisheng.weather.data.LocationSource
 import com.zhisheng.weather.data.LifeIndexMetric
 import com.zhisheng.weather.data.SettingsRepository
@@ -38,6 +39,7 @@ data class DisplayPrefs(
     val scanlines: Boolean = true,
     val ambience: AmbienceLevel = AmbienceLevel.VIVID,
     val bootAnim: Boolean = true,
+    val homeBriefingStyle: HomeBriefingStyle = HomeBriefingStyle.WEATHER_GIRL,
     val moduleOrder: List<HomeModule> = HomeModule.defaultOrder,
     val telemetryMetrics: Set<TelemetryMetric> = TelemetryMetric.defaultSelection,
     val lifeIndexMetrics: Set<LifeIndexMetric> = LifeIndexMetric.defaultSelection,
@@ -133,6 +135,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         )
     }.combine(SettingsRepository.moduleOrder) { prefs, order ->
         prefs.copy(moduleOrder = order)
+    }.combine(SettingsRepository.homeBriefingStyle) { prefs, style ->
+        prefs.copy(homeBriefingStyle = style)
     }.combine(SettingsRepository.telemetryMetrics) { prefs, metrics ->
         prefs.copy(telemetryMetrics = metrics)
     }.combine(SettingsRepository.lifeIndexMetrics) { prefs, metrics ->
@@ -313,6 +317,12 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             CityRepository.removeCity(locationKey)
+        }
+    }
+
+    fun toggleCityFavorite(locationKey: String) {
+        viewModelScope.launch {
+            CityRepository.toggleFavorite(locationKey)
         }
     }
 

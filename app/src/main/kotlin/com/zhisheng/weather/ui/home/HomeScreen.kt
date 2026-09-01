@@ -142,12 +142,15 @@ import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.model.YesterdayInfo
 import com.zhisheng.weather.R
 import com.zhisheng.weather.data.HomeModule
+import com.zhisheng.weather.data.HomeBriefingStyle
 import com.zhisheng.weather.data.DailyForecastLayout
 import com.zhisheng.weather.data.LifeIndexMetric
 import com.zhisheng.weather.data.TelemetryMetric
 import com.zhisheng.weather.ui.Fmt
 import com.zhisheng.weather.ui.HomeUiState
 import com.zhisheng.weather.ui.WeatherViewModel
+import com.zhisheng.weather.ui.rememberWorldHeadingDegrees
+import com.zhisheng.weather.ui.windNeedleScreenRotation
 import com.zhisheng.weather.ui.components.WeatherIcon
 import com.zhisheng.weather.ui.components.WeatherAmbience
 import com.zhisheng.weather.ui.components.isNightAt
@@ -261,6 +264,7 @@ fun HomeScreen(
                     viewModel.selectCity(key)
                     scope.launch { drawerState.close() }
                 },
+                onToggleFavorite = viewModel::toggleCityFavorite,
                 onRemove = viewModel::removeCity,
                 onAddCity = {
                     scope.launch { drawerState.close() }
@@ -384,7 +388,7 @@ fun HomeScreen(
                 },
             )
             CityTouchSensor(
-                // 手势进行中显现；卡组锁定、松手后立即退场，不在主页常驻。
+                // 长按成立后立即显现；左右滑动并松手即可切换，向上推则锁定卡组。
                 active = cityDeckVisible && !cityDeckPinned,
                 scrolling = weatherContentScrolling && !cityDeckVisible,
                 enabled = uiState.cities.size > 1,
@@ -406,11 +410,13 @@ fun HomeScreen(
                                 cityDeckPinned = false
                                 cityDeckExpansion = 0f
                                 pinnedThisGesture = false
-                                // 横向滑动主页不再直接亮出/切换城市。只有明确向上推过阈值
-                                // 才展开卡组，避免用户在底部空白处左右滑时误触。
-                                cityDeckVisible = false
+                                // detectDragGesturesAfterLongPress 已经确认长按成立；此时才亮出
+                                // 卡组，所以普通的主页横向滑动仍不会触发城市切换。
+                                cityDeckVisible = true
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             },
                             onDrag = { change, dragAmount ->
+                                change.consume()
                                 cityDeckDrag += dragAmount.x
                                 cityDeckVerticalDrag += dragAmount.y
                                 cityDeckPosition = clampCityDeckPosition(
@@ -422,7 +428,6 @@ fun HomeScreen(
                                         .coerceIn(0f, 0.76f)
                                     val upwardIntent = -cityDeckVerticalDrag >= abs(cityDeckDrag) * 1.10f
                                     if (cityDeckVerticalDrag <= -pinThresholdPx && upwardIntent) {
-                                        change.consume()
                                         pinnedThisGesture = true
                                         cityDeckVisible = true
                                         cityDeckPinned = true
@@ -434,9 +439,15 @@ fun HomeScreen(
                             onDragEnd = {
                                 cityDeckPosition = cityDeckPosition.roundToInt().toFloat()
                                 if (!pinnedThisGesture) {
+                                    val targetKey = uiState.cities
+                                        .getOrNull(cityDeckPosition.roundToInt())
+                                        ?.locationKey
                                     cityDeckVisible = false
                                     cityDeckPinned = false
                                     cityDeckExpansion = 0f
+                                    if (targetKey != null && targetKey != uiState.selectedCity?.locationKey) {
+                                        viewModel.selectCity(targetKey)
+                                    }
                                 }
                             },
                             onDragCancel = {
@@ -542,7 +553,7 @@ private fun CityTouchSensor(
             .height(48.dp)
             .semantics {
                 contentDescription = if (enabled) {
-                    "城市切换传感器，长按后左右滑动选择，向上推可展开并松手"
+                    "城市切换传感器，长按后左右滑动，松手切换；向上推可展开卡组"
                 } else {
                     "城市切换传感器，当前没有可切换城市"
                 }
@@ -1076,7 +1087,14 @@ private fun WeatherContent(
 
             val animationIndex = nextStagger()
             val n = nextIndex()
-            item(key = "title_${module.key}") { SectionTitle(n, module.cn, module.en) }
+            item(key = "title_${module.key}") {
+                SectionTitle(
+                    index = n,
+                    title = module.cn,
+                    en = module.en,
+                    prominent = module.isPrimaryHomeModule(),
+                )
+            }
             item(key = "module_${module.key}") {
                 Stagger(animationIndex, entered) { m ->
                     when (module) {
@@ -1095,7 +1113,7 @@ private fun WeatherContent(
                             m,
                             onDailyForecastClick,
                         )
-                        HomeModule.TELEMETRY -> data.current?.let { TelemetryGrid(it, todayDaily, unit, prefs, m) }
+                        HomeModule.TELEMETRY -> data.current?.let { TelemetryGrid(it, todayDaily, unit, prefs, m, city) }
                         HomeModule.AQI -> data.aqi?.let { AqiCard(it, m) }
                         HomeModule.INDICES -> IndicesRow(data, prefs.lifeIndexMetrics, m)
                         HomeModule.YESTERDAY -> data.yesterday?.let { YesterdayCard(it, todayDaily, unit, m) }
@@ -1106,6 +1124,21 @@ private fun WeatherContent(
         }
         item { Stagger(nextStagger(), entered) { m -> Footer(data, m) } }
     }
+}
+
+/** 核心预报保留完整章节力度，辅助资料降低一级，避免九个模块同时抢视线。 */
+private fun HomeModule.isPrimaryHomeModule(): Boolean = when (this) {
+    HomeModule.HOURLY,
+    HomeModule.PRECIP,
+    HomeModule.DAILY,
+    HomeModule.SPACETIME
+    -> true
+    HomeModule.TELEMETRY,
+    HomeModule.AQI,
+    HomeModule.INDICES,
+    HomeModule.YESTERDAY,
+    HomeModule.TYPHOON
+    -> false
 }
 
 // —— 状态行：坐标 / 更新时间 / 数据源 ——
@@ -1258,60 +1291,114 @@ private fun HeroSection(
         Nowcast.briefing(data, unit, System.currentTimeMillis())?.let { briefing ->
             val copy = briefingCopy(briefing.text)
             val copyColor = briefingColor(briefing)
-            val emotePlacement = briefingEmotePlacement(briefing.emote)
-            Spacer(Modifier.height(2.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-                    .drawBehind {
-                        val baselineY = size.height - 1.dp.toPx()
-                        drawLine(
-                            color = copyColor.copy(alpha = 0.18f),
-                            start = Offset(86.dp.toPx(), baselineY),
-                            end = Offset(size.width, baselineY),
-                            strokeWidth = 1.dp.toPx(),
+            when (prefs.homeBriefingStyle) {
+                HomeBriefingStyle.WEATHER_GIRL -> {
+                    val emotePlacement = briefingEmotePlacement(briefing.emote)
+                    Spacer(Modifier.height(2.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .drawBehind {
+                                val baselineY = size.height - 1.dp.toPx()
+                                drawLine(
+                                    color = copyColor.copy(alpha = 0.18f),
+                                    start = Offset(86.dp.toPx(), baselineY),
+                                    end = Offset(size.width, baselineY),
+                                    strokeWidth = 1.dp.toPx(),
+                                )
+                            }
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = uiText("天气娘提示：${briefing.text}")
+                            },
+                    ) {
+                        Image(
+                            painter = painterResource(briefingEmoteRes(briefing.emote)),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                // 各表情 PNG 的透明边界不同：按有效轮廓校正，让发梢右缘与落地线一致。
+                                .offset(x = emotePlacement.x.dp, y = emotePlacement.y.dp)
+                                .size(94.dp)
+                                .alpha(0.96f),
                         )
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(start = 88.dp, end = 2.dp, bottom = 9.dp)
+                                .zIndex(1f),
+                            verticalArrangement = Arrangement.Bottom,
+                        ) {
+                            Text(
+                                text = copy.lead,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = copyColor,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = if (copy.detail == null) 2 else 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            copy.detail?.let { detail ->
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = detail,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = copyColor.copy(alpha = 0.78f),
+                                    fontWeight = FontWeight.Medium,
+                                    // 温差、防晒等建议常比标题长；保留两行，不能把关键动作截成省略号。
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = uiText("天气娘提示：${briefing.text}")
-                    },
-            ) {
-                Image(
-                    painter = painterResource(briefingEmoteRes(briefing.emote)),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        // 各表情 PNG 的透明边界不同：按有效轮廓校正，让发梢右缘与落地线一致。
-                        .offset(x = emotePlacement.x.dp, y = emotePlacement.y.dp)
-                        .size(94.dp)
-                        .alpha(0.96f),
-                )
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 88.dp, end = 2.dp, bottom = 9.dp)
-                        .zIndex(1f),
-                    verticalArrangement = Arrangement.Bottom,
-                ) {
-                    Text(
-                        text = copy.lead,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = copyColor,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    copy.detail?.let { detail ->
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = detail,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = copyColor.copy(alpha = 0.78f),
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                }
+
+                HomeBriefingStyle.TIPS -> {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 54.dp)
+                            .drawBehind {
+                                val baselineY = size.height - 1.dp.toPx()
+                                drawLine(
+                                    color = copyColor.copy(alpha = 0.18f),
+                                    start = Offset.Zero.copy(y = baselineY),
+                                    end = Offset(size.width, baselineY),
+                                    strokeWidth = 1.dp.toPx(),
+                                )
+                            }
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = uiText("天气提示：${briefing.text}")
+                            }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .width(3.dp)
+                                .height(30.dp)
+                                .background(copyColor),
                         )
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "TIPS //",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZhishengTextTertiary,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.4.sp,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = briefing.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = copyColor,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
@@ -1344,13 +1431,15 @@ private fun briefingEmotePlacement(emote: BriefingEmote): BriefingEmotePlacement
     BriefingEmote.ALERT -> BriefingEmotePlacement(x = 8, y = 3)
 }
 
-private data class BriefingCopy(val lead: String, val detail: String?)
+internal data class BriefingCopy(val lead: String, val detail: String?)
 
-private fun briefingCopy(text: String): BriefingCopy {
-    if (text.length <= 18) return BriefingCopy(text, null)
+internal fun briefingCopy(text: String): BriefingCopy {
+    // 是否分行首先由自然标点决定，而不是只按总字数决定。18 字在多数手机上仍放不下，
+    // 旧逻辑会把“外面有点风，骑车时会比走路更有感觉。”硬塞成一行并截尾。
     val splitAt = text.indices.firstOrNull { index ->
         index in 4..14 && text[index] in setOf('，', '：', '；', '。') && text.length - index > 4
-    } ?: return BriefingCopy(text, null)
+    }
+    if (splitAt == null) return BriefingCopy(text, null)
     val lead = text.substring(0, splitAt).trim().trimEnd('，', '：', '；', '。')
     val detail = text.substring(splitAt + 1).trim()
     return BriefingCopy(lead, detail.takeIf { it.isNotEmpty() })
@@ -1555,18 +1644,41 @@ private fun WeatherToolEntry(
 }
 
 @Composable
-private fun SectionTitle(index: Int, title: String, en: String) {
+private fun SectionTitle(index: Int, title: String, en: String, prominent: Boolean) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 16.dp, bottom = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(
+            start = 20.dp,
+            top = if (prominent) 16.dp else 13.dp,
+            bottom = if (prominent) 8.dp else 6.dp,
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("%02d//".format(index), style = MaterialTheme.typography.titleSmall, color = ZhishengOrange, fontWeight = FontWeight.Bold)
+        Text(
+            "%02d//".format(index),
+            style = if (prominent) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge,
+            color = if (prominent) ZhishengOrange else ZhishengOrange.copy(alpha = 0.82f),
+            fontWeight = FontWeight.Bold,
+        )
         Spacer(Modifier.width(6.dp))
-        Text(title, style = MaterialTheme.typography.titleSmall, color = ZhishengTextSecondary, letterSpacing = 2.sp)
-        Spacer(Modifier.width(8.dp))
-        Text(en, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary, letterSpacing = 1.5.sp)
+        Text(
+            title,
+            style = if (prominent) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge,
+            color = if (prominent) ZhishengTextSecondary else ZhishengTextTertiary,
+            letterSpacing = if (prominent) 1.6.sp else 1.1.sp,
+        )
+        Spacer(Modifier.width(if (prominent) 8.dp else 6.dp))
+        Text(
+            en,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZhishengTextTertiary.copy(alpha = if (prominent) 1f else 0.72f),
+            letterSpacing = if (prominent) 1.4.sp else 1.sp,
+        )
         Spacer(Modifier.weight(1f))
-        Text("─".repeat(6), style = MaterialTheme.typography.labelSmall, color = ZhishengCardBorder)
+        Text(
+            "─".repeat(if (prominent) 6 else 3),
+            style = MaterialTheme.typography.labelSmall,
+            color = ZhishengCardBorder.copy(alpha = if (prominent) 1f else 0.65f),
+        )
     }
 }
 
@@ -1576,11 +1688,12 @@ private fun HudCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val palette = LocalZhishengPalette.current
     Box(
         modifier = modifier
             .padding(horizontal = 16.dp)
             .clip(RectangleShape)
-            .background(ZhishengSurface)
+            .background(if (palette.isLight) ZhishengCard else ZhishengSurface)
             .then(Modifier.hudBorder())
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
@@ -1641,7 +1754,12 @@ private fun HourlySection(
     // 10:00 格），找不到（该格已被 dropPastHourly 裁掉）再退回 40 分钟
     // 窗口内最近的一格；均无则不标。
     val showPrecipProbability = hourly.any { (it.precipProb ?: 0) > 0 }
-    val outlookText = hourlyOutlookText(data.current, data.hourly, nowMs)
+    // 趋势从实时观测开始，与用户眼前的首个“现在”列对齐；没有实况时再退回逐时源。
+    // 不能把已经过去的当前整点或更远时段峰值写成含混的“最高温”。
+    val trendHours = displayItems.dropWhile { !it.isNow }
+        .map { it.weather }
+        .ifEmpty { data.hourly }
+    val outlookText = hourlyTrendText(trendHours, nowMs, unit)
     HudCard(modifier = modifier.fillMaxWidth()) {
         Column {
             Text(
@@ -1654,7 +1772,7 @@ private fun HourlySection(
             Spacer(Modifier.height(14.dp))
             // key=时间戳：数据刷新时按身份复用 item，不整列重绑（v0.0.1）
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 4.dp),
+                contentPadding = PaddingValues(start = 0.dp, end = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 itemsIndexed(displayItems, key = { i, item ->
@@ -1685,6 +1803,10 @@ internal data class HourlyDisplayItem(
     val isNow: Boolean,
 )
 
+// 和风高档套餐可返回 240 小时。完整数据继续留在 WeatherData 中供趋势和详情使用，
+// 主页横向卡片只承担“今天接下来怎么变”的速览职责，不能随套餐等级无限变长。
+internal const val HOME_HOURLY_ITEM_LIMIT = 24
+
 /** 当前小时整点预报在左，实时观测紧随其后，再连接未来整点，和数据含义一一对应。 */
 internal fun hourlyDisplayItems(
     current: CurrentWeather?,
@@ -1698,7 +1820,9 @@ internal fun hourlyDisplayItems(
     }
     val currentHourIndex = WeatherConsistency.currentHourIndex(hourly, nowMillis)
     if (current == null || currentHourIndex < 0) {
-        return hourly.map { HourlyDisplayItem(it, isNow = false) }
+        return hourly
+            .take(HOME_HOURLY_ITEM_LIMIT)
+            .map { HourlyDisplayItem(it, isNow = false) }
     }
 
     val visibleHours = hourly.drop(currentHourIndex)
@@ -1710,7 +1834,7 @@ internal fun hourlyDisplayItems(
                 add(HourlyDisplayItem(currentAsHourly(current, anchor, nowMillis), isNow = true))
             }
         }
-    }
+    }.take(HOME_HOURLY_ITEM_LIMIT)
 }
 
 private fun currentAsHourly(
@@ -1738,30 +1862,45 @@ private fun currentAsHourly(
 )
 
 /**
- * 逐时卡片的第一句话只使用已经进入统一模型的数据，避免把分钟降水与逐时概率混为一谈。
- * 30% 是“可能有降水”的提示阈值；低于阈值时使用“暂无明显”而不是绝对的“无降水”。
+ * 逐时卡片只解释温度趋势；是否马上下雨由紧邻的分钟降水模块独占回答，
+ * 避免两个模块连续重复“无降水”。只读取统一后的逐时温度，不根据天气图标猜结论。
+ * 用可核对的起点→转折点→终点表达，不把六小时内的阶段峰值叫成“最高温”。
  */
-internal fun hourlyOutlookText(
-    current: CurrentWeather?,
+internal fun hourlyTrendText(
     hourly: List<HourlyWeather>,
     nowMillis: Long,
+    unit: String,
 ): String {
-    val rainingNow = current?.condition?.isPrecipitation == true ||
-        (current?.precipMm ?: 0.0) > 0.05
-    if (rainingNow) return "当前有降水，注意路面湿滑"
-
     val horizon = hourly
-        .filter { it.timeMillis >= nowMillis - 60 * 60 * 1000L }
-        .take(12)
-    val rainSignal = horizon.any {
-        it.condition?.isPrecipitation == true ||
-            (it.precipMm ?: 0.0) > 0.05 ||
-            (it.precipProb ?: 0) >= 30
-    }
-    return if (rainSignal) {
-        "未来短时内可能有降水"
-    } else {
-        "未来短时内暂无明显降水"
+        .filter { it.timeMillis >= nowMillis - 5 * 60 * 1000L }
+        .take(6)
+        .mapNotNull { point -> conv(point.temperature, unit) }
+    if (horizon.size < 2) return "逐小时温度与风力"
+
+    val first = horizon.first()
+    val last = horizon.last()
+    val peak = horizon.maxOrNull() ?: first
+    val trough = horizon.minOrNull() ?: first
+    val peakIndex = horizon.indexOfFirst { it == peak }
+    val troughIndex = horizon.indexOfFirst { it == trough }
+    val threshold = if (unit == "f") 4.0 else 2.0
+    fun degrees(value: Double): String = "${value.roundToInt()}°"
+
+    return when {
+        peakIndex in 1 until horizon.lastIndex &&
+            peak - first >= threshold && peak - last >= threshold ->
+            "接下来几小时先升后降 · ${degrees(first)} → ${degrees(peak)} → ${degrees(last)}"
+        troughIndex in 1 until horizon.lastIndex &&
+            first - trough >= threshold && last - trough >= threshold ->
+            "接下来几小时先降后升 · ${degrees(first)} → ${degrees(trough)} → ${degrees(last)}"
+        last - first >= threshold ->
+            "接下来几小时逐渐升温 · ${degrees(first)} → ${degrees(last)}"
+        first - last >= threshold ->
+            "接下来几小时逐渐降温 · ${degrees(first)} → ${degrees(last)}"
+        peak.roundToInt() == trough.roundToInt() ->
+            "接下来几小时气温稳定 · ${degrees(first)}"
+        else ->
+            "接下来几小时气温平稳 · ${degrees(trough)}–${degrees(peak)}"
     }
 }
 
@@ -2636,7 +2775,9 @@ private fun DailySection(
                                 ?: "未知",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengTextSecondary,
-                            modifier = Modifier.width(58.dp),
+                            // 和风常返回“少云转晴”等五字日夜组合；58dp 会只在该源截尾。
+                            // 加宽后仍给温度区间条保留超过三分之一的卡片宽度。
+                            modifier = Modifier.width(72.dp),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -2660,7 +2801,12 @@ private fun DailySection(
                                     .offset(x = maxWidth * lo)
                                     .width(maxWidth * w)
                                     .fillMaxHeight()
-                                    .background(tempColor(d.low), RectangleShape),
+                                    // 位置和长度已经表达温度区间；颜色只表达阅读状态：
+                                    // 今天用薄荷绿，后续日期统一钢青，避免整张表被绿色淹没。
+                                    .background(
+                                        if (isToday) ZhishengMint else ZhishengCyan.copy(alpha = 0.68f),
+                                        RectangleShape,
+                                    ),
                             )
                         }
                         Text(
@@ -2777,6 +2923,7 @@ private fun TelemetryGrid(
     unit: String,
     prefs: com.zhisheng.weather.ui.DisplayPrefs,
     modifier: Modifier,
+    city: com.zhisheng.weather.model.City?,
 ) {
     // 没数的格不画：小米实况没有 1 时降水，硬留第九格会 -- 还在右侧留空（v0.0.7）。
     val items = listOf(
@@ -2794,35 +2941,48 @@ private fun TelemetryGrid(
             val (cn, en, value) = item
             value?.let { Triple(cn, en, it) }
         }
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        items.chunked(2).forEach { rowItems ->
+    val showLuminary = TelemetryMetric.LUMINARY in prefs.telemetryMetrics && today != null && (
+        today.sunrise != null || today.sunset != null || today.moonPhase != null ||
+            today.moonrise != null || today.moonset != null
+        )
+    val palette = LocalZhishengPalette.current
+
+    // 同级遥测读数合并为一个连续面板，用分隔线组织，不再一项套一张卡。
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RectangleShape)
+            .background(if (palette.isLight) ZhishengCard else ZhishengSurface)
+            .border(1.dp, ZhishengCardBorder, RectangleShape),
+    ) {
+        val rows = items.chunked(2)
+        rows.forEachIndexed { rowIndex, rowItems ->
             Row(
                 Modifier.fillMaxWidth().height(IntrinsicSize.Max),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                rowItems.forEach { (cn, en, value) ->
-                    TeleCell(cn, en, value, cur, Modifier.weight(1f).fillMaxHeight())
+                rowItems.forEachIndexed { itemIndex, (cn, en, value) ->
+                    TeleCell(cn, en, value, cur, city, Modifier.weight(1f).fillMaxHeight())
+                    if (itemIndex < rowItems.lastIndex) {
+                        Box(
+                            Modifier
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(ZhishengCardBorder.copy(alpha = 0.72f)),
+                        )
+                    }
                 }
-                // 奇数项让最后一格占满整行，不再人为保留一个空白右栏。
             }
-            Spacer(Modifier.height(8.dp))
+            if (rowIndex < rows.lastIndex || showLuminary) {
+                HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.72f), thickness = 1.dp)
+            }
         }
         // 日月宽卡：公共源不提供月出月落时由本地天文计算补齐。
-        if (TelemetryMetric.LUMINARY in prefs.telemetryMetrics && today != null && (
-                today.sunrise != null || today.sunset != null || today.moonPhase != null ||
-                    today.moonrise != null || today.moonset != null
-                )
-        ) {
-            Box(
-                Modifier.fillMaxWidth()
-                    .clip(RectangleShape)
-                    .background(ZhishengSurface)
-                    .border(1.dp, ZhishengCardBorder, RectangleShape)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            ) {
+        if (showLuminary) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
                 Column {
                     TeleLabel("日月", "LUMINARY")
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         today?.sunrise?.let {
                             Text("日出 ", style = MaterialTheme.typography.labelMedium, color = ZhishengTextSecondary)
@@ -2834,7 +2994,7 @@ private fun TelemetryGrid(
                             Text(it, style = MaterialTheme.typography.titleSmall, color = ZhishengOrange, fontWeight = FontWeight.Bold)
                         }
                     }
-                    Spacer(Modifier.height(7.dp))
+                    Spacer(Modifier.height(5.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("月相 ", style = MaterialTheme.typography.labelMedium, color = ZhishengTextSecondary)
                         Text(
@@ -2844,7 +3004,7 @@ private fun TelemetryGrid(
                             fontWeight = FontWeight.Bold,
                         )
                     }
-                    Spacer(Modifier.height(5.dp))
+                    Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("月出 ", style = MaterialTheme.typography.labelMedium, color = ZhishengTextSecondary)
                         Text(today.moonrise ?: "--", style = MaterialTheme.typography.titleSmall, color = ZhishengCyan, fontWeight = FontWeight.Bold)
@@ -2884,42 +3044,36 @@ private fun TeleCell(
     en: String,
     value: String,
     cur: CurrentWeather,
+    city: com.zhisheng.weather.model.City?,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier
-            .clip(RectangleShape)
-            .background(ZhishengSurface)
-            .border(1.dp, ZhishengCardBorder, RectangleShape)
-            .drawCornerBrackets(ZhishengOrange.copy(alpha = 0.8f))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Column {
-            TeleLabel(cn, en)
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (en == "WIND" && cur.windDirectionDeg != null) {
-                    WindCompass(cur.windDirectionDeg)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    value,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = ZhishengText,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
+    Column(modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+        TeleLabel(cn, en)
+        Spacer(Modifier.height(5.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (en == "WIND" && cur.windDirectionDeg != null) {
+                WindCompass(cur.windDirectionDeg, city?.latitude, city?.longitude)
+                Spacer(Modifier.width(8.dp))
             }
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                color = ZhishengText,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
         }
     }
 }
 
 @Composable
-private fun WindCompass(degrees: Double) {
+private fun WindCompass(degrees: Double, latitude: Double?, longitude: Double?) {
     val ring = ZhishengCardBorder
     val north = ZhishengOrange
     val needle = ZhishengCyan
     val hubFill = ZhishengSurface
+    val heading = rememberWorldHeadingDegrees(latitude, longitude)
+    val needleDeg = heading?.let { windNeedleScreenRotation(degrees.toFloat(), it) } ?: degrees.toFloat()
     Box(
         Modifier
             // 与 titleMedium 行高对齐，湿度/风向这一行才不会比气压紫外线更高。
@@ -2932,14 +3086,16 @@ private fun WindCompass(degrees: Double) {
             val r = size.minDimension / 2f - 0.8.dp.toPx()
             val tick = 2.2.dp.toPx()
             drawCircle(ring, r, c, style = Stroke(1.dp.toPx()))
-            drawLine(north, Offset(c.x, c.y - r), Offset(c.x, c.y - r + tick), 1.6.dp.toPx(), cap = StrokeCap.Round)
+            if (heading == null) {
+                drawLine(north, Offset(c.x, c.y - r), Offset(c.x, c.y - r + tick), 1.6.dp.toPx(), cap = StrokeCap.Round)
+            }
             val pip = 1.5.dp.toPx()
             drawLine(ring, Offset(c.x + r, c.y), Offset(c.x + r - pip, c.y), 1.dp.toPx())
             drawLine(ring, Offset(c.x, c.y + r), Offset(c.x, c.y + r - pip), 1.dp.toPx())
             drawLine(ring, Offset(c.x - r, c.y), Offset(c.x - r + pip, c.y), 1.dp.toPx())
         }
-        // 指针与文字共用同一“来向”角度：北=0°向上、东=90°向右，不再额外翻转 180°。
-        Canvas(Modifier.fillMaxSize().rotate(degrees.toFloat())) {
+        // 有朝向时箭头锁在真实来风方向；立着拿、平放都能用，不要求当前城市来自定位。
+        Canvas(Modifier.fillMaxSize().rotate(needleDeg)) {
             val c = center
             val dart = Path().apply {
                 moveTo(c.x, 2.2.dp.toPx())
@@ -3002,18 +3158,46 @@ private fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(aqi.level ?: "空气质量", style = MaterialTheme.typography.titleMedium, color = aqiColor(aqi.value), fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        aqi.level ?: "空气质量",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = aqiColor(aqi.value),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         "AQI${aqi.standard?.let { " · $it" }.orEmpty()} // AIR QUALITY INDEX",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZhishengTextTertiary,
                         letterSpacing = 0.7.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(Modifier.weight(1f))
                 aqi.primary?.let {
-                    Text("首要污染物 $it", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    Spacer(Modifier.width(12.dp))
+                    Column(
+                        modifier = Modifier.widthIn(max = 112.dp),
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        Text(
+                            "首要污染物",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZhishengTextTertiary,
+                            maxLines = 1,
+                        )
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = aqiColor(aqi.value),
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.End,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -3026,16 +3210,20 @@ private fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                         .background(aqiColor(aqi.value), RectangleShape),
                 )
             }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                 PollutantChip("PM2.5", aqi.pm25, aqi.pollutantUnits["pm2p5"], Modifier.weight(1f))
+                Box(Modifier.width(1.dp).fillMaxHeight().background(ZhishengCardBorder.copy(alpha = 0.65f)))
                 PollutantChip("PM10", aqi.pm10, aqi.pollutantUnits["pm10"], Modifier.weight(1f))
+                Box(Modifier.width(1.dp).fillMaxHeight().background(ZhishengCardBorder.copy(alpha = 0.65f)))
                 PollutantChip("O3", aqi.o3, aqi.pollutantUnits["o3"], Modifier.weight(1f))
             }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HorizontalDivider(color = ZhishengCardBorder.copy(alpha = 0.65f), thickness = 1.dp)
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                 PollutantChip("NO2", aqi.no2, aqi.pollutantUnits["no2"], Modifier.weight(1f))
+                Box(Modifier.width(1.dp).fillMaxHeight().background(ZhishengCardBorder.copy(alpha = 0.65f)))
                 PollutantChip("SO2", aqi.so2, aqi.pollutantUnits["so2"], Modifier.weight(1f))
+                Box(Modifier.width(1.dp).fillMaxHeight().background(ZhishengCardBorder.copy(alpha = 0.65f)))
                 PollutantChip("CO", aqi.co, aqi.pollutantUnits["co"], Modifier.weight(1f))
             }
             // 健康建议（v0.0.4：小米 suggest 接入，其余源无此行）
@@ -3050,10 +3238,7 @@ private fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
 @Composable
 private fun PollutantChip(name: String, value: String?, unit: String?, modifier: Modifier = Modifier) {
     Column(
-        modifier
-            .clip(RectangleShape)
-            .background(ZhishengCard)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+        modifier.padding(horizontal = 9.dp, vertical = 7.dp),
     ) {
         Text(name, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
         Row(verticalAlignment = Alignment.Bottom) {
@@ -3477,6 +3662,7 @@ private fun CityDrawer(
     uiState: HomeUiState,
     onBack: () -> Unit,
     onSelect: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
     onRemove: (String) -> Unit,
     onAddCity: () -> Unit,
 ) {
@@ -3504,6 +3690,16 @@ private fun CityDrawer(
             Text("城市", style = MaterialTheme.typography.titleMedium, color = ZhishengText, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
             Text("CITY LIST", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary, letterSpacing = 1.5.sp)
+            val favoriteCount = uiState.cities.count { it.isFavorite }
+            if (favoriteCount > 0) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "★ $favoriteCount ${uiText("收藏优先")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZhishengOrange,
+                    letterSpacing = 0.4.sp,
+                )
+            }
         }
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -3557,6 +3753,23 @@ private fun CityDrawer(
                                 color = ZhishengTextTertiary,
                             )
                         }
+                    }
+                    IconButton(
+                        onClick = { onToggleFavorite(city.locationKey) },
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Text(
+                            if (city.isFavorite) "★" else "☆",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (city.isFavorite) ZhishengOrange else ZhishengTextTertiary,
+                            modifier = Modifier.semantics {
+                                contentDescription = if (city.isFavorite) {
+                                    "${uiText("取消收藏")} ${city.displayName}"
+                                } else {
+                                    "${uiText("收藏")} ${city.displayName}"
+                                }
+                            },
+                        )
                     }
                     IconButton(onClick = { onRemove(city.locationKey) }, modifier = Modifier.size(48.dp)) {
                         Icon(

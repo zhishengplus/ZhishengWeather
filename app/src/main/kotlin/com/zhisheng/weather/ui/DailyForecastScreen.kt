@@ -543,7 +543,8 @@ internal fun buildForecastDigest(
     }
 
     fun isSnow(day: DailyWeather): Boolean =
-        day.condition in setOf(WeatherCondition.SNOW, WeatherCondition.SLEET, WeatherCondition.FREEZING_RAIN, WeatherCondition.FREEZING_DRIZZLE) ||
+        // 冻雨和冻毛毛雨仍是液态降水，不能因为“冻”就归入雪。
+        day.condition in setOf(WeatherCondition.SNOW, WeatherCondition.SLEET) ||
             "雪" in day.weatherText.orEmpty()
 
     fun isRain(day: DailyWeather): Boolean {
@@ -603,20 +604,26 @@ internal fun buildForecastDigest(
     val bigRangeDays = rangeDays.count { requireNotNull(it.high) - requireNotNull(it.low) >= 12.0 }
     val n = days.size
 
-    // 分级链：连续雨雪 > 明显降温 > 极端高温 > 冰点 > 持续高温 > 明天雨雪 > 有雪 > 雷雨多 > 周末雨雪 > 雨雪偏多
+    // 分级链：连续降水 > 明显降温 > 极端高温 > 冰点 > 持续高温 > 明天降水 > 有雪 > 雷雨多 > 周末降水 > 降水偏多
     //        > 切换频繁 > 明显回暖 > 转凉 > 小幅回暖 > 多风 > 雾霾沙 > 昼夜温差大 > 晴多 > 阴天多 > 平稳
     val headline: String
     val emote: BriefingEmote
     when {
         maxWetStreak >= 3 -> {
-            headline = forecastPick(listOf(
+            val lines = if (snowDays > 0) listOf(
                 "接下来有连着几天雨雪，中间好天气不多。",
                 "有一段连阴雨雪，晾晒的事往后放放。",
                 "雨雪会连着来几天，鞋子和伞都要备好。",
-                "接下来几天雨水接二连三，出门多留点时间。",
                 "接下来是连着的雨雪天，通勤路上慢一点。",
-                "雨雪天会连着来，家里通风和晾晒都先等等。",
-            ), days, utcOffsetSeconds, seedKey, 11)
+            ) else listOf(
+                "接下来有连着几天降雨，中间好天气不多。",
+                "有一段连阴雨，晾晒的事往后放放。",
+                "雨会连着来几天，鞋子和伞都要备好。",
+                "接下来几天雨水接二连三，出门多留点时间。",
+                "接下来是连着的雨天，通勤路上慢一点。",
+                "雨天会连着来，家里通风和晾晒都先等等。",
+            )
+            headline = forecastPick(lines, days, utcOffsetSeconds, seedKey, 11)
             emote = BriefingEmote.RAIN
         }
         trendCelsius <= -6.0 -> {
@@ -672,7 +679,7 @@ internal fun buildForecastDigest(
                     todayWet -> listOf(
                         "明天还有雨，伞先别收。",
                         "这雨还没下完，明天出门继续带伞。",
-                        "明天还有雨雪，路上照旧慢一点。",
+                        "明天还有雨，路上照旧慢一点。",
                     )
                     else -> listOf(
                         "明天就有雨，出门把伞装包里。",
@@ -704,23 +711,34 @@ internal fun buildForecastDigest(
             emote = BriefingEmote.RAIN
         }
         weekendWet -> {
-            headline = forecastPick(listOf(
+            val lines = if (snowDays > 0) listOf(
                 "这个周末有雨雪，出去玩前先看一眼预报。",
                 "周末的天气不太给力，雨雪可能来串门。",
                 "周末可能有雨雪，外出安排个备选更稳妥。",
                 "周末和雨雪撞上了，出门记得带伞。",
-            ), days, utcOffsetSeconds, seedKey, 89)
+            ) else listOf(
+                "这个周末可能下雨，出去玩前先看一眼预报。",
+                "周末可能碰上雨天，户外安排留个备选。",
+                "周末有降雨可能，出门记得带伞。",
+                "周末和雨天撞上了，行程多留一点余量。",
+            )
+            headline = forecastPick(lines, days, utcOffsetSeconds, seedKey, 89)
             emote = BriefingEmote.RAIN
         }
         wetDays >= maxOf(3, n / 3) -> {
-            headline = forecastPick(listOf(
+            val lines = if (snowDays > 0) listOf(
                 "这段时间雨雪偏多，出门常备一把伞。",
                 "接下来雨雪天不少，洗晒尽量挑晴天。",
                 "雨雪会时不时来一下，包里放把伞更稳妥。",
-                "晴雨来回切换，出门前记得看我一眼。",
                 "雨雪天数不算少，晾晒都要先看天。",
-                "接下来要常和雨雪打照面，伞放在顺手的地方。",
-            ), days, utcOffsetSeconds, seedKey, 29)
+            ) else listOf(
+                "这段时间雨天偏多，出门常备一把伞。",
+                "接下来下雨的日子不少，洗晒尽量挑晴天。",
+                "雨会时不时来一下，包里放把伞更稳妥。",
+                "晴雨来回切换，出门前记得看我一眼。",
+                "降雨天数不算少，晾晒都要先看天。",
+            )
+            headline = forecastPick(lines, days, utcOffsetSeconds, seedKey, 29)
             emote = BriefingEmote.RAIN
         }
         wetRuns >= 3 -> {
@@ -869,9 +887,9 @@ internal fun buildForecastDigest(
         snowDays >= 1 ->
             "我看到有 $snowDays 天可能下雪，路面结冰要当心。"
         else -> forecastPick(listOf(
-            "目前没看到明显雨雪，洗晒和出行都比较省心。",
-            "这段时间没有明显的雨雪，行程可以放心安排。",
-            "接下来没看到雨雪的影子，出行和洗晒都放心。",
+            "目前没看到明显降水，洗晒和出行都比较省心。",
+            "这段时间没有明显降水，行程可以放心安排。",
+            "接下来没看到降水的影子，出行和洗晒都放心。",
         ), days, utcOffsetSeconds, seedKey, 61)
     }
     val overview = "$temperatureCopy$wetCopy"
@@ -948,8 +966,9 @@ private fun ForecastSummaryPanel(
                     painter = painterResource(forecastGirlRes(digest.emote)),
                     contentDescription = null,
                     modifier = Modifier
-                        // 固定头像相对标题的视觉基线，避免正文行数变化时人物跟着下沉。
-                        .align(Alignment.TopStart)
+                        // 人物与标题、结论、指标组成一个整体：按内容区垂直居中，
+                        // 避免固定在顶部后，下半段指标旁留下明显空洞。
+                        .align(Alignment.CenterStart)
                         .offset(x = placement.x.dp, y = placement.y.dp)
                         .size(128.dp),
                 )
@@ -977,11 +996,15 @@ private fun ForecastSummaryPanel(
                         color = ZhishengTextSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ForecastMetric("最热", "${digest.highValue} · ${digest.highDate}", Modifier.weight(1f))
-                        ForecastMetric("最冷", "${digest.lowValue} · ${digest.lowDate}", Modifier.weight(1f))
-                        ForecastMetric("雨雪", digest.rainValue, Modifier.weight(1f))
-                        ForecastMetric("温差", digest.rangeValue, Modifier.weight(1f))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            ForecastMetric("最热", "${digest.highValue} · ${digest.highDate}", Modifier.weight(1f))
+                            ForecastMetric("最冷", "${digest.lowValue} · ${digest.lowDate}", Modifier.weight(1f))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            ForecastMetric("降水", digest.rainValue, Modifier.weight(1f))
+                            ForecastMetric("温差", digest.rangeValue, Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -1005,8 +1028,7 @@ private fun ForecastMetric(label: String, value: String, modifier: Modifier = Mo
             style = MaterialTheme.typography.labelMedium,
             color = ZhishengMint,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = 2,
         )
     }
 }

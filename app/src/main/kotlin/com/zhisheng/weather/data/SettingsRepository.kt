@@ -185,6 +185,17 @@ enum class AppIconStyle(val key: String, val cn: String) {
     }
 }
 
+/** 主页首屏播报样式：默认保留天气娘，也为偏好纯天气工具的用户提供无人物模式。 */
+enum class HomeBriefingStyle(val key: String, val cn: String) {
+    WEATHER_GIRL("weather_girl", "天气娘"),
+    TIPS("tips", "简洁 Tips");
+
+    companion object {
+        fun from(v: String?): HomeBriefingStyle =
+            entries.firstOrNull { it.key == v } ?: WEATHER_GIRL
+    }
+}
+
 enum class WidgetBackgroundMode(val key: String, val cn: String) {
     TRANSPARENT("transparent", "全透明"),
     GLASS("glass", "玻璃"),
@@ -240,7 +251,20 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
     TYPHOON("typhoon", "台风关注", "TYPHOON");
 
     companion object {
-        val defaultOrder: List<HomeModule> = entries.toList()
+        // 默认阅读顺序先回答用户最常看的三件事：接下来几小时、是否马上下雨、
+        // 未来几天怎样；回看与雷达属于主动查看工具，放在核心预报之后。
+        // 用户已经保存的自定义排序仍按原顺序读取，不会被默认值覆盖。
+        val defaultOrder: List<HomeModule> = listOf(
+            HOURLY,
+            PRECIP,
+            DAILY,
+            SPACETIME,
+            TELEMETRY,
+            AQI,
+            INDICES,
+            YESTERDAY,
+            TYPHOON,
+        )
 
         fun orderFrom(raw: String?): List<HomeModule> {
             if (raw.isNullOrBlank()) return defaultOrder
@@ -254,10 +278,13 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
                 }
                 .distinct()
                 .toMutableList()
-            // 旧版自定义顺序中没有新模块：就近插在短时降水后，
-            // 既不打乱用户已排好的其他模块，也不把新入口丢到页尾。
+            // 旧版本曾把完整默认序列写入偏好；这不代表用户主动排序。
+            // 仅当它仍与旧默认完全一致时迁移到新默认，任何真实改动过的顺序都原样保留。
+            if (selected == entries.toList()) return defaultOrder
+            // 旧版自定义顺序中没有新模块：插在逐日预报后；既不打乱用户
+            // 已排好的其他模块，也让核心预报先于回看/雷达工具出现。
             if (SPACETIME !in selected) {
-                val anchor = selected.indexOf(PRECIP)
+                val anchor = selected.indexOf(DAILY)
                 val insertion = if (anchor >= 0) anchor + 1 else selected.size
                 selected.add(insertion, SPACETIME)
             }
@@ -296,6 +323,7 @@ object SettingsRepository {
     private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
     private val KEY_ACCENT_TONE = stringPreferencesKey("accent_tone")
     private val KEY_APP_ICON = stringPreferencesKey("app_icon")
+    private val KEY_HOME_BRIEFING_STYLE = stringPreferencesKey("home_briefing_style")
     private val KEY_WIDGET_BACKGROUND = stringPreferencesKey("widget_background")
     private val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
     private val KEY_DAILY_FORECAST_LAYOUT = stringPreferencesKey("daily_forecast_layout")
@@ -373,6 +401,9 @@ object SettingsRepository {
     val appIconStyle: Flow<AppIconStyle> by lazy {
         store.data.map { AppIconStyle.from(it[KEY_APP_ICON]) }.distinctUntilChanged()
     }
+    val homeBriefingStyle: Flow<HomeBriefingStyle> by lazy {
+        store.data.map { HomeBriefingStyle.from(it[KEY_HOME_BRIEFING_STYLE]) }.distinctUntilChanged()
+    }
     val widgetBackgroundMode: Flow<WidgetBackgroundMode> by lazy {
         store.data.map { WidgetBackgroundMode.from(it[KEY_WIDGET_BACKGROUND]) }.distinctUntilChanged()
     }
@@ -446,6 +477,9 @@ object SettingsRepository {
     suspend fun setThemeMode(mode: ThemeMode) = store.edit { it[KEY_THEME_MODE] = mode.key }
     suspend fun setAccentTone(tone: AccentTone) = store.edit { it[KEY_ACCENT_TONE] = tone.key }
     suspend fun setAppIconStyle(style: AppIconStyle) = store.edit { it[KEY_APP_ICON] = style.key }
+    suspend fun setHomeBriefingStyle(style: HomeBriefingStyle) = store.edit {
+        it[KEY_HOME_BRIEFING_STYLE] = style.key
+    }
     suspend fun setWidgetBackgroundMode(mode: WidgetBackgroundMode) = store.edit {
         it[KEY_WIDGET_BACKGROUND] = mode.key
     }

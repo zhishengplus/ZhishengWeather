@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -64,16 +65,19 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhisheng.weather.data.AccentTone
 import com.zhisheng.weather.data.AppLanguage
 import com.zhisheng.weather.data.AppIconManager
 import com.zhisheng.weather.data.AppIconStyle
+import com.zhisheng.weather.data.AppUpdateInfo
 import com.zhisheng.weather.data.WidgetBackgroundMode
 import com.zhisheng.weather.data.AmbienceLevel
 import com.zhisheng.weather.data.CaiyunApi
 import com.zhisheng.weather.data.HomeModule
+import com.zhisheng.weather.data.HomeBriefingStyle
 import com.zhisheng.weather.data.LocationSource
 import com.zhisheng.weather.data.LifeIndexMetric
 import com.zhisheng.weather.data.LandscapeStandbyStyle
@@ -92,6 +96,7 @@ import com.zhisheng.weather.ui.theme.ZhishengCardBorder
 import com.zhisheng.weather.ui.theme.ZhishengCyan
 import com.zhisheng.weather.ui.theme.ZhishengMint
 import com.zhisheng.weather.ui.theme.ZhishengOrange
+import com.zhisheng.weather.ui.theme.ZhishengRed
 import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
@@ -119,6 +124,7 @@ fun SettingsScreen(
     sourceLoading: Boolean,
     onAtmosphereLab: () -> Unit,
     onShowWhatsNew: () -> Unit,
+    availableUpdate: AppUpdateInfo?,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -151,6 +157,9 @@ fun SettingsScreen(
     val themeMode by SettingsRepository.themeMode.collectAsState(initial = ThemeMode.DARK)
     val accentTone by SettingsRepository.accentTone.collectAsState(initial = AccentTone.STANDARD)
     val appIconStyle by SettingsRepository.appIconStyle.collectAsState(initial = AppIconStyle.CHARACTER)
+    val homeBriefingStyle by SettingsRepository.homeBriefingStyle.collectAsState(
+        initial = HomeBriefingStyle.WEATHER_GIRL,
+    )
     val widgetBackgroundMode by SettingsRepository.widgetBackgroundMode.collectAsState(initial = WidgetBackgroundMode.GLASS)
     val appLanguage by SettingsRepository.appLanguage.collectAsState(initial = AppLanguage.CHINESE)
     val moduleOrder by SettingsRepository.moduleOrder.collectAsState(initial = HomeModule.defaultOrder)
@@ -451,6 +460,21 @@ fun SettingsScreen(
             }
             if (!landscapeLayout || landscapeSection == 1) {
             SectionTitle(2, "首页内容", "HOME CONTENT", "调整单位、显示模块与主页顺序。")
+            InlineGroupLabel("主页播报")
+            CardBox {
+                SegmentRow(
+                    "播报样式",
+                    listOf("天气娘" to "weather_girl", "简洁 Tips" to "tips"),
+                    homeBriefingStyle.key,
+                    hint = "天气内容完全相同；简洁 Tips 不显示人物形象",
+                ) { value ->
+                    scope.launch {
+                        SettingsRepository.setHomeBriefingStyle(HomeBriefingStyle.from(value))
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
             InlineGroupLabel("单位")
             CardBox {
                 SegmentRow(
@@ -730,11 +754,13 @@ fun SettingsScreen(
                 HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
                 InfoRow(
                     "检查更新",
-                    "有新版本时再下载，不自动提醒",
+                    availableUpdate?.let { "发现新版本 v${it.versionName} · 点此查看" }
+                        ?: "自动检测更新 · 不弹窗、不自动下载",
                     onClick = { showAppUpdate = true },
+                    attention = availableUpdate != null,
                 )
                 HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
-                InfoRow("权限", "网络；位置可选；检查更新时才调用系统安装")
+                InfoRow("权限", "网络；位置可选；安装更新时才调用系统安装")
                 HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
                 ActionRow(
                     label = "> 社区贡献者名单 · ${CommunityContributors.size} 位",
@@ -799,7 +825,10 @@ fun SettingsScreen(
         CommunityGroupDialog(onClose = { showCommunityGroup = false })
     }
     if (showAppUpdate) {
-        AppUpdateDialog(onClose = { showAppUpdate = false })
+        AppUpdateDialog(
+            initialInfo = availableUpdate,
+            onClose = { showAppUpdate = false },
+        )
     }
 }
 
@@ -1181,7 +1210,12 @@ private fun ActionRow(
 }
 
 @Composable
-private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null) {
+private fun InfoRow(
+    label: String,
+    value: String,
+    onClick: (() -> Unit)? = null,
+    attention: Boolean = false,
+) {
     Row(
         modifier = Modifier.fillMaxWidth()
             .then(
@@ -1191,9 +1225,30 @@ private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.titleSmall, color = ZhishengTextSecondary)
-        Spacer(Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.labelMedium, color = ZhishengText)
+        if (attention) {
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .background(ZhishengRed, CircleShape),
+            )
+            Spacer(Modifier.width(7.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (attention) ZhishengRed else ZhishengTextSecondary,
+            fontWeight = if (attention) FontWeight.Bold else FontWeight.Normal,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (attention) ZhishengRed else ZhishengText,
+            textAlign = TextAlign.End,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }
 

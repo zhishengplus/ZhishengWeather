@@ -201,32 +201,33 @@ fun WhatsNewDialog(onClose: () -> Unit) {
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.forecastPage() {
-    item { UpdateTitle("02//", "天气回看更完整", "WEATHER HISTORY", ZhishengOrange) }
-    item { EmphasisBlock("昨天、过去一周与往年同日，放在同一条时间线上。") }
-    item { FeatureBlock("[新增] 时空观测", "天气回看与雷达合并为一个首页模块，共用一个开关和排序位置。") }
-    item { FeatureBlock("[新增] 往年同日", "今日预报与往年同日平均分开标注，直接给出偏暖、偏凉或接近往年的结论。") }
-    item { FeatureBlock("[新增] 温度带", "各年高温、低温与今日预报落在同一张图上，历史冷热一眼可见。") }
-    item { FeatureBlock("[新增] 逐日探索", "支持前后切换日期，回看范围可在近 5 年与近 10 年之间切换。") }
-    item { FeatureBlock("[新增] 过去7天", "新增过去 7 个完整自然日的回看，天气、温度、降水和最大风速逐日列出；今天未结束的数据不混入统计。") }
-    item { FeatureBlock("[优化] 有效记录", "没有可比温度的年份自动略过，不再用整屏“未知／--”占位。") }
+    item { UpdateTitle("02//", "过去的天气也能查", "WEATHER HISTORY", ZhishengOrange) }
+    item { EmphasisBlock("昨天、过去 7 日和往年同日，各自说明日期与数据含义。") }
+    item { FeatureBlock("[新增] 过去7日", "按完整自然日列出天气、最高最低温、降水和最大风速；今天还没结束，不会提前混进统计。") }
+    item { FeatureBlock("[新增] 往年同日", "每条历史记录都标出具体年份，再与今天的预报并排比较，偏暖还是偏凉一眼就能看懂。") }
+    item { FeatureBlock("[新增] 温度对比", "各年的最高温、最低温和今天的预报落在同一条温度带上，不用在一排数字里来回找。") }
+    item { FeatureBlock("[新增] 前后查日期", "可以逐日向前、向后查看，也可以在近 5 年与近 10 年之间切换。") }
+    item { FeatureBlock("[优化] 只显示有效记录", "缺少可比温度的年份会自动略过，不再用满屏“未知／--”占位置。") }
+    item { FeatureBlock("[整理] 时空观测", "天气回看与雷达仍放在同一个首页模块里，共用开关和排序位置。") }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.homeUpgradePage() {
-    item { UpdateTitle("01//", "主页天气更好读", "HOME", ZhishengMint) }
-    item { EmphasisBlock("主页预报更紧凑，提醒和天气娘都更完整。", ZhishengMint) }
-    item { FeatureBlock("[优化] 先看五天", "逐日预报改为紧凑的 5 天卡片，日期、天气、温度区间和降水概率一眼可读。") }
-    item { FeatureBlock("[新增] 近15日天气", "新增独立的 15 日预报页，白天天气、高低温走势、夜间天气、降水和风况在同一数据轨道中查看。") }
-    item { FeatureBlock("[新增] 天气娘播报", "播报与预警分开判断，细分高温、寒冷、大风、空气质量、能见度、紫外线、湿度和不同时段。") }
-    item { FeatureBlock("[新增] 天气娘表情", "表情随晴天、雨雪、冷热、大风、夜晚和预警切换，相同天气也有不同说法。") }
+    item { UpdateTitle("01//", "主页先说重点", "HOME", ZhishengMint) }
+    item { EmphasisBlock("先看接下来几小时和未来五天；需要更远的天气，再进入 15 日预报。", ZhishengMint) }
+    item { FeatureBlock("[调整] 逐时预报", "“现在”与本小时预报紧挨着显示，温度、降水概率和风速重新对齐；主页最多保留 24 个时间格，不再横着划很久。") }
+    item { FeatureBlock("[调整] 五日预报", "主页恢复紧凑的 5 天布局，日期、天气文字、降水概率和高低温放在固定位置，扫一眼就够。") }
+    item { FeatureBlock("[新增] 近15日天气", "独立页面补上昨天并压暗显示，往后可看天气、温度走势、降水和风况；天气娘会在下方用更自然的话总结变化。") }
+    item { FeatureBlock("[新增] 天气娘简报", "天气娘会按当前天气、时段和风险挑一句最值得看的提醒，不再和预警重复；不想显示形象时，也可以在设置里换成纯文字 Tips。") }
+    item { FeatureBlock("[新增] 表情与说法", "晴雨、冷热、大风、夜晚和预警都有对应表情，同类天气也准备了多种自然说法，尽量少让你反复看到同一句。") }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.sourcePage() {
-    item { UpdateTitle("03//", "雷达回归地图", "RADAR ECHO", ZhishengCyan) }
-    item { EmphasisBlock("道路、地名和回波占满屏幕，控制条只留底部一小块。", ZhishengCyan) }
-    item { FeatureBlock("[优化] 正常地图手势", "单指拖动、双指缩放、双击放大，操作与常见地图一致。") }
-    item { FeatureBlock("[优化] 平滑回放", "相邻回波短促过渡衔接；拖动时间轴立即停播，便于逐帧查看。") }
-    item { FeatureBlock("[新增] 覆盖范围清楚", "明确区分“没有明显回波”与“当地暂缺雷达覆盖”，不把无数据当成无降水。") }
-    item { FeatureBlock("[优化] 天地图底图", "雷达与台风共用天地图，中文注记随缩放覆盖城市、区县、乡镇和道路；回波可在 RainViewer 与彩云拼图之间切换，并保留中央气象台官方雷达备用入口。") }
+    item { UpdateTitle("03//", "雷达可以直接上手", "RADAR ECHO", ZhishengCyan) }
+    item { EmphasisBlock("把地图留给地图，把播放控制收在底部。", ZhishengCyan) }
+    item { FeatureBlock("[调整] 地图手势", "单指拖动、双指缩放、双击放大，操作方式与常见地图一致，可以直接查看周边雨带。") }
+    item { FeatureBlock("[调整] 回波播放", "相邻画面平滑衔接；拖动时间轴会立即停播，方便停在某一帧细看。") }
+    item { FeatureBlock("[新增] 多个回波入口", "可以在可用的回波源之间切换，也保留中央气象台官方雷达入口，某一路暂时不可用时还有选择。") }
+    item { FeatureBlock("[说明] 无雨不等于无数据", "“附近没有明显回波”和“当地暂缺雷达覆盖”会分开提示，不会把缺少资料说成没有降水。") }
     item {
         Text(
             "这两项都是辅助判断；出行和防灾请同时关注当地气象部门预警。",
@@ -238,24 +239,25 @@ private fun androidx.compose.foundation.lazy.LazyListScope.sourcePage() {
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.typhoonPage() {
-    item { UpdateTitle("04//", "台风路径观测", "TYPHOON TRACK", ZhishengOrange) }
-    item { EmphasisBlock("实况路径、中心强度、风圈和官方预报，放在同一张可缩放的图里。") }
-    item { FeatureBlock("[新增] 国内权威资料", "路径来自浙江省水利厅台风路径实时发布系统，来源、发布时间与缓存状态均有标注。") }
-    item { FeatureBlock("[新增] 路径可以细看", "支持双指缩放、拖动和双击复位；实况为实线，预报为虚线，强度变化按节点颜色区分。") }
-    item { FeatureBlock("[新增] 多机构预报", "默认展示中央气象台预报，可切换查看其他机构路径，分歧不混成一条线。") }
-    item { FeatureBlock("[新增] 断网仍有交代", "连接失败时显示最近一次有效缓存并标注时间；路径过期提示“资料较旧”，不冒充实时。") }
+    item { UpdateTitle("04//", "台风路径来了", "TYPHOON TRACK", ZhishengOrange) }
+    item { EmphasisBlock("实况走到哪里、强度怎样、接下来可能往哪走，都放在一张图里。") }
+    item { FeatureBlock("[新增] 国内公开资料", "路径来自浙江省水利厅台风路径实时发布系统，页面会写明来源、发布时间和当前缓存状态。") }
+    item { FeatureBlock("[新增] 路径与风圈", "地图支持拖动和双指缩放。实况、预报使用不同线型，节点颜色表示强度，风圈范围也会随位置绘出。") }
+    item { FeatureBlock("[新增] 多机构预报", "默认查看中央气象台预报，也可以切换其他机构；各家的判断分别画线，不会混成一条。") }
+    item { FeatureBlock("[说明] 资料是否新鲜", "暂时连不上时会显示最近一次有效资料并标出时间；资料较旧会直接提醒，不会当作实时路径。") }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.qualityPage() {
-    item { UpdateTitle("05//", "数据与桌面组件", "DATA / WIDGET", ZhishengMint) }
-    item { EmphasisBlock("每一项天气数据都按来源和单位重新核对；来源没有返回的内容保持为空，不拿别的数值冒充。", ZhishengMint) }
-    item { FeatureBlock("[优化] 和风天气", "逐项核对当前套餐可用的逐时、逐日、分钟降水、空气质量、预警和生活指数；套餐不含的项目自动隐藏。") }
-    item { FeatureBlock("[优化] 彩云天气", "补齐逐时体感、湿度、气压、能见度、云量、风向、空气质量和生活指数；按服务端更新时间和当地时区显示，各字段按单位分别换算。") }
-    item { FeatureBlock("[新增] 显示语言", "设置新增显示语言，可切换至日本語界面。") }
-    item { FeatureBlock("[新增] 组件底色", "桌面组件新增全透明、玻璃、不透明三档：全透明融入壁纸，玻璃保留原有效果，不透明在复杂壁纸上更清楚。") }
-    item { FeatureBlock("[新增] 横屏样式", "横屏待机界面新增“气象中枢”样式，日照轨迹、天气趋势与沉浸光感一同展示。") }
-    item { FeatureBlock("[更新] 社区贡献者", "感谢名单更新：参与试用、反馈和建议的伙伴已达 ${CommunityContributors.size} 位，完整名单在设置中查看。") }
-    item { FeatureBlock("[修复] 冷启动", "修正部分三星、真我设备横着冷启动时误进城市选择的问题，原有启动动画保留。") }
+    item { UpdateTitle("05//", "日常使用更顺手", "DATA / SETTINGS", ZhishengMint) }
+    item { EmphasisBlock("来源返回什么就显示什么，缺少的项目宁可留空，也不用别的数值代替。", ZhishengMint) }
+    item { FeatureBlock("[核对] 天气数据", "重新核对和风、彩云、小米与 Open-Meteo 的温度、风速、降水、气压、能见度和空气质量；时间按城市当地时区显示。") }
+    item { FeatureBlock("[整理] 设置", "设置页重新分组，常用选项更容易找到；新增日本語界面，并保留天气娘、纯文字 Tips 等显示选择。") }
+    item { FeatureBlock("[新增] 横屏气象中枢", "横屏待机默认使用新的“气象中枢”，也可以换回经典样式；横屏里能打开完整设置，也能一键回到竖屏。") }
+    item { FeatureBlock("[新增] 组件底色", "桌面组件有全透明、玻璃和不透明三档。壁纸简单时可以更轻，背景复杂时也能保持清楚。") }
+    item { FeatureBlock("[新增] 城市收藏", "在城市列表点亮星标，收藏城市就会排在前面；每组城市仍保持原来的顺序。") }
+    item { FeatureBlock("[新增] 更新提醒", "应用启动后会在后台检查一次版本。发现新版只在设置的“检查更新”旁显示红点，不弹窗，也不会自动下载。") }
+    item { FeatureBlock("[修复] 常见问题", "修正部分三星、真我设备横向冷启动误进城市选择，以及夜间图标、预警颜色、短时降水和大屏排版等问题。") }
+    item { FeatureBlock("[更新] 社区贡献者", "贡献者名单已收录 ${CommunityContributors.size} 位伙伴，完整名单可以在设置中查看。") }
     item {
         Text(
             "以上是本次更新的全部内容。",

@@ -67,10 +67,15 @@ private sealed class UpdateUi {
 }
 
 @Composable
-fun AppUpdateDialog(onClose: () -> Unit) {
+fun AppUpdateDialog(
+    initialInfo: AppUpdateInfo? = null,
+    onClose: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var ui by remember { mutableStateOf<UpdateUi>(UpdateUi.Checking) }
+    var ui by remember(initialInfo) {
+        mutableStateOf<UpdateUi>(initialInfo?.let(UpdateUi::Available) ?: UpdateUi.Checking)
+    }
     var progress by remember { mutableFloatStateOf(0f) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -82,11 +87,13 @@ fun AppUpdateDialog(onClose: () -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        ui = when (val result = AppUpdate.check()) {
-            is AppUpdateCheck.Available -> UpdateUi.Available(result.info)
-            AppUpdateCheck.UpToDate -> UpdateUi.UpToDate
-            is AppUpdateCheck.Failed -> UpdateUi.Failed(result.message)
+    LaunchedEffect(initialInfo) {
+        if (initialInfo == null) {
+            ui = when (val result = AppUpdate.check()) {
+                is AppUpdateCheck.Available -> UpdateUi.Available(result.info)
+                AppUpdateCheck.UpToDate -> UpdateUi.UpToDate
+                is AppUpdateCheck.Failed -> UpdateUi.Failed(result.message)
+            }
         }
     }
 

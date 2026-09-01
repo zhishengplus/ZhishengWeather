@@ -36,6 +36,9 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhisheng.weather.data.AccentTone
 import com.zhisheng.weather.data.AppLanguage
+import com.zhisheng.weather.data.AppUpdate
+import com.zhisheng.weather.data.AppUpdateCheck
+import com.zhisheng.weather.data.AppUpdateInfo
 import com.zhisheng.weather.data.LandscapeStandbyStyle
 import com.zhisheng.weather.data.SettingsRepository
 import com.zhisheng.weather.data.ThemeMode
@@ -95,6 +98,7 @@ class MainActivity : ComponentActivity() {
                 // 冷启动统一回主页（横放时由 standbyActive 展示气象时钟）；快捷方式仍由 command 明确跳转。
                 var screen by remember { mutableStateOf(AppScreen.HOME) }
                 var showWhatsNew by rememberSaveable { mutableStateOf(shouldShowWhatsNew()) }
+                var availableUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
                 val uiState by vm.uiState.collectAsState()
                 val command by shortcutCommand.collectAsState()
                 val landscapeStandby by SettingsRepository.landscapeStandby.collectAsState(initial = true)
@@ -189,6 +193,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 每次应用进程启动后静默检查一次。只更新设置页的红点和说明，
+                // 不弹窗、不下载，也不会打断启动动画或主页操作。
+                LaunchedEffect(Unit) {
+                    availableUpdate = when (val result = AppUpdate.check()) {
+                        is AppUpdateCheck.Available -> result.info
+                        AppUpdateCheck.UpToDate, is AppUpdateCheck.Failed -> null
+                    }
+                }
+
                 // 常亮屏幕（设置项）
                 val keepOn by SettingsRepository.keepScreenOn.collectAsState(initial = false)
                 DisposableEffect(keepOn, standbyVisible) {
@@ -276,6 +289,7 @@ class MainActivity : ComponentActivity() {
                                         sourceLoading = uiState.loading,
                                         onAtmosphereLab = { screen = AppScreen.ATMOSPHERE_LAB },
                                         onShowWhatsNew = { showWhatsNew = true },
+                                        availableUpdate = availableUpdate,
                                     )
                                     AppScreen.ATMOSPHERE_LAB -> AtmosphereLabScreen(
                                         initialLevel = uiState.prefs.ambience,

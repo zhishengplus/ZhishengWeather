@@ -16,6 +16,7 @@ data class City(
     val longitude: Double,
     val locationKey: String,
     val street: String? = null,
+    val isFavorite: Boolean = false,
 ) {
     val displayName: String
         get() = listOf(name, street.orEmpty())

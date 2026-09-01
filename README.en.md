@@ -109,6 +109,22 @@ The app also includes 15 custom weather glyphs for clear, cloudy, overcast, fog,
 
 The APK is distributed through GitHub. Android may ask you to allow the current app to install unknown-source files. That prompt refers to the download channel; Zhisheng Weather is not requesting another system permission.
 
+## Version 0.1.5-beta3
+
+- Restores the compact five-day home forecast and caps the hourly carousel at 24 readable slots, with fixed positions for conditions, rain chance, and high/low temperatures
+- Adds a dedicated 15-day view with a dimmed yesterday column and a more natural character-led outlook summary
+- Adds the previous seven days, same-date comparisons, and five- or ten-year history views; each record names its year and unusable records are omitted instead of shown as placeholders
+- Adds map-style radar controls, frame scrubbing, and smooth playback, with separate messages for clear nearby echoes and unavailable coverage
+- Adds typhoon tracks with observed positions, intensity, wind radii, forecasts from multiple agencies, cache time, and clear stale-data notices
+- Separates character briefings from alerts and tailors guidance to temperature, wind, precipitation, air quality, humidity, UV, visibility, and time of day; a text-only Tips mode is also available
+- Rechecks temperature, wind, precipitation, pressure, visibility, and air-quality handling across QWeather, Caiyun, Xiaomi, and Open-Meteo without substituting unrelated values for missing fields
+- Reorganizes Settings and adds Japanese UI, home briefing choices, and transparent, glass, or opaque widget backgrounds
+- Makes the new Weather Hub the default landscape style while retaining the classic view; full Settings and a return-to-portrait control are available in landscape
+- Adds city favorites that stay above regular cities while preserving the order within each group
+- Checks for updates quietly at launch and shows a badge in Settings when one is available, without pop-ups or automatic downloads
+- Fixes landscape cold-start routing on affected Samsung and realme devices, plus night icons, alert colors, short-term precipitation, and large-screen layouts
+- Expands the community contributor list to 558 names
+
 ## Version 0.1.3
 
 - Adds an optional landscape weather clock; disabling it keeps the app in portrait
