@@ -56,3 +56,4 @@ ARCHIVE.txt
 DEBUG_AUDIT_*.md
 fetch_caiyun_docs.ps1
 scripts/update_contributors_from_xlsx.py
+scripts/node_modules/
