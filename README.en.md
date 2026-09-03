@@ -101,6 +101,26 @@ Version 0.1.3 uses the weather character portrait by default. Her hair clip keep
 
 The app also includes 15 custom weather glyphs for clear, cloudy, overcast, fog, rain, thunderstorms, snow, wind, and sleet. They were drawn for this project rather than assembled from a general icon library.
 
+## Community
+
+If you want to talk about the weather, share an idea, or report a problem, join the Zhisheng Weather QQ group. The group number is `1106284779`, or scan the code below.
+
+<p align="center">
+  <img src="assets/qq-group.jpg" width="240" alt="Zhisheng Weather QQ group QR code"/>
+</p>
+
+## Sponsor
+
+Zhisheng Weather will always be free, and it will never have ads. I make this as a hobby, and I like talking with people who use it. If something looks wrong, a line of copy feels off, or you want something added next, just tell me.
+
+If you feel like supporting the project, scan the QR code below. Leave the name you want shown, and every sponsor will be added to the sponsor list.
+
+<p align="center">
+  <img src="assets/sponsor-wechat.jpg" width="220" alt="WeChat appreciation QR code"/>
+  <br/>
+  <b>May you step out into clear skies, ship code on the first try, and have days as smooth as fair weather.</b>
+</p>
+
 ## Install
 
 1. Download the latest public APK from [Releases](https://github.com/zhishengplus/ZhishengWeather/releases).
