@@ -1,8 +1,8 @@
 {
   "versionCode": 20260973,
   "versionName": "0.1.5-beta10-public",
-  "apkUrl": "https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10-public/ZhishengWeather-v0.1.5-beta10-public.apk",
+  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10-public/ZhishengWeather-v0.1.5-beta10-public.apk",
   "sha256": "5DED39D97A99808B81B61A651CF71AAE612F831DD8BD3F170FD999D98D5A1502",
   "notes": "重新设计五款桌面小组件，新增通知栏天气；优化首页滑动和信息排版；天气数据缺失时明确提示，改进城市切换与定位刷新。",
-  "pageUrl": "https://github.com/zhishengplus/ZhishengWeather/releases/tag/v0.1.5-beta10-public"
+  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10-public"
 }
