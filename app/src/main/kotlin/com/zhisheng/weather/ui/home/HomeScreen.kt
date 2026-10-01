@@ -151,6 +151,7 @@ import com.zhisheng.weather.ui.HomeUiState
 import com.zhisheng.weather.ui.WeatherViewModel
 import com.zhisheng.weather.ui.rememberWorldHeadingDegrees
 import com.zhisheng.weather.ui.windNeedleScreenRotation
+import com.zhisheng.weather.ui.components.CityOutlineMap
 import com.zhisheng.weather.ui.components.WeatherIcon
 import com.zhisheng.weather.ui.components.WeatherAmbience
 import com.zhisheng.weather.ui.components.isNightAt
@@ -858,7 +859,15 @@ private fun CityDeckOverlay(
                                         .background(if (focused) ZhishengMint else ZhishengCardBorder, RoundedCornerShape(4.dp)),
                                 )
                             }
-                            Spacer(Modifier.weight(1f))
+                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CityOutlineMap(
+                                    cityName = city.name,
+                                    cityAffiliation = city.affiliation,
+                                    cityLat = city.latitude,
+                                    cityLon = city.longitude,
+                                    modifier = Modifier.fillMaxSize().padding(4.dp),
+                                )
+                            }
                             Text(
                                 city.name,
                                 style = MaterialTheme.typography.headlineMedium,

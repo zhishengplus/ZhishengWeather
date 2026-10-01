@@ -1,0 +1,10 @@
+{
+  "name": "zhisheng-boundaries",
+  "private": true,
+  "type": "module",
+  "description": "生成城市卡片行政区划轮廓地图数据（boundaries.bin）",
+  "dependencies": {
+    "topojson-client": "^3.1.0",
+    "topojson-server": "^3.0.1"
+  }
+}
