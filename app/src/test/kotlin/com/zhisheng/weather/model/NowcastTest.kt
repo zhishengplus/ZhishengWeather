@@ -179,6 +179,39 @@ class NowcastTest {
     }
 
     @Test
+    fun briefingTemperatureThresholdsUseCelsiusEvenInFahrenheit() {
+        // 30°C → 25.6°C 实际降 4.4°C：摄氏口径属"转凉"档（显示 8°F）。
+        // 若按显示值判档，8°F 会被误报成"骤降/冷很多"。
+        val data = WeatherData(
+            daily = listOf(
+                DailyWeather(dateMillis = t0, high = 30.0, low = 20.0),
+                DailyWeather(dateMillis = t0 + 86_400_000L, high = 25.6, low = 18.0),
+            ),
+        )
+        val briefing = Nowcast.briefing(data, "f", t0)!!
+        assertEquals(BriefingKind.TEMPERATURE, briefing.kind)
+        assertEquals(BriefingEmote.COLD, briefing.emote)
+        assertTrue("应显示换算后的华氏差：${briefing.text}", briefing.text.contains("8°"))
+        assertTrue("4.4°C 降幅不应触发骤降措辞：${briefing.text}", !briefing.text.contains("骤降"))
+        assertTrue("4.4°C 降幅不应触发冷很多措辞：${briefing.text}", !briefing.text.contains("冷很多"))
+    }
+
+    @Test
+    fun briefingFahrenheitDeltaDisplaysConvertedValue() {
+        // 20°C → 28°C 升 8°C = 14.4°F，显示 14°；档位按 8°C 命中升温最高档。
+        val data = WeatherData(
+            daily = listOf(
+                DailyWeather(dateMillis = t0, high = 20.0, low = 12.0),
+                DailyWeather(dateMillis = t0 + 86_400_000L, high = 28.0, low = 18.0),
+            ),
+        )
+        val briefing = Nowcast.briefing(data, "f", t0)!!
+        assertEquals(BriefingKind.TEMPERATURE, briefing.kind)
+        assertEquals(BriefingEmote.HOT, briefing.emote)
+        assertTrue("应显示换算后的华氏差：${briefing.text}", briefing.text.contains("14°"))
+    }
+
+    @Test
     fun briefingPrefersRedAlertOverMildAlert() {
         val data = WeatherData(
             alerts = listOf(

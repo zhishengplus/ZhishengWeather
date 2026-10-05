@@ -19,7 +19,7 @@ CLAUDE.md
 # ===== 签名凭据（敏感，永不入库） =====
 keystore/*.jks
 # 公开版签名证书（非敏感，随库分发，供 -PpublicBuild 构建公开 APK）
-!keystore/public.jks
+# No signing keystore is distributed in this source export.
 
 # ===== 开发过程产物（仅本地保留） =====
 .hallmark/
@@ -50,9 +50,16 @@ shots/
 artifacts/
 backups/
 assets/branding/character_design/
-assets/branding/weather_girl_emotes_sheet.png
-*调研报告.md
-ARCHIVE.txt
 DEBUG_AUDIT_*.md
 fetch_caiyun_docs.ps1
 scripts/update_contributors_from_xlsx.py
+scripts/node_modules/
+
+# Private local signing/configuration
+keystore/
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx

@@ -3,31 +3,34 @@
     <shortcut
         android:shortcutId="refresh_weather"
         android:enabled="true"
+        android:icon="@drawable/shortcut_ph_arrow_clockwise"
         android:shortcutShortLabel="@string/shortcut_refresh_short"
         android:shortcutLongLabel="@string/shortcut_refresh_long">
         <intent
             android:action="com.zhisheng.weather.action.REFRESH"
-            android:targetPackage="com.zhisheng.weather"
+            android:targetPackage="@string/shortcut_target_package"
             android:targetClass="com.zhisheng.weather.MainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="search_city"
         android:enabled="true"
+        android:icon="@drawable/shortcut_ph_magnifying_glass"
         android:shortcutShortLabel="@string/shortcut_search_short"
         android:shortcutLongLabel="@string/shortcut_search_long">
         <intent
             android:action="com.zhisheng.weather.action.SEARCH"
-            android:targetPackage="com.zhisheng.weather"
+            android:targetPackage="@string/shortcut_target_package"
             android:targetClass="com.zhisheng.weather.MainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="open_settings"
         android:enabled="true"
+        android:icon="@drawable/shortcut_ph_gear"
         android:shortcutShortLabel="@string/shortcut_settings_short"
         android:shortcutLongLabel="@string/shortcut_settings_long">
         <intent
             android:action="com.zhisheng.weather.action.SETTINGS"
-            android:targetPackage="com.zhisheng.weather"
+            android:targetPackage="@string/shortcut_target_package"
             android:targetClass="com.zhisheng.weather.MainActivity" />
     </shortcut>
 </shortcuts>

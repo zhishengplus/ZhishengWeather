@@ -7,12 +7,17 @@ import org.junit.Test
 
 class AqiLayoutTest {
     @Test
-    fun primaryPollutantHasItsOwnResponsiveColumn() {
+    fun classicPrimaryPollutantHasItsOwnResponsiveColumn() {
         val projectDir = File(requireNotNull(System.getProperty("user.dir")))
         val home = File(
             projectDir,
             "src/main/kotlin/com/zhisheng/weather/ui/home/HomeScreen.kt",
-        ).readText()
+        ).readText().replace("\r\n", "\n")
+            .substringAfter("internal fun AqiCard(")
+            // Vista gives the primary pollutant a full-width wrapping line.
+            // This regression protects the classic header's narrow right column.
+            .substringAfter("        return\n    }")
+            .substringBefore("private fun PollutantChip(")
 
         assertTrue(home.contains("Column(Modifier.weight(1f))"))
         assertTrue(home.contains("modifier = Modifier.widthIn(max = 112.dp)"))

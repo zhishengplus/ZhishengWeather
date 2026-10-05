@@ -42,6 +42,7 @@ class CityFavoriteTest {
         val decoded = Json.decodeFromString<City>(oldJson)
 
         assertFalse(decoded.isFavorite)
+        assertEquals(null, decoded.weatherLocationKey)
     }
 
     @Test
@@ -53,5 +54,49 @@ class CityFavoriteTest {
 
         assertTrue(merged.isFavorite)
         assertEquals("新华路街道", merged.street)
+    }
+
+    @Test
+    fun seventhFavoriteIsRejectedWithoutChangingSavedCities() {
+        val cities = (1..7).map { city("地址$it", favorite = it <= 6) }
+
+        val toggled = toggleFavoriteIn(cities, "地址7")
+
+        assertEquals(FavoriteToggleResult.LIMIT_REACHED, toggled.result)
+        assertEquals(6, toggled.cities.count(City::isFavorite))
+        assertFalse(toggled.cities.last().isFavorite)
+    }
+
+    @Test
+    fun removingAFavoriteAlwaysRemainsAvailableAtTheLimit() {
+        val cities = (1..6).map { city("地址$it", favorite = true) }
+
+        val toggled = toggleFavoriteIn(cities, "地址3")
+
+        assertEquals(FavoriteToggleResult.UNFAVORITED, toggled.result)
+        assertEquals(5, toggled.cities.count(City::isFavorite))
+    }
+
+    @Test
+    fun preciseLocationsWithin250MetersMergeEvenWhenAnotherCityIsSelected() {
+        val oldHome = City("金川区", "甘肃·金昌", 38.5200, 102.1900, "geo:38.520,102.190")
+        val unrelatedSelected = city("北京")
+        val driftedHome = oldHome.copy(
+            latitude = 38.5208,
+            longitude = 102.1908,
+            locationKey = "geo:38.521,102.191",
+        )
+
+        assertEquals(0, nearestLocatedCityIndex(listOf(oldHome, unrelatedSelected), driftedHome))
+        assertTrue(shouldRefreshSameLocatedAddress(oldHome, driftedHome))
+    }
+
+    @Test
+    fun preciseLocationsFartherThan250MetersRemainSeparateFavorites() {
+        val home = City("金川区", "甘肃·金昌", 38.5200, 102.1900, "geo:38.520,102.190")
+        val office = home.copy(latitude = 38.5240, locationKey = "geo:38.524,102.190")
+
+        assertEquals(-1, nearestLocatedCityIndex(listOf(home), office))
+        assertFalse(shouldRefreshSameLocatedAddress(home, office))
     }
 }

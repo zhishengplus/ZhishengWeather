@@ -8,6 +8,15 @@ import com.zhisheng.weather.model.WeatherCondition
 
 class QWeatherV1MappingTest {
     @Test
+    fun gpsCoordinatesUseProviderSupportedOneKilometreGridInsteadOfCityId() {
+        assertEquals("32.12", QWeatherApi.lat(32.1234567))
+        assertEquals(
+            "118.77,32.12",
+            QWeatherApi.lonLat(com.zhisheng.weather.model.City("测试", "", 32.1234567, 118.7654321, "geo:test")),
+        )
+    }
+
+    @Test
     fun decimalPrecipitationProbabilityParsesAndNormalizes() {
         val parsed = Json.decodeFromString<QwHourly>(
             """{"hours":[{"forecastTime":"2026-08-27T00:00+08:00","precipitation":{"probability":0.31}}]}""",
@@ -15,6 +24,22 @@ class QWeatherV1MappingTest {
 
         assertEquals(0.31, parsed.hours.single().precipitation?.probability ?: -1.0, 0.0001)
         assertEquals(31, WeatherRepository.normalizeQwProbability(0.31))
+    }
+
+    @Test
+    fun precipitationProbabilityAcceptsValueObjectStringAndBareNumber() {
+        val json = Json { ignoreUnknownKeys = true; isLenient = true }
+        val objectShaped = json.decodeFromString<QwHourly>(
+            """{"hours":[{"forecastTime":"2026-08-27T00:00+08:00","precipitation":{"probability":{"value":0.31,"unit":"fraction"},"amount":0.2}}]}""",
+        )
+        val stringShaped = json.decodeFromString<QwHourly>(
+            """{"hours":[{"forecastTime":"2026-08-27T00:00+08:00","precipitation":{"probability":"31"}}]}""",
+        )
+
+        assertEquals(0.31, objectShaped.hours.single().precipitation?.probability ?: -1.0, 0.0001)
+        assertEquals(0.2, objectShaped.hours.single().precipitation?.amount?.value ?: -1.0, 0.0001)
+        assertEquals(31.0, stringShaped.hours.single().precipitation?.probability ?: -1.0, 0.0001)
+        assertEquals(31, WeatherRepository.normalizeQwProbability(objectShaped.hours.single().precipitation?.probability))
     }
 
     @Test

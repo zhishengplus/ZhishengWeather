@@ -106,5 +106,14 @@ class FmtTest {
         assertEquals("39.90N  116.41E", Fmt.coordinates(39.90, 116.41))
         assertEquals("33.87S  151.21E", Fmt.coordinates(-33.87, 151.21))
         assertEquals("34.60S  58.38W", Fmt.coordinates(-34.60, -58.38))
+        assertEquals("39.90N  116.41E", Fmt.coordinates(39.9042, 116.4074, precise = true))
+    }
+
+    @Test
+    fun aqiStandardUsesAStandardLabelInsteadOfLookingLikeALocation() {
+        assertEquals("国标", Fmt.aqiStandardLabel("中国"))
+        assertEquals("美标", Fmt.aqiStandardLabel("美国"))
+        assertEquals("QAQI", Fmt.aqiStandardLabel("QWeather"))
+        assertNull(Fmt.aqiStandardLabel(null))
     }
 }

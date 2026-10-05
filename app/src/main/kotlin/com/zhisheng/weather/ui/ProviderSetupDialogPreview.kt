@@ -1,4 +1,3 @@
-/* Hallmark · component demo: provider setup controls · eight states */
 package com.zhisheng.weather.ui
 
 import androidx.compose.foundation.background

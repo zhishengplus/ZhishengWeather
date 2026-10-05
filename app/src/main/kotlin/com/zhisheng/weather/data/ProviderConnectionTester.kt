@@ -1,5 +1,6 @@
 package com.zhisheng.weather.data
 
+import com.zhisheng.weather.model.City
 import java.net.IDN
 import java.net.SocketTimeoutException
 import java.net.URI
@@ -41,7 +42,7 @@ data class QweatherHostResult(
 /** 对尚未保存的候选凭据做一次真实请求；本类不读写 SecretStore，也不记录凭据。 */
 object ProviderConnectionTester {
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
     fun normalizeQweatherHost(raw: String): QweatherHostResult {
         val trimmed = raw.trim()
@@ -180,15 +181,36 @@ object ProviderConnectionTester {
         onStage(ProviderTestStage.CONNECT)
         val result = AmapApi.verifyKey(candidate)
         onStage(ProviderTestStage.VERIFY)
-        return if (result.ok && (!result.street.isNullOrBlank() || !result.formattedAddress.isNullOrBlank())) {
+        return if (result.ok) {
             ProviderConnectionResult(
                 ok = true,
-                title = "高德街道链路已建立",
-                detail = "已通过北京测试点完成逆地理编码；定位时将优先返回街道名称",
+                title = "高德地理服务已建立",
+                detail = "已通过北京测试点完成坐标转换与逆地理编码（高德仅用于定位增强，不参与天气）",
             )
         } else {
             val code = result.infocode?.let { " · $it" }.orEmpty()
             failure("高德验证未通过$code", result.info ?: "请核对 Key、应用类型、额度与服务状态")
+        }
+    }
+
+    suspend fun testBaidu(
+        ak: String,
+        onStage: (ProviderTestStage) -> Unit,
+    ): ProviderConnectionResult {
+        onStage(ProviderTestStage.VALIDATE)
+        val candidate = ak.trim()
+        if (candidate.isEmpty()) return failure("凭据还不完整", "请填写百度地图服务端 AK")
+        onStage(ProviderTestStage.CONNECT)
+        val result = BaiduApi.verifyKey(candidate)
+        onStage(ProviderTestStage.VERIFY)
+        return if (result.ok) {
+            ProviderConnectionResult(
+                ok = true,
+                title = "百度地理服务已建立",
+                detail = "已通过北京 WGS84 测试点完成逆地理查询（百度仅用于定位增强，不参与天气）",
+            )
+        } else {
+            failure("百度验证未通过", result.info ?: "请核对 AK、服务端应用类型、接口权限与额度")
         }
     }
 

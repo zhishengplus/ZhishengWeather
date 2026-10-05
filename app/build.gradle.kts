@@ -27,9 +27,10 @@ android {
         applicationId = "com.zhisheng.weather"
         minSdk = 26
         targetSdk = 34
-        // 20260901：0.1.5 beta3 社区前瞻版
-        versionCode = 20260901
-        versionName = "0.1.5-beta3"
+        // Beta 10 widget and update hotfix; keep the public package/signature.
+        versionCode = 20261028
+        versionName = "0.1.5-beta10.3-public"
+        resValue("string", "shortcut_target_package", "com.zhisheng.weather")
 
         // 发行渠道面向实体手机；去掉仅供 Intel 模拟器使用的 x86/x86_64 MapLibre 库。
         // 同时保留现代 ARM64 与 Android 8 时代的 32 位 ARM 设备。
@@ -46,40 +47,20 @@ android {
         buildConfigField("String", "TDT_TOKEN", "\"${lp("tianditu.token")}\"")
         buildConfigField("String", "COMMUNITY_QQ_GROUP", "\"$communityQqGroup\"")
         // 只有与 GitHub 公共版同包名、同签名的构建可以直接覆盖更新。
-        buildConfigField("boolean", "CAN_SELF_UPDATE", publicBuild.toString())
+        buildConfigField("boolean", "CAN_SELF_UPDATE", "false")
     }
 
-    signingConfigs {
-        create("public") {
-            // 公开证书只保证公开包可持续升级，密码本身不作为秘密。
-            storeFile = project.rootProject.file("keystore/public.jks")
-            storePassword = "public123"
-            keyAlias = "public"
-            keyPassword = "public123"
-        }
-        create("release") {
-            val props = Properties()
-            val f = rootProject.file("local.properties")
-            if (f.canRead()) props.load(f.inputStream())
-            if (publicBuild) {
-                // 公开版：随库公开证书（密码公开即其设计，仅保证安装/升级签名一致）
-                storeFile = project.rootProject.file("keystore/public.jks")
-                storePassword = "public123"
-                keyAlias = "public"
-                keyPassword = "public123"
-            } else {
-                storeFile = project.rootProject.file("keystore/zhisheng.jks")
-                storePassword = props.getProperty("keystore.store_password")
-                keyAlias = "zhisheng"
-                keyPassword = props.getProperty("keystore.key_password")
-            }
-        }
-    }
+    // Key-free source export: local builds use the developer debug signing key.
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = signingConfigs.getByName("debug")
         }
         create("performance") {
             initWith(getByName("release"))
@@ -92,8 +73,9 @@ android {
             initWith(getByName("release"))
             // 仅用于体验机并行安装：内容与公开版一致，但不覆盖手机上的满血版。
             applicationIdSuffix = ".preview"
-            resValue("string", "app_name", "枳生天气 公开版")
-            signingConfig = signingConfigs.getByName("public")
+            resValue("string", "shortcut_target_package", "com.zhisheng.weather.preview")
+            resValue("string", "app_name", "枳生天气 澄空体验")
+            signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             buildConfigField("String", "QW_HOST", "\"\"")
             buildConfigField("String", "QW_PROJECT_ID", "\"\"")
@@ -104,13 +86,13 @@ android {
         create("publicRelease") {
             initWith(getByName("release"))
             // 面向社区的正式公开包：独立任务、公开签名、凭据硬清空，避免漏写 -PpublicBuild。
-            signingConfig = signingConfigs.getByName("public")
+            signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             buildConfigField("String", "QW_HOST", "\"\"")
             buildConfigField("String", "QW_PROJECT_ID", "\"\"")
             buildConfigField("String", "QW_KID", "\"\"")
             buildConfigField("String", "QW_PRIVATE_KEY", "\"\"")
-            buildConfigField("boolean", "CAN_SELF_UPDATE", "true")
+            buildConfigField("boolean", "CAN_SELF_UPDATE", "false")
         }
     }
 
@@ -124,6 +106,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    androidResources {
+        noCompress += "mp4"
     }
     testOptions {
         // android.util.Log 等在纯 JVM 单测中返回默认值而非抛「not mocked」
@@ -139,6 +124,7 @@ dependencies {
     implementation(libs.compose.foundation)
     implementation(libs.compose.tooling.preview)
     implementation(libs.core.ktx)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
@@ -149,8 +135,14 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.coroutines.android)
     implementation(libs.bouncycastle)
-    implementation(libs.work.runtime.ktx)
+    implementation("org.shredzone.commons:commons-suncalc:3.11")
     implementation(libs.maplibre.android)
     testImplementation(libs.junit)
     debugImplementation(libs.compose.tooling)
+}
+
+// Opt-in native screenshot review; normal unit tests and release APKs do not include this fixture.
+if (providers.gradleProperty("atlasSnapshots").orNull == "true") {
+    apply(plugin = "app.cash.paparazzi")
+    android.sourceSets.getByName("test").java.srcDir("src/atlasSnapshot/kotlin")
 }

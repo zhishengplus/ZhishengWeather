@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_forecast_cell" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="vertical" android:layout_weight="1" android:gravity="center_vertical|end">
+<TextView android:id="@+id/widget_cell_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="end">
+</TextView>
+<ImageView android:id="@+id/widget_cell_icon" android:layout_width="24dp" android:layout_height="24dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_cell_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>

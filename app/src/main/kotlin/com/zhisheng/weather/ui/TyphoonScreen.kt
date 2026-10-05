@@ -1,11 +1,18 @@
-/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
-/* Hallmark · genre: atmospheric technical utility · macrostructure: Workbench · design-system: design.md · designed-as-app */
 package com.zhisheng.weather.ui
+
+import com.zhisheng.weather.R
+import com.zhisheng.weather.ui.components.VistaMapToolbar
+import com.zhisheng.weather.ui.components.VistaMapTool
+import com.zhisheng.weather.ui.components.SignalSlider
+import com.zhisheng.weather.ui.theme.isPhosphorVista
+import com.zhisheng.weather.ui.theme.zhishengCompactPanel
+import com.zhisheng.weather.ui.theme.zhishengPanel
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +47,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.toArgb
@@ -65,9 +73,8 @@ import com.zhisheng.weather.data.TyphoonWindRadii
 import com.zhisheng.weather.data.parseTyphoonTime
 import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import com.zhisheng.weather.ui.theme.ZhishengPalette
-import kotlinx.coroutines.Dispatchers
+import com.zhisheng.weather.ui.theme.zhishengScreen
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -113,7 +120,7 @@ import kotlin.math.sqrt
 private const val TY_REFRESH_MILLIS = 10 * 60_000L
 private const val TY_STALE_MILLIS = 24 * 60 * 60_000L
 private const val TY_MIN_ZOOM = 2.2
-private const val TY_MAX_ZOOM = 16.0
+private const val TY_MAX_ZOOM = 20.0
 private const val TY_HIT_RADIUS_PX = 48f
 
 private data class DisplayPoint(val point: TyphoonTrackPoint, val forecast: Boolean)
@@ -178,26 +185,32 @@ private fun TyphoonLoadingPage(
     onBack: () -> Unit,
 ) {
     val palette = LocalZhishengPalette.current
-    Column(Modifier.fillMaxSize().background(palette.bg).statusBarsPadding().navigationBarsPadding()) {
-        FeaturePageHeader(
-            title = "台风路径",
-            subtitle = "TYPHOON OBSERVATORY",
-            onBack = onBack,
-            trailing = { TyphoonIconAction(Icons.Filled.Refresh, "刷新台风资料", onRetry) },
-        )
+    Column(Modifier.fillMaxSize().zhishengScreen().statusBarsPadding().navigationBarsPadding()) {
+        if (isPhosphorVista) {
+            VistaMapToolbar("台风路径", "正在获取最新消息", onBack) {
+                VistaMapTool(R.drawable.ph_arrow_clockwise, "刷新", onRetry)
+            }
+        } else {
+            FeaturePageHeader(
+                title = "台风路径",
+                subtitle = "TYPHOON OBSERVATORY",
+                onBack = onBack,
+                trailing = { TyphoonIconAction(Icons.Filled.Refresh, "刷新台风资料", onRetry) },
+            )
+        }
         if (storms.isNotEmpty()) StormStrip(storms, selectedId, onSelectStorm, palette)
         when {
             catalog == null -> FeatureBootLoader(
                 channel = "TYPHOON LINK",
                 lines = listOf("连接国内台风资料源", "读取当前编号", "校准路径与预报时次"),
-                status = "正在建立台风观测链路…",
+                status = if (isPhosphorVista) "正在获取台风消息" else "正在获取台风消息…",
             )
-            catalog.value.isNullOrEmpty() -> TyphoonEmpty(catalog.error ?: "当前没有可显示的台风资料", onRetry)
+            catalog.value.isNullOrEmpty() -> TyphoonEmpty(catalog.error ?: if (isPhosphorVista) "现在没有正在活动的台风" else "当前没有可显示的台风资料", onRetry)
             detailError != null -> TyphoonEmpty(detailError, onRetry)
             else -> FeatureBootLoader(
                 channel = "TRACK DECODE",
                 lines = listOf("读取实况节点", "核对中心强度", "展开多机构预报"),
-                status = "正在整理路径…",
+                status = if (isPhosphorVista) "正在整理这条台风的路径" else "正在整理路径…",
             )
         }
     }
@@ -226,7 +239,7 @@ private fun TyphoonWorkbench(
     var showInfo by remember { mutableStateOf(false) }
     var recenterToken by remember(detail.storm.id) { mutableIntStateOf(0) }
 
-    Box(Modifier.fillMaxSize().background(palette.bg)) {
+    Box(Modifier.fillMaxSize().zhishengScreen()) {
         TyphoonVectorMap(
             detail = detail,
             forecast = forecast,
@@ -278,6 +291,30 @@ private fun TyphoonTopChrome(
     val latest = detail.observed.lastOrNull()
     val stale = parseTyphoonTime(latest?.time)?.let { System.currentTimeMillis() - it > TY_STALE_MILLIS } ?: true
     val warning = warningVisual(detail.storm.warningLevel, palette)
+    if (isPhosphorVista) {
+        Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+            VistaMapToolbar(
+                "台风 · " + vistaStormLabel(detail.storm.id, (storms.firstOrNull { it.id == selectedId } ?: detail.storm).name),
+                vistaTyphoonStatus(
+                    warning?.label,
+                    stale,
+                    detail.storm.active,
+                    selectedId != null && selectedId != detail.storm.id,
+                ),
+                onBack,
+            ) {
+                VistaMapTool(R.drawable.ph_crosshair, "回到台风路径", onRecenter)
+                VistaMapTool(R.drawable.ph_arrow_clockwise, "刷新", onRefresh)
+                VistaMapTool(R.drawable.ph_info, "这些线是什么", onInfo)
+            }
+            StormStrip(storms, selectedId, onSelectStorm, palette)
+            (catalogNotice ?: load.error)?.let {
+                Text(it, Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall, color = palette.orange)
+            }
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth().statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
@@ -348,6 +385,36 @@ private fun StormStrip(
     onSelect: (String) -> Unit,
     palette: ZhishengPalette,
 ) {
+    if (isPhosphorVista) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            storms.forEach { storm ->
+                val selected = storm.id == selectedId
+                val warning = warningVisual(storm.warningLevel, palette)
+                Row(
+                    Modifier
+                        .zhishengCompactPanel(selected = selected)
+                        .clickable(role = Role.Tab) { onSelect(storm.id) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    WarningDot(warning, palette)
+                    if (warning != null) Spacer(Modifier.width(6.dp))
+                    Text(
+                        vistaStormLabel(storm.id, storm.name),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) palette.text else palette.textSecondary,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
             .background(palette.bg.copy(alpha = 0.88f))
@@ -404,8 +471,10 @@ private fun warningVisual(raw: String?, palette: ZhishengPalette): WarningVisual
 private fun WarningDot(warning: WarningVisual?, palette: ZhishengPalette) {
     if (warning == null) return
     Box(
-        Modifier.size(8.dp).background(warning.color)
-            .then(if (warning.outlined) Modifier.border(1.dp, palette.textTertiary) else Modifier),
+        Modifier.size(if (isPhosphorVista) 9.dp else 8.dp)
+            .clip(if (isPhosphorVista) CircleShape else RectangleShape)
+            .background(warning.color)
+            .then(if (warning.outlined) Modifier.border(1.dp, palette.textTertiary, if (isPhosphorVista) CircleShape else RectangleShape) else Modifier),
     )
 }
 
@@ -420,21 +489,28 @@ private fun TyphoonBottomController(
     palette: ZhishengPalette,
 ) {
     val selectedIndex = displayPoints.indexOf(selected).coerceAtLeast(0)
-    Column(
-        modifier.fillMaxWidth().background(palette.surface.copy(alpha = 0.97f))
-            .border(1.dp, palette.cardBorder)
-            .navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp),
-    ) {
+    val panel = if (isPhosphorVista) {
+        Modifier.fillMaxWidth().zhishengPanel(containerColor = palette.surface.copy(alpha = 0.97f))
+            .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 14.dp)
+    } else {
+        Modifier.fillMaxWidth().background(palette.surface.copy(alpha = 0.97f)).border(1.dp, palette.cardBorder)
+            .navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)
+    }
+    Column(modifier.then(if (isPhosphorVista) Modifier.padding(horizontal = 12.dp, vertical = 8.dp) else Modifier).then(panel)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    selected?.let { if (it.forecast) "中央气象台预报" else "实况节点" } ?: "路径节点",
+                    selected?.let {
+                        if (it.forecast) {
+                            if (isPhosphorVista) "预计接下来会走到" else "中央气象台预报"
+                        } else if (isPhosphorVista) "刚才经过的位置" else "实况节点"
+                    } ?: if (isPhosphorVista) "选一个时刻看看" else "路径节点",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (selected?.forecast == true) palette.cyan else palette.mint,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    selected?.point?.let(::pointHeadline) ?: "暂无节点资料",
+                    selected?.point?.let { pointHeadline(it, human = isPhosphorVista) } ?: "暂时没有这段时间的记录",
                     style = MaterialTheme.typography.titleMedium,
                     color = palette.text,
                     fontWeight = FontWeight.Bold,
@@ -442,29 +518,31 @@ private fun TyphoonBottomController(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    selected?.point?.let(::pointDetailLine) ?: "--",
+                    selected?.point?.let { pointDetailLine(it, human = isPhosphorVista) } ?: "--",
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("${selectedIndex + 1}/${displayPoints.size}", style = MaterialTheme.typography.labelMedium, color = palette.orange, fontWeight = FontWeight.Bold)
-                Text(
-                    selected?.point?.let { "${formatCoord(it.longitude, "E")}  ${formatCoord(it.latitude, "N")}" } ?: "--",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.textTertiary,
-                )
+            if (!isPhosphorVista) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("${selectedIndex + 1}/${displayPoints.size}", style = MaterialTheme.typography.labelMedium, color = palette.orange, fontWeight = FontWeight.Bold)
+                    Text(
+                        selected?.point?.let { "${formatCoord(it.longitude, "E")}  ${formatCoord(it.latitude, "N")}" } ?: "--",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.textTertiary,
+                    )
+                }
             }
         }
         if (displayPoints.size > 1) {
-            Slider(
+            SignalSlider(
                 value = selectedIndex.toFloat(),
                 onValueChange = { value -> displayPoints.getOrNull(value.roundToInt())?.let(onSelect) },
                 valueRange = 0f..displayPoints.lastIndex.toFloat(),
-                modifier = Modifier.fillMaxWidth().height(34.dp)
-                    .semantics { contentDescription = "拖动查看完整台风路径时序" },
+                modifier = Modifier.fillMaxWidth().height(if (isPhosphorVista) 48.dp else 34.dp)
+                    .semantics { contentDescription = "拖动查看台风怎么走" },
                 colors = SliderDefaults.colors(
                     thumbColor = if (selected?.forecast == true) palette.cyan else palette.mint,
                     activeTrackColor = palette.textSecondary,
@@ -473,7 +551,8 @@ private fun TyphoonBottomController(
             )
         }
         Text(
-            "实况 ${detail.observed.size} 点${forecast?.let { " · 预报 ${it.points.size} 点" }.orEmpty()} · 拖动时间轴或点选路径节点",
+            if (isPhosphorVista) "拖动下面的条，看它从哪来、往哪去"
+            else "实况 ${detail.observed.size} 点${forecast?.let { " · 预报 ${it.points.size} 点" }.orEmpty()} · 拖动时间轴或点选路径节点",
             style = MaterialTheme.typography.labelSmall,
             color = palette.textTertiary,
             maxLines = 1,
@@ -494,7 +573,6 @@ private fun TyphoonVectorMap(
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val palette = LocalZhishengPalette.current
-    var fallbackGeo by remember { mutableStateOf<WeatherMapFallbackGeo?>(null) }
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableIntStateOf(0) }
     var lastFollowedKey by remember(detail.storm.id) { mutableStateOf<String?>(null) }
@@ -503,18 +581,6 @@ private fun TyphoonVectorMap(
     }
     val pointsState = rememberUpdatedState(allPoints)
     val selectState = rememberUpdatedState(onSelect)
-
-    LaunchedEffect(Unit) {
-        if (hasTiandituToken()) return@LaunchedEffect
-        fallbackGeo = withContext(Dispatchers.IO) {
-            runCatching {
-                WeatherMapFallbackGeo(
-                    china = context.assets.open("geo/china_boundaries.geojson").bufferedReader().use { it.readText() },
-                    coast = context.assets.open("geo/world_coastline.geojson").bufferedReader().use { it.readText() },
-                )
-            }.getOrNull()
-        }
-    }
 
     val mapView = remember {
         MapView(context).apply {
@@ -571,10 +637,9 @@ private fun TyphoonVectorMap(
         }
     }
 
-    LaunchedEffect(mapRef, fallbackGeo, palette.isLight) {
+    LaunchedEffect(mapRef, palette.isLight) {
         val map = mapRef ?: return@LaunchedEffect
-        if (!hasTiandituToken() && fallbackGeo == null) return@LaunchedEffect
-        map.setStyle(weatherMapBaseStyle(palette, fallbackGeo)) { style ->
+        map.setStyle(weatherMapBaseStyle(palette)) { style ->
             installTyphoonOverlayScaffold(style, palette)
             styleReady++
         }
@@ -625,8 +690,8 @@ private fun MapLibreMap.keepSelectedInView(target: LatLng) {
 private fun emptyFeatures(): FeatureCollection = FeatureCollection.fromFeatures(emptyArray<Feature>())
 
 private fun Style.addTyphoonLayer(layer: org.maplibre.android.style.layers.Layer, belowLabels: Boolean) {
-    if (belowLabels && getLayer(TIANDITU_LABEL_LAYER) != null) addLayerBelow(layer, TIANDITU_LABEL_LAYER)
-    else addLayer(layer)
+    val anchor = if (belowLabels) mapLabelAnchorId(this) else null
+    if (anchor != null) addLayerBelow(layer, anchor) else addLayer(layer)
 }
 
 private fun installTyphoonOverlayScaffold(style: Style, palette: ZhishengPalette) {
@@ -842,15 +907,22 @@ private fun TyphoonInfoDialog(detail: TyphoonDetail, onDismiss: () -> Unit) {
     val palette = LocalZhishengPalette.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RectangleShape,
-        title = { Text("台风路径说明", color = palette.text, fontWeight = FontWeight.Bold) },
+        containerColor = com.zhisheng.weather.ui.theme.zhishengOverlayColor(),
+        shape = MaterialTheme.shapes.large,
+        title = { Text(if (isPhosphorVista) "这些线是什么" else "台风路径说明", color = palette.text, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("数据来源：${detail.source}", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
-                Text("地图使用国家地理信息公共服务平台天地图（$TIANDITU_ATTRIBUTION）；中文注记随缩放覆盖城市、区县与岛屿。台湾省按中国省级行政区显示。", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
-                Text("实况路径为橙色折线，点位按国标强度配色。当前点之后的红色虚线是中央气象台预报路径。风圈按东北、东南、西南、西北四个象限等半径圆弧拼接；青、橙、红分别表示7级、10级、12级风圈。已结束的编号通常不再发布预报。", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
-                Text("预报路径会随官方发布调整，防灾避险请以中央气象台和当地政府最新预警为准。", color = palette.orange, style = MaterialTheme.typography.bodySmall)
+                if (isPhosphorVista) {
+                    Text("实线是已经走过的路。虚线是接下来可能走的路，官方会改。", color = palette.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                    Text("颜色越红，风越大。青、橙、红三圈分别大约是 7 级、10 级、12 级风。", color = palette.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                    Text("防灾听当地预警，别只看这张图。", color = palette.orange, style = MaterialTheme.typography.bodySmall)
+                    Text("资料来自 ${detail.source}。地图来自 OpenStreetMap。", color = palette.textTertiary, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("数据来源：${detail.source}", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("地图使用 OpenFreeMap（OpenStreetMap 矢量瓦片，$OPEN_MAP_ATTRIBUTION）；街道与地名随缩放出现。底图仅用于路径定位。", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("实况路径为橙色折线，点位按国标强度配色。当前点之后的红色虚线是中央气象台预报路径。风圈按东北、东南、西南、西北四个象限等半径圆弧拼接；青、橙、红分别表示7级、10级、12级风圈。已结束的编号通常不再发布预报。", color = palette.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("预报路径会随官方发布调整，防灾避险请以中央气象台和当地政府最新预警为准。", color = palette.orange, style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         confirmButton = {
@@ -891,6 +963,20 @@ private fun TyphoonEmpty(message: String, onRetry: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        if (isPhosphorVista) {
+            Text("现在没有台风", style = MaterialTheme.typography.titleMedium, color = palette.text, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            Text(message, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
+            Spacer(Modifier.height(18.dp))
+            Box(
+                Modifier.zhishengCompactPanel()
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+            ) {
+                Text("再试一次", style = MaterialTheme.typography.labelMedium, color = palette.mint)
+            }
+            return
+        }
         Text("TYPHOON LINK STANDBY", style = MaterialTheme.typography.labelMedium, color = palette.orange, letterSpacing = 1.6.sp)
         Spacer(Modifier.height(10.dp))
         Text(message, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
@@ -899,13 +985,25 @@ private fun TyphoonEmpty(message: String, onRetry: () -> Unit) {
     }
 }
 
-private fun pointHeadline(point: TyphoonTrackPoint): String = buildString {
+private fun pointHeadline(point: TyphoonTrackPoint, human: Boolean = false): String = buildString {
     append(formatTyphoonTime(point.time))
     append(" · ")
-    append(point.intensity?.takeIf(String::isNotBlank) ?: point.windLevel?.let { "${it}级" } ?: "强度待发布")
+    append(
+        point.intensity?.takeIf(String::isNotBlank)
+            ?: point.windLevel?.let { if (human) "大约 ${it} 级风" else "${it}级" }
+            ?: if (human) "还不知道有多强" else "强度待发布",
+    )
 }
 
-private fun pointDetailLine(point: TyphoonTrackPoint): String = buildString {
+private fun pointDetailLine(point: TyphoonTrackPoint, human: Boolean = false): String = buildString {
+    if (human) {
+        point.windSpeedMs?.let { append("风速大约 ${formatHumanNumber(it)} 米每秒") }
+        point.pressureHpa?.let { if (isNotEmpty()) append(" · "); append("气压 $it 百帕") }
+        point.moveDirection?.takeIf(String::isNotBlank)?.let { if (isNotEmpty()) append(" · "); append("往${it}走") }
+        point.moveSpeedKmh?.let { append(" ${formatHumanNumber(it)} 公里每小时") }
+        if (isEmpty()) append("详细资料还没到")
+        return@buildString
+    }
     point.windSpeedMs?.let { append("风速 ${format1(it)} m/s") }
     point.pressureHpa?.let { if (isNotEmpty()) append(" · "); append("气压 $it hPa") }
     point.moveDirection?.takeIf(String::isNotBlank)?.let { if (isNotEmpty()) append(" · "); append("向$it") }
@@ -926,3 +1024,7 @@ private fun formatTyphoonTime(raw: String?): String {
 
 private fun formatCoord(value: Double, suffix: String): String = "${format1(abs(value))}°$suffix"
 private fun format1(value: Double): String = String.format(Locale.US, "%.1f", value)
+private fun formatHumanNumber(value: Double): String {
+    val rounded = value.roundToInt()
+    return if (abs(value - rounded) < 0.05) rounded.toString() else format1(value)
+}

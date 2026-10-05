@@ -83,7 +83,7 @@ data class TyphoonLoad<T>(
     val error: String? = null,
 )
 
-private val typhoonJson = Json { ignoreUnknownKeys = true; isLenient = true }
+private val typhoonJson = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
 object TyphoonRepository {
     private const val BASE = "https://typhoon.slt.zj.gov.cn/Api"
@@ -103,6 +103,7 @@ object TyphoonRepository {
 
     suspend fun loadCatalog(context: Context, force: Boolean = false): TyphoonLoad<List<TyphoonStorm>> =
         withContext(Dispatchers.IO) {
+            if (!ReleaseFeatures.typhoon) return@withContext TyphoonLoad(error = "功能暂未开放")
             val cache = File(context.cacheDir, CATALOG_CACHE)
             if (!force) readCache<List<TyphoonStorm>>(cache, 10 * 60_000L)?.let { return@withContext it }
             runCatching {
@@ -121,6 +122,7 @@ object TyphoonRepository {
 
     suspend fun loadDetail(context: Context, storm: TyphoonStorm, force: Boolean = false): TyphoonLoad<TyphoonDetail> =
         withContext(Dispatchers.IO) {
+            if (!ReleaseFeatures.typhoon) return@withContext TyphoonLoad(error = "功能暂未开放")
             val safeId = storm.id.filter(Char::isLetterOrDigit)
             val cache = File(context.cacheDir, "$DETAIL_PREFIX$safeId.json")
             if (!force) readCache<TyphoonDetail>(cache, 10 * 60_000L)?.let { return@withContext it }
@@ -257,8 +259,12 @@ private fun parseTrackPoint(element: JsonElement): TyphoonTrackPoint? {
     )
 }
 
-private fun samePoint(a: TyphoonTrackPoint, b: TyphoonTrackPoint): Boolean =
-    kotlin.math.abs(a.latitude - b.latitude) < 0.001 && kotlin.math.abs(a.longitude - b.longitude) < 0.001
+private fun samePoint(a: TyphoonTrackPoint, b: TyphoonTrackPoint): Boolean {
+    val sameTime = parseTyphoonTime(a.time)?.let { it == parseTyphoonTime(b.time) }
+        ?: (a.time.isNotBlank() && a.time == b.time)
+    return sameTime && kotlin.math.abs(a.latitude - b.latitude) < 0.001 &&
+        kotlin.math.abs(a.longitude - b.longitude) < 0.001
+}
 
 internal fun parseTyphoonTime(text: String?): Long? {
     if (text.isNullOrBlank()) return null

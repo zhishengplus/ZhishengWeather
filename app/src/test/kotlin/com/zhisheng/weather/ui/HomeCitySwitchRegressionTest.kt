@@ -49,20 +49,18 @@ class HomeCitySwitchRegressionTest {
         assertTrue(source.contains("cityDeckVisible = true"))
         assertTrue(source.contains("val targetKey = uiState.cities"))
         assertTrue(source.contains("viewModel.selectCity(targetKey)"))
-        assertTrue(source.contains("松手切换；向上推可展开卡组"))
         assertFalse(source.contains("普通的主页横向滑动仍不会触发城市切换。\n                                cityDeckVisible = false"))
     }
 
     @Test
-    fun sensorSeparatesScrollBreathFromHeldScan() {
+    fun shortTapIsBoundedByLongPressTimeoutAndScrollsOnlyTheActiveCity() {
         val source = homeSource()
-        assertTrue(source.contains("active = cityDeckVisible && !cityDeckPinned"))
-        assertTrue(source.contains("scrolling = weatherContentScrolling && !cityDeckVisible"))
-        assertTrue(source.contains("delay(720)"))
-        assertTrue(source.contains("breath.animateTo(0.38f"))
-        assertTrue(source.contains("tween(1_100"))
-        assertTrue(source.contains("scan.animateTo(1.24f"))
-        assertTrue(source.contains("padding(bottom = 14.dp)"))
+        assertTrue(source.contains("withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis)"))
+        assertTrue(source.contains("waitForUpOrCancellation()"))
+        assertTrue(source.contains("if (up != null && !cityDeckVisible) scrollToTopRequest++"))
+        assertTrue(source.contains("page.cityKey == uiState.selectedCity?.locationKey"))
+        assertTrue(source.contains("weatherListState.animateScrollToItem(0)"))
+        assertTrue(source.contains("enabled = uiState.weather != null || uiState.cities.size > 1"))
     }
 
     @Test

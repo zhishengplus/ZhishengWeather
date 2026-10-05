@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 private object HistoricalWeatherSource {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -54,6 +54,9 @@ private object HistoricalWeatherSource {
             .addQueryParameter("wind_speed_unit", "kmh")
             .addQueryParameter("precipitation_unit", "mm")
             .addQueryParameter("timezone", "auto")
+            .apply {
+                if (city.isPreciseLocation) addQueryParameter("cell_selection", "nearest")
+            }
             .build()
         try {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->
@@ -83,7 +86,7 @@ private object HistoricalWeatherSource {
 }
 
 private object RecentWeatherSource {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -105,6 +108,9 @@ private object RecentWeatherSource {
             .addQueryParameter("wind_speed_unit", "kmh")
             .addQueryParameter("precipitation_unit", "mm")
             .addQueryParameter("timezone", "auto")
+            .apply {
+                if (city.isPreciseLocation) addQueryParameter("cell_selection", "nearest")
+            }
             .build()
         try {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->

@@ -34,3 +34,22 @@ val ZhishengTypography = Typography(
     labelMedium = TextStyle(fontFamily = ZhishengMono, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
     labelSmall = TextStyle(fontFamily = ZhishengMono, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp),
 )
+
+// 澄空终端：数字保持仪表感，中文标题与说明使用系统无衬线。
+val PhosphorVistaTypography = Typography(
+    displayLarge = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Light, fontSize = 80.sp, lineHeight = 84.sp),
+    displayMedium = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Bold, fontSize = 46.sp, lineHeight = 50.sp),
+    displaySmall = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 40.sp),
+    headlineLarge = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Bold, fontSize = 30.sp, lineHeight = 36.sp),
+    headlineMedium = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.SemiBold, fontSize = 25.sp, lineHeight = 31.sp),
+    headlineSmall = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.SemiBold, fontSize = 21.sp, lineHeight = 27.sp),
+    titleLarge = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp),
+    titleMedium = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
+    titleSmall = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
+    bodyLarge = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 25.sp),
+    bodyMedium = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp),
+    bodySmall = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 18.sp),
+    labelLarge = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
+    labelMedium = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 17.sp),
+    labelSmall = TextStyle(fontFamily = ZhishengReading, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
+)

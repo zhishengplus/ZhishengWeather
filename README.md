@@ -1,3 +1,8 @@
+> 无密钥源码导出版 / Key-free source export. Read SOURCE_EXPORT.md before building or publishing.
+
+> 最新公开版本：**0.1.5 Beta10.3**。小组件排版与编辑、定位收藏和天气读数已优化；新增可开关的日照天光，融入主页与五款澄空组件。
+> [Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public)
+
 ![枳生天气 · ZHISHENG WEATHER TERMINAL](assets/banner.png)
 
 <p align="center">
@@ -131,6 +136,28 @@ GitHub Releases 只发布正式公共版 APK，这也是普通用户唯一需要
 3. 首次打开默认显示北京，可通过搜索保存自己的城市。
 
 APK 只在 GitHub 发布。Android 可能提示允许当前应用安装未知来源文件，这是安装渠道提示，不是枳生天气申请了额外系统权限。
+
+## 0.1.5-beta5 更新
+
+- 城市列表新增“定位当前位置”，首次使用由 Android 提供“使用应用时允许”以及精确／大致位置选择
+- 同一城市可保存不同精确地址，收藏上限为 6 个，第 7 个会提示先取消已有收藏
+- 定位兼容系统融合服务及厂商 provider；四个天气源都从 GPS 坐标发起请求，Open-Meteo 精确定位时强制使用最近网格，和风按其官方坐标精度传入
+- 城市列表底部改为安全区操作栏，较矮屏幕和部分全面屏手机不再裁掉“添加城市”
+- 2×2 小组件固定为 110dp 正方形并禁止拉成长方形；收紧预警卡与下一模块之间的多余留白
+
+- 主页恢复紧凑的五日预报，逐时列表收在 24 个时间格内；日期、天气文字、降水概率和高低温更容易扫读
+- 新增独立的近 15 日天气页，补上压暗显示的昨天，并由天气娘用更自然的话总结后续变化
+- 新增过去 7 日、往年同日和近 5／10 年回看；每条记录标出具体年份，缺少有效温度的年份不再堆叠“未知”占位
+- 雷达支持地图拖动、双指缩放、时间轴逐帧查看和平滑播放，也会分清“没有明显回波”与“当地暂缺覆盖”
+- 新增台风路径，查看实况位置、中心强度、风圈和多机构预报；缓存时间与资料是否过期会直接标明
+- 天气娘简报与预警分开判断，按冷热、风雨、空气质量、湿度、紫外线、能见度和时段选择更合适的提醒；也可换成纯文字 Tips
+- 重新核对和风、彩云、小米与 Open-Meteo 的温度、风速、降水、气压、能见度和空气质量，缺少的字段不会用其他数值代替
+- 设置页重新分组，新增日本語界面、主页播报样式选择和桌面组件全透明／玻璃／不透明三档底色
+- 横屏待机默认新增“气象中枢”样式，同时保留经典样式；横屏内可打开完整设置，也能一键回到竖屏
+- 城市列表新增收藏星标，收藏城市自动排在前面，每组仍保持原来的顺序
+- 应用启动后静默检查新版本，发现更新只在设置页显示红点和文案，不弹窗、不自动下载
+- 修复部分三星、真我设备横向冷启动误进城市选择，以及夜间图标、预警颜色、短时降水和大屏排版等问题
+- 社区贡献者名单已收录 558 位伙伴
 
 ## 0.1.5-beta3 更新
 
@@ -278,13 +305,12 @@ qw.private_key=<Ed25519 私钥，单行>
 ```bash
 ./gradlew assembleDebug                     # Windows：.\gradlew.bat assembleDebug
 ./gradlew assembleRelease                   # 维护者本地构建，需配置自己的签名文件
-./gradlew assemblePublicRelease             # 公共版，强制清空凭据并使用随库公开证书
+./gradlew assemblePublicRelease             # 无密钥导出版：清空和风凭据，使用本机调试签名，仅供开发
 ./gradlew assemblePreviewPublic             # 维护者本地并行验收包，不上传 Release
 ./scripts/package_release.ps1               # 生成 GitHub 公共版 APK 及 SHA-256
 ./scripts/package_release.ps1 -IncludeDevelopmentBuilds  # 另打包本地开发构建
 ```
 
-随库的 `keystore/public.jks` 只用于保持公共版之间可以覆盖安装，不是私有签名身份。
 
 主要技术栈：Kotlin 2.0.21、Jetpack Compose、Material 3、ViewModel / StateFlow、Retrofit、OkHttp、kotlinx-serialization、DataStore 和 BouncyCastle。`minSdk 26`，`targetSdk 34`。代码结构与提交约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 

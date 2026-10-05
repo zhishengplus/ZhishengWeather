@@ -30,7 +30,7 @@ class ContributorsTest {
         assertEquals("xGrok", CommunityContributors[2])
         assertEquals("r1file", CommunityContributors[6])
         assertEquals("库洛小黑", CommunityContributors[7])
-        assertEquals(558, CommunityContributors.size)
+        assertEquals(1204, CommunityContributors.size)
         assertEquals(CommunityContributors.size, CommunityContributors.distinct().size)
     }
 
@@ -40,7 +40,7 @@ class ContributorsTest {
             listOf("FOUNDING", "COCREATION", "SUPPORT", "COMMUNITY"),
             CommunityContributorSections.map { it.key },
         )
-        assertEquals(listOf(25, 153, 24, 356), CommunityContributorSections.map { it.contributors.size })
+        assertEquals(listOf(25, 408, 53, 718), CommunityContributorSections.map { it.contributors.size })
         assertEquals(
             CommunityContributors,
             CommunityContributorSections.flatMap { it.contributors }.distinct(),

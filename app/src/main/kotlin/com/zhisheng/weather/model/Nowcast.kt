@@ -117,15 +117,16 @@ object Nowcast {
         nowMillis: Long,
         wet: Float = WET_THRESHOLD,
         currentPrecip: Boolean = false,
+        intervalMinutes: Int = 1,
     ): RainTiming {
         val sorted = minutes.sortedBy { it.timeMillis }
-        val seriesNow = seriesWetAt(sorted, nowMillis, wet)
+        val seriesNow = seriesWetAt(sorted, nowMillis, wet, intervalMinutes)
         val rainingNow = currentPrecip || seriesNow
         if (rainingNow) {
             val end = if (seriesNow) minutesUntilDry(sorted, nowMillis, wet) else null
             return RainTiming(true, 0, end)
         }
-        val start = minutesUntilWet(sorted, nowMillis, wet)
+        val start = minutesUntilWet(sorted, nowMillis, wet, intervalMinutes)
         return RainTiming(false, start, null)
     }
 
@@ -150,7 +151,8 @@ object Nowcast {
         val precipNow = data.current.let { cur ->
             cur != null && (cur.condition?.isPrecipitation == true || (cur.precipMm ?: 0.0) > 0.05)
         }
-        val timing = rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow)
+        val timing = rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow,
+            intervalMinutes = data.rainMeta?.intervalMinutes ?: 1)
         val api = data.rainNowcast?.trim()?.takeIf { it.isNotEmpty() }?.let { tidyCopy(it) }
 
         if (timing.rainingNow) {
@@ -199,7 +201,8 @@ object Nowcast {
         val precipNow = data.current.let { cur ->
             cur != null && (cur.condition?.isPrecipitation == true || (cur.precipMm ?: 0.0) > 0.05)
         }
-        val timing = rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow)
+        val timing = rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow,
+            intervalMinutes = data.rainMeta?.intervalMinutes ?: 1)
         if (timing.hasRain) return true
         val api = data.rainNowcast?.trim()?.takeIf { it.isNotEmpty() }
         if (api != null && looksLikeIncomingRain(api)) return true
@@ -220,7 +223,8 @@ object Nowcast {
     // 任何源只要确实返回当前/未来短时序列就展示；全 0 代表“有数据且未来无雨”，
     // 空列表才代表当前源没有这项能力或请求失败。
     fun shouldShowPrecipModule(data: WeatherData, nowMillis: Long): Boolean {
-        val hasUsableSeries = data.rainMinutes.any { it.timeMillis >= nowMillis - NOW_WINDOW_MS }
+        val hasUsableSeries = data.rainMinutes.any { it.timeMillis >= nowMillis - NOW_WINDOW_MS } ||
+            samplesAt(data.rainMinutes, nowMillis, data.rainMeta?.intervalMinutes ?: 1).isNotEmpty()
         return hasUsableSeries || shouldShowPrecipCard(data, nowMillis)
     }
 
@@ -260,22 +264,36 @@ object Nowcast {
         minutes: List<MinutePrecip>,
         nowMillis: Long,
         wet: Float = WET_THRESHOLD,
+        intervalMinutes: Int = 1,
     ): Boolean {
-        if (minutes.isEmpty()) return false
-        val window = minutes.filter { abs(it.timeMillis - nowMillis) <= NOW_WINDOW_MS }
-        if (window.isNotEmpty()) return window.any { it.precip >= wet }
-        val first = minutes.first()
-        return first.timeMillis > nowMillis &&
-            first.timeMillis - nowMillis <= NOW_WINDOW_MS &&
-            first.precip >= wet
+        return samplesAt(minutes, nowMillis, intervalMinutes).any { it.precip >= wet }
+    }
+
+    // Coarse samples describe the interval starting at their timestamp. Future
+    // buckets must not count as current rain merely because they are nearby.
+    internal fun samplesAt(
+        minutes: List<MinutePrecip>,
+        nowMillis: Long,
+        intervalMinutes: Int = 1,
+    ): List<MinutePrecip> {
+        if (intervalMinutes <= 1) {
+            return minutes.filter { abs(it.timeMillis - nowMillis) <= NOW_WINDOW_MS }
+        }
+        val duration = intervalMinutes.toLong() * MINUTE_MS
+        val activeStart = minutes.asSequence()
+            .filter { it.timeMillis <= nowMillis && nowMillis - it.timeMillis < duration }
+            .maxOfOrNull { it.timeMillis } ?: return emptyList()
+        return minutes.filter { it.timeMillis == activeStart }
     }
 
     private fun minutesUntilWet(
         minutes: List<MinutePrecip>,
         nowMillis: Long,
         wet: Float,
+        intervalMinutes: Int,
     ): Int? {
-        val firstWet = minutes.firstOrNull { it.timeMillis > nowMillis + NOW_WINDOW_MS && it.precip >= wet }
+        val cutoff = nowMillis + if (intervalMinutes > 1) 0L else NOW_WINDOW_MS
+        val firstWet = minutes.firstOrNull { it.timeMillis > cutoff && it.precip >= wet }
             ?: return null
         val mins = ((firstWet.timeMillis - nowMillis + 30_000L) / MINUTE_MS).toInt().coerceAtLeast(1)
         return mins
@@ -344,11 +362,15 @@ object Nowcast {
     private fun temperatureDeltaBriefing(data: WeatherData, unit: String, nowMillis: Long): HeroBriefing? {
         val today = data.todayDaily(nowMillis)?.high ?: return null
         val tomorrow = data.tomorrowDaily(nowMillis)?.high ?: return null
-        val delta = displayTemp(tomorrow, unit) - displayTemp(today, unit)
-        if (abs(delta) < 3) return null
-        val magnitude = abs(delta)
+        // 档位阈值按摄氏度原始差值判断（华氏下 3/8°F 仅 1.7/4.4°C，直接比会降档误报）；
+        // magnitude 只承载文案数值，按显示单位换算（华氏差 ×9/5，差值换算不带 +32 偏移）。
+        val deltaC = tomorrow - today
+        if (abs(deltaC) < 3) return null
+        val delta = deltaC
+        val tier = abs(deltaC)
+        val magnitude = (if (unit == "f") tier * 9.0 / 5.0 else tier).roundToInt()
         val lines = if (delta > 0) when {
-            magnitude >= 8 -> listOf(
+            tier >= 8 -> listOf(
                 "明天最高温会比今天高 ${magnitude}°，中午前后注意防晒补水。",
                 "明天升温 ${magnitude}°，白天会更热，衣服可以穿得轻薄些。",
                 "明天最高温预计上升 ${magnitude}°，外出尽量避开午后最热的时段。",
@@ -356,7 +378,7 @@ object Nowcast {
                 "明天比今天热不少，最高温会高出 ${magnitude}°。",
                 "明天热得很明显，最高温预计升 ${magnitude}°，注意防暑。",
             )
-            magnitude >= 5 -> listOf(
+            tier >= 5 -> listOf(
                 "明天最高温会升 ${magnitude}°，中午会比今天热一些。",
                 "明天比今天高 ${magnitude}°，可以提前准备轻薄一点的衣服。",
                 "明天会暖不少，最高温预计上升 ${magnitude}°。",
@@ -372,7 +394,7 @@ object Nowcast {
                 "明天回暖 ${magnitude}°，早晚还是照常保暖。",
             )
         } else when {
-            magnitude >= 8 -> listOf(
+            tier >= 8 -> listOf(
                 "明天最高温会骤降 ${magnitude}°，厚外套提前准备好。",
                 "明天会比今天冷很多，最高温预计下降 ${magnitude}°。",
                 "明天降温 ${magnitude}°，早晚出门要多穿一些。",
@@ -380,7 +402,7 @@ object Nowcast {
                 "明天最高温下降 ${magnitude}°，出门多带一层更稳妥。",
                 "明天要冷一大截，最高温比今天低 ${magnitude}°。",
             )
-            magnitude >= 5 -> listOf(
+            tier >= 5 -> listOf(
                 "明天会比今天低 ${magnitude}°，今晚把外套备好。",
                 "明天会降温 ${magnitude}°，早晚别穿得太单薄。",
                 "明天最高温回落 ${magnitude}°，体感会明显转凉。",

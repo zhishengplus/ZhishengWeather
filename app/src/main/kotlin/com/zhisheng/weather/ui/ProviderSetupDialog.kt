@@ -1,8 +1,3 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
-/* Hallmark · component: provider setup modal · genre: atmospheric · theme: existing Zhisheng terminal
- * states: default · hover · focus · active · disabled · loading · error · success
- * contrast: pass
- */
 package com.zhisheng.weather.ui
 
 import android.content.ClipData
@@ -61,6 +56,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.zhisheng.weather.ui.theme.zhishengScreen
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -101,12 +97,14 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 import kotlinx.coroutines.delay
 
 private val EnterEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private val ExitEase = CubicBezierEasing(0.7f, 0f, 0.84f, 0f)
 private const val CAIYUN_APPLICATION_MANAGE_URL = "https://platform.caiyunapp.com/application/manage"
 private const val AMAP_APPLICATION_MANAGE_URL = "https://console.amap.com/dev/key/app"
+private const val BAIDU_APPLICATION_MANAGE_URL = "https://lbsyun.baidu.com/apiconsole/key"
 
 @Composable
 fun ProviderWizard(kind: ProviderWizardKind, onClose: () -> Unit) {
@@ -170,12 +168,12 @@ fun ProviderWizard(kind: ProviderWizardKind, onClose: () -> Unit) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ZhishengBg.copy(alpha = 0.78f))
+                .zhishengScreen()
                 .safeDrawingPadding()
                 .padding(12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            val panelMaxHeight = minOf(maxHeight - 24.dp, 680.dp)
+            val panelMaxHeight = (maxHeight - 24.dp).coerceIn(0.dp, 680.dp)
             val panelEnter: EnterTransition = if (reducedMotion) {
                 fadeIn(tween(120, easing = EnterEase))
             } else {
@@ -186,7 +184,7 @@ fun ProviderWizard(kind: ProviderWizardKind, onClose: () -> Unit) {
                 fadeOut(tween(120, easing = ExitEase))
             } else {
                 fadeOut(tween(220, easing = ExitEase)) +
-                    scaleOut(tween(220, easing = ExitEase), targetScale = 0.98f)
+                    scaleOut(tween(220, easing = ExitEase), targetScale = 0.96f)
             }
             AnimatedVisibility(visible = shown, enter = panelEnter, exit = panelExit) {
                 ProviderSetupPanel(
@@ -207,7 +205,7 @@ fun ProviderWizard(kind: ProviderWizardKind, onClose: () -> Unit) {
 }
 
 @Composable
-private fun ProviderSetupPanel(
+internal fun ProviderSetupPanel(
     state: ProviderSetupUiState,
     model: ProviderSetupViewModel,
     compact: Boolean,
@@ -227,14 +225,13 @@ private fun ProviderSetupPanel(
     LaunchedEffect(state.step == 0) {
         if (state.step == 0) {
             delay(80)
-            firstAction.requestFocus()
+            runCatching { firstAction.requestFocus() }
         }
     }
 
     Column(
         modifier = modifier
-            .background(ZhishengSurface, RectangleShape)
-            .border(1.dp, ZhishengCardBorder, RectangleShape)
+            .zhishengDialogPanel()
             .imePadding(),
     ) {
         ProviderHeader(state = state, onBack = onBack, onClose = onClose)
@@ -265,7 +262,8 @@ private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onCl
     val (title, provider) = when (state.kind) {
         ProviderWizardKind.QWEATHER -> "接入和风天气" to "QWEATHER"
         ProviderWizardKind.CAIYUN -> "接入彩云天气" to "CAIYUN"
-        ProviderWizardKind.AMAP -> "接入高德街道定位" to "AMAP GEO"
+        ProviderWizardKind.AMAP -> "接入高德地理服务" to "AMAP GEO"
+        ProviderWizardKind.BAIDU -> "接入百度地理服务" to "BAIDU GEO"
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 12.dp),
@@ -289,7 +287,7 @@ private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onCl
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "$provider · PROVIDER LINK",
+                if (com.zhisheng.weather.ui.theme.isPhosphorVista) "数据源接入" else "$provider · PROVIDER LINK",
                 style = MaterialTheme.typography.labelSmall,
                 color = ZhishengTextTertiary,
                 letterSpacing = 1.2.sp,
@@ -320,6 +318,8 @@ private fun StepRail(state: ProviderSetupUiState) {
             listOf("准备", "进入应用管理", "打开访问控制", "复制并验证", "接入完成")
         ProviderWizardKind.AMAP ->
             listOf("准备", "创建 Web 应用", "复制并验证", "接入完成")
+        ProviderWizardKind.BAIDU ->
+            listOf("准备", "创建服务端应用", "复制并验证", "接入完成")
     }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -336,7 +336,7 @@ private fun StepRail(state: ProviderSetupUiState) {
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("CURRENT TASK", color = ZhishengTextTertiary, style = MaterialTheme.typography.labelSmall)
+            Text("当前步骤", color = ZhishengTextTertiary, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.weight(1f))
             Text(
                 labels.getOrElse(state.step) { labels.last() },
@@ -353,6 +353,7 @@ private fun ProviderStepContent(state: ProviderSetupUiState, model: ProviderSetu
         ProviderWizardKind.QWEATHER -> QweatherStep(state, model)
         ProviderWizardKind.CAIYUN -> CaiyunStep(state, model)
         ProviderWizardKind.AMAP -> AmapStep(state, model)
+        ProviderWizardKind.BAIDU -> BaiduStep(state, model)
     }
 }
 
@@ -584,12 +585,12 @@ private fun AmapStep(state: ProviderSetupUiState, model: ProviderSetupViewModel)
     when (state.step) {
         0 -> {
             StepIntro(
-                title = "增强国内街道名称",
-                body = "高德只负责把精确坐标转换成街道名称，不接管系统定位，也不改变天气数据源。未配置、额度不足或请求失败时会自动退回系统识别。",
+                title = "接入地址与街道解析",
+                body = "高德 Web 服务 Key 用于地址解析和精确地点搜索。beta6 不再接入高德天气，普通天气自动优选仍使用小米与 Open-Meteo。",
             )
             TerminalCommand("location enhance amap --web-service")
-            FactRow("调用时机", "仅在开启“街道级精确定位”并实际定位时请求")
-            FactRow("请求次数", "GPS 坐标转换 + 逆地理编码；不会随天气刷新重复调用")
+            FactRow("地理能力", "GPS 坐标转换、逆地理编码与精确地点搜索")
+            FactRow("能力范围", "仅地理服务，不调用高德天气接口")
             FactRow("存储", "Web 服务 Key 仅保存在本机 no_backup 私密目录")
         }
         1 -> {
@@ -610,7 +611,7 @@ private fun AmapStep(state: ProviderSetupUiState, model: ProviderSetupViewModel)
         2 -> {
             StepIntro(
                 title = "验证高德 Web 服务 Key",
-                body = "验证会真实请求一次北京测试点的逆地理编码。成功后才替换本机旧配置，Key 不会写入 APK 或日志。",
+                body = "验证会真实请求北京测试点的逆地理编码，成功后才替换旧配置；不测试天气接口。Key 不会写入 APK 或日志。",
             )
             TerminalField(
                 label = "高德 Web 服务 API Key",
@@ -623,6 +624,58 @@ private fun AmapStep(state: ProviderSetupUiState, model: ProviderSetupViewModel)
                 enabled = !state.testing,
             )
             ClipboardPasteButton("从剪贴板粘贴高德 Key", model::setAmapKey)
+            ConnectionTrace(state)
+            ResultBanner(state)
+        }
+        3 -> SuccessStep(state)
+    }
+}
+
+@Composable
+private fun BaiduStep(state: ProviderSetupUiState, model: ProviderSetupViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    when (state.step) {
+        0 -> {
+            StepIntro(
+                title = "接入精确地址搜索",
+                body = "百度服务端 AK 用于逆地理编码与精确地点搜索。beta6 不再接入百度天气，不需要为了天气查询申请企业认证。",
+            )
+            TerminalCommand("provider add baidu --server-ak")
+            FactRow("坐标", "直接使用手机 WGS84 经纬度，不替换系统定位")
+            FactRow("回退", "未配置、额度不足或失败时不影响小米/Open-Meteo 主链")
+            FactRow("存储", "AK 仅保存在本机 no_backup 私密目录")
+        }
+        1 -> {
+            StepIntro(
+                title = "创建服务端类型 AK",
+                body = "在百度地图开放平台创建服务端应用并开通地点检索与全球逆地理编码。不要填写 Android SDK 类型 AK。",
+            )
+            ProviderLink("打开百度应用管理", "控制台 → 应用管理 → 我的应用") {
+                openUrl(context, BAIDU_APPLICATION_MANAGE_URL)
+            }
+            InstructionList(
+                "创建或打开名为“枳生天气”的服务端应用",
+                "确认地点检索与逆地理编码权限可用",
+                "复制 AK，回到下一步粘贴",
+                "配额和商用授权以百度控制台当前规则为准",
+            )
+        }
+        2 -> {
+            StepIntro(
+                title = "验证百度服务端 AK",
+                body = "验证会真实请求北京 WGS84 测试点的逆地理编码，成功后才保存；不测试天气接口。",
+            )
+            TerminalField(
+                label = "百度地图服务端 AK",
+                value = state.baiduAk,
+                onValueChange = model::setBaiduAk,
+                helper = "使用服务端应用 AK，不是 Android SDK AK",
+                error = state.fieldErrors[ProviderField.BAIDU_AK],
+                sensitive = true,
+                keyboardType = KeyboardType.Password,
+                enabled = !state.testing,
+            )
+            ClipboardPasteButton("从剪贴板粘贴百度 AK", model::setBaiduAk)
             ConnectionTrace(state)
             ResultBanner(state)
         }
@@ -955,13 +1008,13 @@ private fun ConnectionTrace(state: ProviderSetupUiState) {
             .semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("CONNECTION TRACE", color = ZhishengTextTertiary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
+        Text("连接进度", color = ZhishengTextTertiary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
         stages.forEach { stage ->
             val marker: String
             val color: Color
             when {
                 stage in state.completedStages -> {
-                    marker = "[✓]"
+                    marker = "[完成]"
                     color = ZhishengMint
                 }
                 stage == state.activeStage && state.status == ProviderSetupStatus.ERROR -> {
@@ -999,7 +1052,7 @@ private fun ResultBanner(state: ProviderSetupUiState) {
             .semantics { liveRegion = LiveRegionMode.Polite },
     ) {
         Text(
-            (if (success) "[✓] " else "[!] ") + result.title,
+            (if (success) "[完成] " else "[注意] ") + result.title,
             color = if (success) ZhishengMint else ZhishengRed,
             style = MaterialTheme.typography.titleSmall,
         )
@@ -1024,8 +1077,12 @@ private fun SuccessStep(state: ProviderSetupUiState) {
             "连接验证和本机保存都已完成。关闭弹窗后，可以在天气来源中锁定彩云天气。",
         )
         ProviderWizardKind.AMAP -> Triple(
-            "高德街道定位", "amap-geo",
-            "连接验证和本机保存都已完成。开启街道级精确定位后，高德会增强国内街道名称；失败时仍会自动回退。",
+            "高德地理服务", "amap-geo",
+            "连接验证和本机保存都已完成。可用于地点搜索和街道名称，不影响普通天气数据源。",
+        )
+        ProviderWizardKind.BAIDU -> Triple(
+            "百度地理服务", "baidu-geo",
+            "连接验证和本机保存都已完成。可用于精确地点搜索和街道名称，不影响普通天气数据源。",
         )
     }
     StepIntro(
@@ -1049,6 +1106,7 @@ private fun ProviderFooter(
     val finalInput = (state.kind == ProviderWizardKind.QWEATHER && state.step == 4) ||
         (state.kind == ProviderWizardKind.CAIYUN && state.step == 3) ||
         (state.kind == ProviderWizardKind.AMAP && state.step == 2)
+        || (state.kind == ProviderWizardKind.BAIDU && state.step == 2)
     val finished = state.status == ProviderSetupStatus.SUCCESS || state.step == state.lastStep
     val primaryLabel = when {
         finished -> "完成"
@@ -1058,6 +1116,7 @@ private fun ProviderFooter(
                 "使用 API KEY 快速接入"
             state.kind == ProviderWizardKind.CAIYUN -> "开始接入"
             state.kind == ProviderWizardKind.AMAP -> "开始接入"
+            state.kind == ProviderWizardKind.BAIDU -> "开始接入"
             else -> "开始高级配置"
         }
         state.kind == ProviderWizardKind.QWEATHER && state.step == 1 -> "项目已打开，去创建凭据"
@@ -1068,12 +1127,19 @@ private fun ProviderFooter(
         state.kind == ProviderWizardKind.CAIYUN && state.step == 1 -> "已登录，去创建天气应用"
         state.kind == ProviderWizardKind.CAIYUN && state.step == 2 -> "应用已创建，去复制 Token"
         state.kind == ProviderWizardKind.AMAP && state.step == 1 -> "Web 服务应用已创建，去粘贴 Key"
+        state.kind == ProviderWizardKind.BAIDU && state.step == 1 -> "服务端应用已创建，去粘贴 AK"
         else -> "进入下一步"
     }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val primaryAction = {
         when {
             finished -> onClose()
-            finalInput -> model.testAndSave()
+            finalInput -> {
+                focusManager.clearFocus(force = true)
+                keyboard?.hide()
+                model.testAndSave()
+            }
             else -> model.next()
         }
     }
@@ -1179,7 +1245,7 @@ internal fun TerminalButton(
     val displayLabel = when (visual) {
         ButtonVisualState.LOADING -> "[..] 正在验证"
         ButtonVisualState.ERROR -> "[!] $label"
-        ButtonVisualState.SUCCESS -> "[✓] $label"
+        ButtonVisualState.SUCCESS -> "[完成] $label"
         else -> label
     }
 
@@ -1217,7 +1283,7 @@ internal fun TerminalButton(
 }
 
 @Composable
-private fun rememberReducedMotion(): Boolean {
+internal fun rememberReducedMotion(): Boolean {
     val context = androidx.compose.ui.platform.LocalContext.current
     return remember(context) {
         runCatching {

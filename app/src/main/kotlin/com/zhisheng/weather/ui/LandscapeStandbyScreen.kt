@@ -1,7 +1,3 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
-/* Hallmark · component: landscape standby settings entry · genre: atmospheric
- * theme: existing Zhisheng terminal · states: default · focus · active · enabled · contrast: pass
- */
 package com.zhisheng.weather.ui
 
 import android.provider.Settings as AndroidSettings
@@ -71,6 +67,9 @@ import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 import com.zhisheng.weather.ui.theme.alertLevelColor
+import com.zhisheng.weather.ui.theme.zhishengScreen
+import com.zhisheng.weather.ui.theme.zhishengPanel
+import com.zhisheng.weather.ui.theme.zhishengCompactPanel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -87,6 +86,7 @@ fun LandscapeStandbyScreen(
     onExitLandscape: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    StandbyBurnInProtection {
     when (style) {
         LandscapeStandbyStyle.CLASSIC -> ClassicLandscapeStandbyScreen(
             uiState, onRefresh, onExitLandscape, onSettings,
@@ -94,6 +94,7 @@ fun LandscapeStandbyScreen(
         LandscapeStandbyStyle.WEATHER_CORE -> LandscapeWeatherCoreScreen(
             uiState, onRefresh, onExitLandscape, onSettings,
         )
+    }
     }
 }
 
@@ -127,7 +128,7 @@ private fun ClassicLandscapeStandbyScreen(
     val today = data?.todayDaily(nowMillis)
     val night = isNightAt(today?.sunrise, today?.sunset, cityNow.hour * 60 + cityNow.minute)
 
-    Box(Modifier.fillMaxSize().background(ZhishengBg)) {
+    Box(Modifier.fillMaxSize().zhishengScreen()) {
         WeatherAmbience(data, uiState.prefs.ambience, night = night)
         StandbySignalField()
         BoxWithConstraints(
@@ -156,14 +157,14 @@ private fun ClassicLandscapeStandbyScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "ZHISHENG AMBIENT TERMINAL / ${BuildConfig.VERSION_NAME}",
+                                if (com.zhisheng.weather.ui.theme.isPhosphorVista) "枳生天气 · ${BuildConfig.VERSION_NAME}" else "ZHISHENG AMBIENT TERMINAL / ${BuildConfig.VERSION_NAME}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = ZhishengTextTertiary,
                                 letterSpacing = 2.sp,
                             )
                         }
                         Text(
-                            "● ${if (uiState.loading) "SYNC" else "LIVE"}",
+                            if (com.zhisheng.weather.ui.theme.isPhosphorVista) "● ${if (uiState.loading) "更新中" else "已更新"}" else "● ${if (uiState.loading) "SYNC" else "LIVE"}",
                             modifier = Modifier.clickable(onClick = onRefresh).padding(8.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = if (uiState.loading) ZhishengOrange else ZhishengMint,
@@ -208,14 +209,13 @@ private fun ClassicLandscapeStandbyScreen(
 
                 Column(
                     Modifier.weight(0.92f).fillMaxHeight()
-                        .background(ZhishengSurface.copy(alpha = 0.78f))
-                        .border(1.dp, ZhishengCardBorder)
+                        .zhishengPanel(containerColor = ZhishengSurface.copy(alpha = 0.78f))
                         .padding(18.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Box(Modifier.fillMaxWidth()) {
                         Row(
-                            Modifier.fillMaxWidth().padding(end = 122.dp),
+                            Modifier.fillMaxWidth().padding(top = 52.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
@@ -252,8 +252,7 @@ private fun ClassicLandscapeStandbyScreen(
                             IconButton(
                                 onClick = onSettings,
                                 modifier = Modifier.size(44.dp)
-                                    .background(ZhishengBg.copy(alpha = 0.72f))
-                                    .border(1.dp, ZhishengCardBorder),
+                                    .zhishengCompactPanel(containerColor = ZhishengBg.copy(alpha = 0.72f)),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Settings,
@@ -275,7 +274,7 @@ private fun ClassicLandscapeStandbyScreen(
                     if (hours.isNotEmpty()) {
                         Column {
                             Text(
-                                "NEXT / ${hours.size} HOURS",
+                                "未来 ${hours.size} 小时",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = ZhishengOrange,
                                 letterSpacing = 1.5.sp,
@@ -306,7 +305,7 @@ private fun ClassicLandscapeStandbyScreen(
 
                     val alert = data?.alerts?.firstOrNull()
                     Text(
-                        alert?.let { "! ${it.title}" } ?: "SRC ${data?.dataSource ?: "--"}  ·  UPD ${data?.updateTime?.let { Fmt.clock(it, offset) } ?: "--:--"}",
+                        alert?.let { "! ${it.title}" } ?: "SRC ${data?.dataSource ?: "--"}  ·  UPD ${(data?.updateTime ?: data?.fetchedAt)?.let { Fmt.clock(it, offset) } ?: "--:--"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = alert?.let { alertLevelColor(it.severity) } ?: ZhishengTextTertiary,
                         maxLines = 1,
@@ -322,9 +321,8 @@ private fun ClassicLandscapeStandbyScreen(
 internal fun StandbyPortraitButton(onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .height(44.dp)
-            .background(ZhishengBg.copy(alpha = 0.72f))
-            .border(1.dp, ZhishengCardBorder)
+            .height(if (com.zhisheng.weather.ui.theme.isPhosphorVista) 48.dp else 44.dp)
+            .zhishengCompactPanel(containerColor = ZhishengBg.copy(alpha = 0.72f))
             .clickable(
                 role = Role.Button,
                 onClickLabel = uiText("回到竖屏"),
@@ -334,7 +332,7 @@ internal fun StandbyPortraitButton(onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            "↥  ${uiText("竖屏")}",
+            if (com.zhisheng.weather.ui.theme.isPhosphorVista) uiText("竖屏") else "↥  ${uiText("竖屏")}",
             style = MaterialTheme.typography.labelMedium,
             color = ZhishengCyan,
             fontWeight = FontWeight.Bold,

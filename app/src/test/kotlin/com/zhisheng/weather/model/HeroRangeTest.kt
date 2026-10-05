@@ -24,16 +24,16 @@ class HeroRangeTest {
     @Test
     fun morningUsesYesterdayLowAndTodayHigh() {
         val r = HeroTemps.range(listOf(today, tomorrow), yesterday, at(7), zone)
-        assertEquals("昨低", r.leftLabel)
+        assertEquals("昨晚最低", r.leftLabel)
         assertEquals(5.0, r.left)
-        assertEquals("今高", r.rightLabel)
+        assertEquals("今天最高", r.rightLabel)
         assertEquals(24.0, r.right)
     }
 
     @Test
     fun missingYesterdayLeavesMorningLowEmpty() {
         val r = HeroTemps.range(listOf(today, tomorrow), null, at(7), zone)
-        assertEquals("昨低", r.leftLabel)
+        assertEquals("昨晚最低", r.leftLabel)
         assertEquals(null, r.left)
         assertEquals(24.0, r.right)
     }
@@ -48,18 +48,20 @@ class HeroRangeTest {
     }
 
     @Test
-    fun eveningUsesTonightLowAndTomorrowHigh() {
-        // 0.0.9-debug：夜低取明日 low（今夜最低通常落在明晨），今日 low 仅为缺数兜底
+    fun eveningWithoutHourlyUsesExplicitTomorrowLabel() {
+        // Daily-only sources must not call a calendar-day minimum tonight.
         val r = HeroTemps.range(listOf(today, tomorrow), yesterday, at(21), zone)
-        assertEquals("夜低", r.leftLabel)
+        assertEquals("明日最低", r.leftLabel)
         assertEquals(6.0, r.left)
-        assertEquals("明高", r.rightLabel)
+        assertEquals("明天最高", r.rightLabel)
         assertEquals(18.0, r.right)
     }
 
     @Test
     fun eveningFallsBackToTodayLowWhenTomorrowMissing() {
         val r = HeroTemps.range(listOf(today), yesterday, at(21), zone)
+        assertEquals("今日最低", r.leftLabel)
+        assertEquals("今天最高", r.rightLabel)
         assertEquals(8.0, r.left)
         assertEquals(24.0, r.right)
     }
@@ -86,9 +88,9 @@ class HeroRangeTest {
             now,
             ny,
         )
-        assertEquals("夜低", r.leftLabel)
+        assertEquals("明日最低", r.leftLabel)
         assertEquals(6.0, r.left)
-        assertEquals("明高", r.rightLabel)
+        assertEquals("明天最高", r.rightLabel)
         assertEquals(18.0, r.right)
     }
 
@@ -123,6 +125,31 @@ class HeroRangeTest {
 
         assertEquals(null, r.left)
         assertEquals(null, r.right)
+    }
+
+    @Test
+    fun completeNightUsesHourlyLowEvenWhenDailyMinimumDisagrees() {
+        val hours = (0..11).map { offset ->
+            HourlyWeather(at(21) + offset * 3_600_000L, temperature = if (offset == 8) 18.0 else 22.0)
+        }
+        val r = HeroTemps.range(listOf(today, tomorrow.copy(low = 20.0)), yesterday, at(21), zone, hours)
+        assertEquals("今夜最低", r.leftLabel)
+        assertEquals(18.0, r.left)
+    }
+
+    @Test
+    fun ShortNightForecastDoesNotClaimToKnowTheNightMinimum() {
+        val hours = listOf(HourlyWeather(at(21), temperature = 22.0), HourlyWeather(at(22), temperature = 21.0))
+        val r = HeroTemps.range(listOf(today, tomorrow), yesterday, at(21), zone, hours)
+        assertEquals("明日最低", r.leftLabel)
+        assertEquals(6.0, r.left)
+    }
+
+    @Test
+    fun MissingMiddleOfNightDoesNotClaimCompleteCoverage() {
+        val hours = listOf(HourlyWeather(at(21), temperature = 22.0), HourlyWeather(at(21) + 10 * 3_600_000L, temperature = 18.0))
+        val r = HeroTemps.range(listOf(today, tomorrow), yesterday, at(21), zone, hours)
+        assertEquals("明日最低", r.leftLabel)
     }
 
     private fun HeroRange.lowOrRight() = right

@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.zhisheng.weather.ui.theme.zhishengScreen
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -54,6 +55,7 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 import kotlinx.coroutines.launch
 
 private sealed class UpdateUi {
@@ -65,10 +67,11 @@ private sealed class UpdateUi {
     data class Ready(val info: AppUpdateInfo) : UpdateUi()
     data class Failed(val message: String, val info: AppUpdateInfo? = null) : UpdateUi()
 }
-
 @Composable
 fun AppUpdateDialog(
     initialInfo: AppUpdateInfo? = null,
+    downloadOnOpen: Boolean = false,
+    onDeclineVersion: (() -> Unit)? = null,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -77,6 +80,15 @@ fun AppUpdateDialog(
         mutableStateOf<UpdateUi>(initialInfo?.let(UpdateUi::Available) ?: UpdateUi.Checking)
     }
     var progress by remember { mutableFloatStateOf(0f) }
+    var requestedDownload by remember { mutableStateOf(false) }
+    LaunchedEffect(ui, downloadOnOpen) {
+        val info = (ui as? UpdateUi.Available)?.info
+        if (downloadOnOpen && !requestedDownload && info != null && AppUpdate.canSelfUpdate()) {
+            requestedDownload = true
+            if (!AppUpdate.canInstall(context)) ui = UpdateUi.NeedPermission(info)
+            else scope.launch { downloadAndInstall(context, info, { progress = it }, { ui = it }) }
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -89,7 +101,8 @@ fun AppUpdateDialog(
 
     LaunchedEffect(initialInfo) {
         if (initialInfo == null) {
-            ui = when (val result = AppUpdate.check()) {
+            // 无预置信息 = 用户主动点开检查：绕过进程级缓存强制重查
+            ui = when (val result = AppUpdate.check(refresh = true)) {
                 is AppUpdateCheck.Available -> UpdateUi.Available(result.info)
                 AppUpdateCheck.UpToDate -> UpdateUi.UpToDate
                 is AppUpdateCheck.Failed -> UpdateUi.Failed(result.message)
@@ -104,7 +117,7 @@ fun AppUpdateDialog(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ZhishengBg.copy(alpha = 0.82f))
+                .zhishengScreen()
                 .safeDrawingPadding()
                 .padding(12.dp),
             contentAlignment = Alignment.Center,
@@ -115,8 +128,7 @@ fun AppUpdateDialog(
                     .fillMaxWidth()
                     .widthIn(max = 520.dp)
                     .heightIn(max = panelHeight)
-                    .background(ZhishengSurface, RectangleShape)
-                    .border(1.dp, ZhishengCyan.copy(alpha = 0.54f), RectangleShape),
+                    .zhishengDialogPanel(borderColor = ZhishengCyan.copy(alpha = 0.54f)),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
@@ -124,7 +136,7 @@ fun AppUpdateDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
                         Text(
-                            "ZHISHENG WEATHER / UPDATE",
+                            "版本更新",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengCyan,
                             letterSpacing = 1.3.sp,
@@ -162,6 +174,14 @@ fun AppUpdateDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = ZhishengTextSecondary,
                     )
+                }
+                if (onDeclineVersion != null && ui is UpdateUi.Available) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        Text("不再提醒此版本", color = ZhishengTextSecondary,
+                            modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onDeclineVersion).padding(vertical = 12.dp))
+                        Text("稍后再说 · 3 天后提醒", color = ZhishengTextSecondary,
+                            modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClose).padding(vertical = 12.dp))
+                    }
                 }
                 HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
                 Row(
@@ -220,7 +240,8 @@ fun AppUpdateDialog(
                                     is UpdateUi.Failed -> {
                                         ui = UpdateUi.Checking
                                         scope.launch {
-                                            ui = when (val result = AppUpdate.check()) {
+                                            // 用户点"重试"：强制刷新，不吃失败/旧缓存
+                                            ui = when (val result = AppUpdate.check(refresh = true)) {
                                                 is AppUpdateCheck.Available -> UpdateUi.Available(result.info)
                                                 AppUpdateCheck.UpToDate -> UpdateUi.UpToDate
                                                 is AppUpdateCheck.Failed -> UpdateUi.Failed(result.message)
@@ -263,7 +284,9 @@ private suspend fun downloadAndInstall(
         }
         AppUpdate.install(context, file)
         setUi(UpdateUi.Ready(info))
-    } catch (t: Throwable) {
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (t: Exception) {
         setUi(UpdateUi.Failed(t.message?.takeIf { it.isNotBlank() } ?: "下载或安装失败", info))
     }
 }
@@ -292,7 +315,7 @@ private fun body(ui: UpdateUi, progress: Float): String = when (ui) {
         if (AppUpdate.canSelfUpdate()) {
             append("下载后会打开系统安装页，需要再确认一次。不会在后台自动安装。")
         } else {
-            append("当前版本需从 GitHub 获取更新，不能由公共版直接覆盖。")
+            append("当前版本需从 ${ui.info.channel.displayName} 获取更新，不能由公共版直接覆盖。")
         }
         if (ui.info.notes.isNotBlank()) {
             append("\n\n")
@@ -309,20 +332,20 @@ private fun body(ui: UpdateUi, progress: Float): String = when (ui) {
 private fun primaryAction(ui: UpdateUi): String = when (ui) {
     UpdateUi.Checking -> "[ 检查中 ]"
     UpdateUi.UpToDate, is UpdateUi.Ready -> "[ 关闭 ]"
-    is UpdateUi.Available -> if (AppUpdate.canSelfUpdate()) "[ 下载并安装 ]" else "[ 打开 GitHub ]"
+    is UpdateUi.Available -> if (AppUpdate.canSelfUpdate()) "[ 立即更新 ]" else pageActionLabel(ui.info)
     is UpdateUi.NeedPermission -> "[ 去授权 ]"
     is UpdateUi.Downloading -> "[ 下载中 ]"
     is UpdateUi.Failed -> "[ 重试 ]"
 }
 
 private fun secondaryAction(ui: UpdateUi): Pair<String, String>? = when (ui) {
-    is UpdateUi.Available -> if (AppUpdate.canSelfUpdate()) "[ 打开 GitHub ]" to ui.info.pageUrl else null
-    is UpdateUi.NeedPermission -> "[ 打开 GitHub ]" to ui.info.pageUrl
-    is UpdateUi.Downloading -> "[ 打开 GitHub ]" to ui.info.pageUrl
-    is UpdateUi.Ready -> "[ 打开 GitHub ]" to ui.info.pageUrl
-    is UpdateUi.Failed -> "[ 打开 GitHub ]" to (ui.info?.pageUrl ?: AppUpdate.RELEASES_PAGE)
+    is UpdateUi.Available, is UpdateUi.NeedPermission, is UpdateUi.Downloading, is UpdateUi.Ready -> null
+    is UpdateUi.Failed -> if (AppUpdate.canSelfUpdate()) null else ui.info?.let { pageActionLabel(it) to it.pageUrl }
+        ?: "[ 打开 Gitee ]" to AppUpdate.GITEE_RELEASES_PAGE
     else -> null
 }
+
+private fun pageActionLabel(info: AppUpdateInfo): String = "[ 打开 ${info.channel.displayName} ]"
 
 private fun openUrl(context: android.content.Context, url: String) {
     runCatching {
@@ -331,3 +354,4 @@ private fun openUrl(context: android.content.Context, url: String) {
         )
     }
 }
+

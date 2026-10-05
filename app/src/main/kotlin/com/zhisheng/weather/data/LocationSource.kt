@@ -10,16 +10,16 @@ import android.location.LocationManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.zhisheng.weather.model.City
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 import kotlin.coroutines.resume
 
 // 定位（v0.0.2）——严格可选：
-// · 权限只在用户主动点「定位当前城市」时申请，App 启动/刷新绝不触碰位置
+// · 权限由 UI 主动申请；用户启用定位后，前台自动复核及当前位置刷新可请求位置
 // · 只用系统 LocationManager / Geocoder，不引入 Google Play 服务
 // · 默认只申请 COARSE；用户主动开启街道级定位时才同时请求 FINE
 // · 不申请后台位置；精确权限或街道反查不可用时自动降级到城市级
@@ -28,20 +28,16 @@ object LocationSource {
     const val PERMISSION = Manifest.permission.ACCESS_COARSE_LOCATION
     const val PRECISE_PERMISSION = Manifest.permission.ACCESS_FINE_LOCATION
 
-    // 精度过滤阈值：COARSE 网络定位超过 20km 误差的坐标不用于反查城市
-    private const val ACCURACY_MAX_M = 20_000f
-    // 超过此误差时不显示街道，以免在街道边界给出过度确定的结果。
-    private const val STREET_ACCURACY_MAX_M = 500f
-
     enum class StreetStatus {
         NOT_REQUESTED,
         RESOLVED,
         APPROXIMATE_PERMISSION,
+        INSUFFICIENT_ACCURACY,
         UNAVAILABLE,
     }
 
     sealed interface Result {
-        data class Ok(val city: City, val streetStatus: StreetStatus) : Result
+        data class Ok(val city: City, val streetStatus: StreetStatus, val accuracyMeters: Float?, val fixAgeSeconds: Long) : Result
         data class Failed(val message: String) : Result
     }
 
@@ -72,7 +68,7 @@ object LocationSource {
             lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
 
     // 定位 + 反查城市。调用前必须已确认权限（由 UI 层申请），此处再兜一次校验。
-    // v0.0.4：整体 15s 上限（此前 12s 定位 + 15s 小米 + 12s 和风最坏约 40s），
+    // 时长口径：定位最多 13s + 城市反查 8s + 街道反查总预算 8s；
     // 并对新鲜定位做精度过滤（COARSE 网络定位在城市边界可能反查出隔壁城市）。
     suspend fun locate(context: Context): Result {
         if (!hasPermission(context)) return Result.Failed("未授予位置权限")
@@ -82,22 +78,36 @@ object LocationSource {
         val preciseGranted = preciseRequested && hasPrecisePermission(context)
         val loc = withTimeoutOrNull(13_000L) { currentLocation(context, preferGps = preciseGranted) }
             ?: return Result.Failed("定位超时，请到空旷处重试或手动搜索城市")
-        if (loc.hasAccuracy() && loc.accuracy > ACCURACY_MAX_M) {
-            return Result.Failed("定位精度不足（${loc.accuracy.toInt()}m），请到空旷处重试或手动搜索")
-        }
-        val city = withTimeoutOrNull(8_000L) { reverseGeocode(loc.latitude, loc.longitude) }
-            ?: return Result.Failed("已取到坐标但未能反查城市名，请手动搜索")
+        val reverse = withTimeoutOrNull(8_000L) { reverseGeocode(context, loc.latitude, loc.longitude) }
+            ?: ReverseCityResult(coordinateLocation(loc.latitude, loc.longitude))
+        val city = reverse.city
 
-        val canResolveStreet = preciseGranted && (!loc.hasAccuracy() || loc.accuracy <= STREET_ACCURACY_MAX_M)
+        val canResolveStreet = preciseGranted && LocationFixPolicy.canResolveStreet(loc.fix())
         // 街道反查有自己的超时，不会拖垮已经成功的城市定位。
-        val street = if (canResolveStreet) reverseStreet(context, loc.latitude, loc.longitude, city.name) else null
+        val street = if (canResolveStreet) {
+            try { withTimeoutOrNull(8_000L) { reverseStreet(context, loc.latitude, loc.longitude, city.name, reverse.baidu) } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { null }
+        } else {
+            null
+        }
         val status = when {
             !preciseRequested -> StreetStatus.NOT_REQUESTED
             !preciseGranted -> StreetStatus.APPROXIMATE_PERMISSION
+            !canResolveStreet -> StreetStatus.INSUFFICIENT_ACCURACY
             street != null -> StreetStatus.RESOLVED
             else -> StreetStatus.UNAVAILABLE
         }
-        return Result.Ok(city.copy(latitude = loc.latitude, longitude = loc.longitude, street = street), status)
+        val locatedCity = city.copy(
+            latitude = loc.latitude,
+            longitude = loc.longitude,
+            street = street,
+            // 精确坐标必须拥有自己的地址身份，否则同一城市的多个街道会被城市 ID 覆盖。
+            locationKey = if (preciseGranted) preciseLocationKey(loc.latitude, loc.longitude) else city.locationKey,
+            weatherLocationKey = if (preciseGranted) city.locationKey else city.weatherLocationKey,
+        )
+        return Result.Ok(locatedCity, status, loc.accuracy.takeIf { loc.hasAccuracy() },
+            (LocationFixPolicy.ageMillis(loc.fix(), System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos()) ?: 0L) / 1_000)
     }
 
     @Suppress("MissingPermission")
@@ -105,16 +115,22 @@ object LocationSource {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
 
         // 手动/自动复核都优先请求新位置；缓存只在新位置暂时不可得时兜底，避免换城市后仍停在旧定位。
-        val providerPriority = if (preferGps) {
-            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        val builtInPriority = if (preferGps) {
+            listOf(FUSED_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
         } else {
-            listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+            listOf(LocationManager.NETWORK_PROVIDER, FUSED_PROVIDER, LocationManager.GPS_PROVIDER)
         }
-        val providers = providerPriority
+        // 部分国产 ROM 只把可工作的融合定位注册成自有 provider 名称。
+        // 保留标准 provider 的优先级，同时纳入所有已启用、非 passive 的厂商 provider。
+        val vendorProviders = runCatching { lm.allProviders }.getOrDefault(emptyList())
+            .filterNot { it == LocationManager.PASSIVE_PROVIDER || it in builtInPriority }
+        val providers = (builtInPriority + vendorProviders)
+            .distinct()
             .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
-        val cached = providers.mapNotNull { p -> runCatching { lm.getLastKnownLocation(p) }.getOrNull() }
-            .maxByOrNull { it.time }
-        if (providers.isEmpty()) return cached?.takeIf { isRecentFallback(it) }
+        val cachedLocations = providers.mapNotNull { p -> runCatching { lm.getLastKnownLocation(p) }.getOrNull() }
+        val cachedFix = LocationFixPolicy.cachedFix(cachedLocations.map { it.fix() }, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())
+        val cached = cachedLocations.firstOrNull { it.fix() == cachedFix }
+        if (providers.isEmpty()) return null
 
         // 单次定位请求（回调在主线程 Looper 上注册）
         var bestReceived: Location? = null
@@ -124,6 +140,7 @@ object LocationSource {
                     private var done = false
                     override fun onLocationChanged(location: Location) {
                         if (done) return
+                        if (!LocationFixPolicy.acceptsCallback(location.fix(), System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())) return
                         val previous = bestReceived
                         if (previous == null || !previous.hasAccuracy() ||
                             (location.hasAccuracy() && location.accuracy < previous.accuracy)
@@ -131,7 +148,7 @@ object LocationSource {
                             bestReceived = location
                         }
                         // 精确模式最多等待到 500m 内；超时后仍可用本轮较好的结果做城市级降级。
-                        if (preferGps && location.hasAccuracy() && location.accuracy > STREET_ACCURACY_MAX_M) return
+                        if (preferGps && !LocationFixPolicy.canResolveStreet(location.fix())) return
                         done = true
                         runCatching { lm.removeUpdates(this) }
                         if (cont.isActive) cont.resume(location)
@@ -157,28 +174,204 @@ object LocationSource {
                 cont.invokeOnCancellation { runCatching { lm.removeUpdates(listener) } }
             }
         }
-        return fresh ?: bestReceived ?: cached?.takeIf { isRecentFallback(it) }
+        return listOfNotNull(fresh, bestReceived, cached).firstOrNull {
+            LocationFixPolicy.acceptsCallback(it.fix(), System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())
+        }
     }
 
-    private fun isRecentFallback(location: Location): Boolean =
-        System.currentTimeMillis() - location.time in 0..15 * 60_000L
+    private fun Location.fix() = LocationFix(latitude, longitude, time, elapsedRealtimeNanos, accuracy.takeIf { hasAccuracy() })
+
+    private const val FUSED_PROVIDER = "fused"
 
     // 坐标 → 中文城市。小米 geo 接口免 key 且直接给 locationKey + 归属地，优先用；
     // 失败且已开开发者模式时才退和风 GeoAPI。两者都失败则如实报错，不猜城市。
-    private suspend fun reverseGeocode(lat: Double, lon: Double): City? =
-        xiaomiReverse(lat, lon) ?: qweatherReverse(lat, lon)
+    private data class ReverseCityResult(
+        val city: City,
+        val baidu: BaiduLookupResult? = null,
+    )
 
-    private suspend fun reverseStreet(context: Context, lat: Double, lon: Double, cityName: String): String? {
-        // 开发者自行配置高德 Web 服务 Key 后，优先用国内街道数据增强名称。
-        // 高德请求包含官方 GPS 坐标转换；超时、额度或鉴权失败全部退回系统 Geocoder。
-        if (SettingsRepository.amapUnlocked()) {
-            val key = SecretStore.currentAmap().webServiceKey
-            val amapStreet = withTimeoutOrNull(7_000L) {
-                AmapApi.reverseStreetFromWgs84(key, lat, lon, cityName).street
+    private suspend fun reverseGeocode(context: Context, lat: Double, lon: Double): ReverseCityResult? {
+        return supervisorScope {
+            val system = async { withTimeoutOrNull(4_000L) { systemReverseCity(context, lat, lon) } }
+            val xiaomi = async { withTimeoutOrNull(3_000L) { xiaomiReverse(lat, lon) } }
+            val primary = xiaomi.await()
+            if (primary != null) {
+                system.cancel()
+                ReverseCityResult(primary)
+            } else {
+                val local = system.await()
+                if (local != null) ReverseCityResult(local)
+                else withTimeoutOrNull(1_500L) { qweatherReverse(lat, lon) }?.let(::ReverseCityResult)
+                    ?: withTimeoutOrNull(1_500L) { baiduReverse(lat, lon) }
             }
-            if (!amapStreet.isNullOrBlank()) return amapStreet
         }
-        return systemReverseStreet(context, lat, lon, cityName)
+    }
+
+    private suspend fun baiduReverse(lat: Double, lon: Double): ReverseCityResult? {
+        if (!SettingsRepository.baiduUnlocked()) return null
+        val result = BaiduApi.reverseStreetFromWgs84(SecretStore.currentBaidu().webServiceAk, lat, lon)
+        if (!result.ok) return null
+        val city = preciseAddressCity(
+            district = result.district,
+            city = result.city,
+            province = result.province,
+            featureName = result.street,
+            thoroughfare = null,
+            premises = null,
+            latitude = lat,
+            longitude = lon,
+        ) ?: return null
+        return ReverseCityResult(city, result)
+    }
+
+    private suspend fun systemReverseCity(context: Context, lat: Double, lon: Double): City? {
+        if (!Geocoder.isPresent()) return null
+        val address = withTimeoutOrNull(4_000L) { safeGeocodeAddress(context, lat, lon) } ?: return null
+        val name = listOf(address.subAdminArea, address.locality, address.adminArea)
+            .firstOrNull { !it.isNullOrBlank() }?.trim() ?: return null
+        val affiliation = listOf(address.adminArea, address.locality)
+            .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+            .filterNot { it == name }
+            .distinct()
+            .joinToString("·")
+        return City(
+            name = name,
+            affiliation = affiliation,
+            latitude = lat,
+            longitude = lon,
+            locationKey = String.format(Locale.US, "geo-city:%.3f,%.3f", lat, lon),
+        )
+    }
+
+    private suspend fun reverseStreet(
+        context: Context,
+        lat: Double,
+        lon: Double,
+        cityName: String,
+        seededBaidu: BaiduLookupResult? = null,
+    ): String? {
+        // 常驻地点命中（200 米内）：街道/区县/adcode 直接复用，零付费调用。
+        // 付费的是高德/百度的逆地理与坐标转换——缓存只省这些，定位坐标仍由调用方实时获取。
+        KnownPlaceStore.find(lat, lon)?.let { known ->
+            // 部分地点的付费源只能识别区县/adcode，不给街道。这种部分命中也要
+            // 阻止重复计费，但仍允许免费的系统 Geocoder 尝试补一次展示文字。
+            return known.street ?: systemReverseStreet(context, lat, lon, cityName)
+        }
+        val amapUnlocked = SettingsRepository.amapUnlocked()
+        val baiduUnlocked = SettingsRepository.baiduUnlocked()
+        var amap: AmapLookupResult? = null
+        var baidu: BaiduLookupResult? = seededBaidu
+
+        if (amapUnlocked && baiduUnlocked) {
+            // 双 key：新地点首次反查（缓存未命中）才并行两源，做一次性四级交叉验证
+            supervisorScope {
+                val amapRequest = async {
+                    withTimeoutOrNull(7_000L) {
+                        AmapApi.reverseStreetFromWgs84(
+                            SecretStore.currentAmap().webServiceKey,
+                            lat,
+                            lon,
+                            cityName,
+                        )
+                    }
+                }
+                val baiduRequest = seededBaidu?.let { null } ?: async {
+                    withTimeoutOrNull(7_000L) {
+                        BaiduApi.reverseStreetFromWgs84(SecretStore.currentBaidu().webServiceAk, lat, lon)
+                    }
+                }
+                amap = amapRequest.await()
+                baidu = seededBaidu ?: baiduRequest?.await()
+            }
+            if (amap?.ok == true || baidu?.ok == true) {
+                val level = crossCheckDistricts(amap?.adcode, baidu?.adcode, baidu?.district, cityName)
+                android.util.Log.i(
+                    "ZhishengWeather",
+                    "双源交叉验证 $level：高德码=${amap?.adcode} 百度码=${baidu?.adcode} 百度区县=${baidu?.district}",
+                )
+                when (level) {
+                    GeoMatchLevel.MATCH_HIGH -> {
+                        val street = mergeStreetSegments(
+                            listOf(amap?.street, baidu?.street),
+                            listOf(cityName, baidu?.district),
+                        )
+                        if (!street.isNullOrBlank()) {
+                            upsertKnownPlace(lat, lon, amap, baidu, street)
+                            return street
+                        }
+                    }
+                    GeoMatchLevel.MATCH_CITY_GRAIN -> {
+                        // 只能确认同城时选择一家较完整的街道，不把可能来自不同区县的两段地址硬拼。
+                        val chosen = moreCompleteStreet(amap?.street, baidu?.street)
+                        val street = mergeStreetSegments(listOf(chosen), listOf(cityName, baidu?.district))
+                        if (!street.isNullOrBlank()) {
+                            upsertKnownPlace(lat, lon, amap, baidu, street)
+                            return street
+                        }
+                    }
+                    GeoMatchLevel.MISMATCH -> {
+                        // 跨城分歧：降城市级展示（不给街道），不写缓存避免固化错误标注
+                        return null
+                    }
+                }
+            }
+            // 双源都失败或未产出街道 → 落到系统 Geocoder（不再重发已失败的付费请求）
+        } else {
+            if (amapUnlocked) {
+                amap = withTimeoutOrNull(7_000L) {
+                    AmapApi.reverseStreetFromWgs84(SecretStore.currentAmap().webServiceKey, lat, lon, cityName)
+                }
+                if (!amap?.street.isNullOrBlank()) {
+                    upsertKnownPlace(lat, lon, amap, null)
+                    return amap?.street
+                }
+            }
+            if (baiduUnlocked) {
+                baidu = seededBaidu ?: withTimeoutOrNull(7_000L) {
+                    BaiduApi.reverseStreetFromWgs84(SecretStore.currentBaidu().webServiceAk, lat, lon)
+                }
+                if (!baidu?.street.isNullOrBlank()) {
+                    upsertKnownPlace(lat, lon, null, baidu)
+                    return baidu?.street
+                }
+            }
+        }
+        val systemStreet = systemReverseStreet(context, lat, lon, cityName)
+        // 系统文字本身不入缓存；但高德/百度任一成功即记录该坐标已查，
+        // 即使没有街道也不让下次定位重复计费。
+        if (amap?.ok == true || baidu?.ok == true) {
+            upsertKnownPlace(lat, lon, amap, baidu)
+        }
+        return systemStreet
+    }
+
+    // 有街道时缓存展示文字；只有区县/adcode 时也记录“该坐标已查”，
+    // 下次只走免费系统 Geocoder，不重复消耗用户的付费额度。缓存写失败不影响定位主流程。
+    private suspend fun upsertKnownPlace(
+        lat: Double,
+        lon: Double,
+        amap: AmapLookupResult?,
+        baidu: BaiduLookupResult?,
+        streetOverride: String? = null,
+    ) {
+        val street = streetOverride
+            ?: amap?.street?.takeIf(String::isNotBlank)
+            ?: baidu?.street?.takeIf(String::isNotBlank)
+        if (street == null && amap?.adcode.isNullOrBlank() && baidu?.adcode.isNullOrBlank() && baidu?.district.isNullOrBlank()) {
+            return
+        }
+        runCatching {
+            KnownPlaceStore.upsert(
+                KnownPlace(
+                    latGrid = lat,
+                    lonGrid = lon,
+                    street = street,
+                    district = baidu?.district,
+                    amapAdcode = amap?.adcode,
+                    baiduAdcode = baidu?.adcode,
+                ),
+            )
+        }.onFailure { android.util.Log.w("ZhishengWeather", "常驻地点缓存写入失败", it) }
     }
 
     private suspend fun systemReverseStreet(
@@ -189,7 +382,7 @@ object LocationSource {
     ): String? {
         if (!Geocoder.isPresent()) return null
         val address = withTimeoutOrNull(4_000L) {
-            geocodeAddress(context, lat, lon)
+            safeGeocodeAddress(context, lat, lon)
         } ?: return null
         return streetLabel(
             subLocality = address.subLocality,
@@ -199,6 +392,11 @@ object LocationSource {
             cityName = cityName,
         )
     }
+
+    private suspend fun safeGeocodeAddress(context: Context, lat: Double, lon: Double): Address? =
+        try { geocodeAddress(context, lat, lon) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { null }
 
     private suspend fun geocodeAddress(context: Context, lat: Double, lon: Double): Address? {
         val geocoder = Geocoder(context.applicationContext, Locale.SIMPLIFIED_CHINESE)
@@ -215,7 +413,7 @@ object LocationSource {
                 })
             }
         } else {
-            withContext(Dispatchers.IO) {
+            geocoderCall {
                 @Suppress("DEPRECATION")
                 runCatching { geocoder.getFromLocation(lat, lon, 1)?.firstOrNull() }.getOrNull()
             }
@@ -245,7 +443,7 @@ object LocationSource {
         if (!SettingsRepository.qweatherUnlocked()) return null
         return try {
             val loc = QWeatherApi.service
-                .cityLookup(String.format(java.util.Locale.US, "%.2f,%.2f", lon, lat))
+                .cityLookup("${QWeatherApi.lat(lon)},${QWeatherApi.lat(lat)}")
                 .location.firstOrNull() ?: return null
             City(
                 name = loc.name.orEmpty().ifBlank { return null },
@@ -263,6 +461,10 @@ object LocationSource {
     }
 
 }
+
+/** 约 100 米量级的稳定地址键，抑制室内 GPS 漂移产生重复地址。 */
+internal fun preciseLocationKey(lat: Double, lon: Double): String =
+    String.format(Locale.US, "geo:%.3f,%.3f", lat, lon)
 
 internal fun streetLabel(
     subLocality: String?,
@@ -282,3 +484,9 @@ internal fun streetLabel(
         .joinToString("·")
         .ifBlank { null }
 }
+
+/** Coordinates are enough for weather even when every reverse-geocoder is unavailable. */
+internal fun coordinateLocation(lat: Double, lon: Double) = City(
+    name = "当前位置", affiliation = "地址名称暂不可用", latitude = lat, longitude = lon,
+    locationKey = preciseLocationKey(lat, lon),
+)

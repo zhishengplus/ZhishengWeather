@@ -27,8 +27,8 @@ class ScreenTransitionTest {
             File("src/main/kotlin/com/zhisheng/weather/MainActivity.kt"),
             File("app/src/main/kotlin/com/zhisheng/weather/MainActivity.kt"),
         ).first { it.isFile }.readText()
-        assertTrue(activity.contains("overlayEnter(overlayScreen)"))
-        assertTrue(activity.contains("overlayExit(overlayScreen)"))
+        assertTrue(activity.contains("overlayEnter(overlayScreen, overlayOrigin)"))
+        assertTrue(activity.contains("overlayExit(overlayScreen, overlayOrigin)"))
         assertTrue(activity.contains("screenTransition(initialState, targetState)"))
         assertTrue(activity.contains("onSettingsClick = { screen = AppScreen.SETTINGS }"))
         assertTrue(activity.contains("onDailyForecastClick = { screen = AppScreen.DAILY_FORECAST }"))

@@ -1,5 +1,3 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
-/* Hallmark · genre: atmospheric technical utility · design-system: design.md · designed-as-app */
 package com.zhisheng.weather.ui
 
 import android.provider.Settings
@@ -8,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,7 +29,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -41,6 +39,8 @@ import com.zhisheng.weather.ui.theme.ZhishengOrange
 import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
+import com.zhisheng.weather.ui.theme.isPhosphorVista
+import com.zhisheng.weather.ui.theme.zhishengPanel
 import com.zhisheng.weather.i18n.uiText
 import kotlinx.coroutines.delay
 
@@ -52,7 +52,10 @@ internal fun FeaturePageHeader(
     trailing: @Composable (() -> Unit)? = null,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = if (isPhosphorVista) 8.dp else 4.dp,
+            vertical = if (isPhosphorVista) 10.dp else 6.dp,
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
@@ -66,16 +69,18 @@ internal fun FeaturePageHeader(
                     lineHeight = 22.sp,
                     fontWeight = FontWeight.SemiBold,
                 ),
-                color = ZhishengOrange,
+                color = if (isPhosphorVista) ZhishengText else ZhishengOrange,
                 maxLines = 1,
             )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall.copy(lineHeight = 13.sp),
-                color = ZhishengTextSecondary,
-                letterSpacing = 1.6.sp,
-                maxLines = 1,
-            )
+            if (!isPhosphorVista) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall.copy(lineHeight = 13.sp),
+                    color = ZhishengTextSecondary,
+                    letterSpacing = 1.6.sp,
+                    maxLines = 1,
+                )
+            }
         }
         trailing?.invoke()
     }
@@ -83,27 +88,39 @@ internal fun FeaturePageHeader(
 
 @Composable
 internal fun FeatureSectionTitle(index: Int, title: String, en: String) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val showCaption = maxWidth >= 420.dp && androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.15f
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (!isPhosphorVista) {
+            Text(
+                "%02d//".format(index),
+                style = MaterialTheme.typography.titleSmall,
+                color = if (isPhosphorVista) ZhishengText else ZhishengOrange,
+                fontWeight = FontWeight.Bold,
+            )
+        }
         Text(
-            "%02d//".format(index),
-            style = MaterialTheme.typography.titleSmall,
-            color = ZhishengOrange,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            "  $title  ",
-            style = MaterialTheme.typography.titleSmall,
+            if (isPhosphorVista) title else "  $title  ",
+            style = if (isPhosphorVista) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
             color = ZhishengText,
+            fontWeight = if (isPhosphorVista) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
         )
-        Text(
-            en,
-            style = MaterialTheme.typography.labelSmall,
-            color = ZhishengTextSecondary,
-            letterSpacing = 2.sp,
-        )
+        if (!isPhosphorVista && showCaption) {
+            Text(
+                en,
+                style = MaterialTheme.typography.labelSmall,
+                color = ZhishengTextSecondary,
+                letterSpacing = 2.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(.65f),
+            )
+        }
+    }
     }
 }
 
@@ -114,8 +131,7 @@ internal fun TerminalPanel(
 ) {
     Box(
         modifier = modifier
-            .background(ZhishengSurface, RectangleShape)
-            .border(1.dp, ZhishengCardBorder, RectangleShape),
+            .zhishengPanel(),
     ) { content() }
 }
 
@@ -156,6 +172,29 @@ internal fun FeatureBootLoader(
         }
     }
 
+    if (isPhosphorVista) {
+        Column(
+            modifier = modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 28.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text("枳生天气", style = MaterialTheme.typography.titleMedium, color = palette.orange, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text(status, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                repeat(13) { index ->
+                    val completed = progress?.let { index < (it.coerceIn(0f, 1f) * 13).toInt() }
+                    val color = when {
+                        completed == true -> palette.mint
+                        progress == null && index == probe -> palette.orange
+                        else -> palette.cardBorder
+                    }
+                    Canvas(Modifier.weight(1f).height(5.dp)) { drawRect(color) }
+                }
+            }
+        }
+        return
+    }
     Column(
         modifier = modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 28.dp),
         verticalArrangement = Arrangement.Center,

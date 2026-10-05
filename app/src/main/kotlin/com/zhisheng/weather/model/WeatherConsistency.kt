@@ -5,7 +5,8 @@ import kotlin.math.abs
 // 把同一份 WeatherData 里互相打架的信号收成一套「现在」。
 // 实况、逐时第一格、短时降水文案必须能同时成立，不能上头下雨、下面写没雨。
 object WeatherConsistency {
-    const val PAST_HOUR_GRACE_MS = 50 * 60_000L
+    // Keep the preceding real hourly forecast at the exact-hour boundary.
+    const val PAST_HOUR_GRACE_MS = 60 * 60_000L
     const val NOW_HOUR_PAST_MS = 40 * 60_000L
     const val NOW_HOUR_FUTURE_MS = 10 * 60_000L
 
@@ -106,6 +107,7 @@ object WeatherConsistency {
                     humidity = day.humidity.inRange(0.0, 100.0),
                     cloudCover = day.cloudCover.inRange(0.0, 100.0),
                     uvIndex = day.uvIndex?.takeIf { it in 0..50 },
+                    aqi = day.aqi?.takeIf { it in 0..1_000 },
                 )
             }
             .toList()
@@ -130,6 +132,27 @@ object WeatherConsistency {
             )
         }
         val validTimeRange = 946_684_800_000L..(nowMillis + 5 * 60_000L)
+        val yesterday = data.yesterday?.let { day ->
+            val rawHigh = day.high.inRange(-110.0, 70.0)
+            val rawLow = day.low.inRange(-110.0, 70.0)
+            day.copy(
+                high = if (rawHigh != null && rawLow != null) maxOf(rawHigh, rawLow) else rawHigh,
+                low = if (rawHigh != null && rawLow != null) minOf(rawHigh, rawLow) else rawLow,
+                aqi = day.aqi?.takeIf { it in 0..1_000 },
+                dateMillis = day.dateMillis?.takeIf { it in 946_684_800_000L..nowMillis },
+                windDirectionStartDeg = day.windDirectionStartDeg.asDirection(),
+                windDirectionEndDeg = day.windDirectionEndDeg.asDirection(),
+                windSpeedStart = day.windSpeedStart.inRange(0.0, 500.0),
+                windSpeedEnd = day.windSpeedEnd.inRange(0.0, 500.0),
+            )
+        }
+        val typhoons = data.typhoons.map { typhoon ->
+            typhoon.copy(
+                windSpeed = typhoon.windSpeed.inRange(0.0, 200.0),
+                latitude = typhoon.latitude.inRange(-90.0, 90.0),
+                longitude = typhoon.longitude.inRange(-180.0, 180.0),
+            )
+        }
         return data.copy(
             current = current,
             hourly = hourly,
@@ -140,6 +163,8 @@ object WeatherConsistency {
             },
             rainDistanceKm = data.rainDistanceKm.inRange(0.0, 20_000.0),
             aqi = aqi,
+            yesterday = yesterday,
+            typhoons = typhoons,
             updateTime = data.updateTime?.takeIf { it in validTimeRange },
             utcOffsetSeconds = data.utcOffsetSeconds?.takeIf { it in -18 * 3_600..18 * 3_600 },
         )
@@ -187,9 +212,10 @@ object WeatherConsistency {
 
     internal fun syncCurrentWithNowcast(data: WeatherData, nowMillis: Long): WeatherData {
         val cur = data.current ?: return data
-        val seriesWet = Nowcast.seriesWetAt(data.rainMinutes, nowMillis)
+        val intervalMinutes = data.rainMeta?.intervalMinutes ?: 1
+        val seriesWet = Nowcast.seriesWetAt(data.rainMinutes, nowMillis, intervalMinutes = intervalMinutes)
         if (cur.condition?.isPrecipitation == true || !seriesWet) return data
-        val nearby = data.rainMinutes.filter { abs(it.timeMillis - nowMillis) <= Nowcast.NOW_WINDOW_MS }
+        val nearby = Nowcast.samplesAt(data.rainMinutes, nowMillis, intervalMinutes)
         val intensity = nearby.maxOfOrNull { it.precip } ?: 0f
         val phase = nearby.maxByOrNull { it.precip }?.phase ?: cur.profile?.phase ?: PrecipitationPhase.RAIN
         val upgraded = when (phase) {
@@ -243,7 +269,8 @@ object WeatherConsistency {
         val precipNow = data.current.let { cur ->
             cur != null && (cur.condition?.isPrecipitation == true || (cur.precipMm ?: 0.0) > 0.05)
         }
-        val timing = Nowcast.rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow)
+        val timing = Nowcast.rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow,
+            intervalMinutes = data.rainMeta?.intervalMinutes ?: 1)
         if (timing.hasRain && Nowcast.isDryNowcast(api)) {
             return data.copy(rainNowcast = null)
         }

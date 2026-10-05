@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent">
+<ImageView android:id="@+id/widget_surface" android:background="@drawable/widget_vista_clip_outline" android:clipToOutline="true" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:contentDescription="" android:src="@drawable/widget_vista_surface">
+</ImageView>
+<LinearLayout android:id="@+id/widget_content" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="8dp">
+<LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+<LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:orientation="horizontal" android:gravity="center_vertical">
+<LinearLayout android:id="@+id/widget_weather_hit" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="vertical" android:layout_weight="1" android:gravity="center_vertical">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_vertical">
+<TextView android:id="@+id/widget_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="32sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:id="@+id/widget_condition" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="0dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="end" android:layout_marginEnd="7dp">
+<TextView android:id="@+id/widget_city" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:id="@+id/widget_range" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="4dp">
+</TextView>
+<TextView android:id="@+id/widget_footer" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="2dp">
+</TextView>
+</LinearLayout>
+<ImageView android:id="@+id/widget_icon" android:layout_width="36dp" android:layout_height="36dp" android:scaleType="fitCenter" android:contentDescription="">
+</ImageView>
+</LinearLayout>
+<LinearLayout android:id="@+id/widget_forecast" android:layout_width="match_parent" android:layout_height="0dp" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>
+<TextView android:id="@+id/widget_alarm_hit" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+<TextView android:id="@+id/widget_alarm" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+<TextView android:id="@+id/widget_alarm_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+<TextView android:id="@+id/widget_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+</FrameLayout>

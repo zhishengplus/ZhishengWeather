@@ -11,6 +11,7 @@ object SourceHealth {
 
     const val QWEATHER = "qweather"
     const val XIAOMI = "xiaomi"
+    const val NMC = "nmc"
     const val OPEN_METEO = "openmeteo"
     const val CAIYUN = "caiyun"
 

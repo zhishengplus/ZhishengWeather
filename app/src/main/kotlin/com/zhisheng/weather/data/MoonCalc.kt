@@ -26,10 +26,24 @@ object MoonCalc {
     fun enrich(day: DailyWeather, latitude: Double, longitude: Double): DailyWeather {
         if (day.moonPhase != null && day.moonrise != null && day.moonset != null) return day
         val times = riseSet(day.dateMillis, latitude, longitude)
+        var rise = day.moonrise ?: times.rise
+        var set = day.moonset ?: times.set
+        // 当日只升不落（如 15:01 升、次日凌晨落）是月亮的常态而非缺数据。
+        // 与和风"下一次事件"语义对齐：向相邻日窗口补齐配对事件，否则月亮波浪图永远画不出来。
+        if (rise != null && set == null) {
+            set = (1L..2L).asSequence()
+                .map { offset -> riseSet(day.dateMillis + offset * DAY_MS, latitude, longitude).set }
+                .firstOrNull { it != null }
+        }
+        if (set != null && rise == null) {
+            rise = (1L..2L).asSequence()
+                .map { offset -> riseSet(day.dateMillis - offset * DAY_MS, latitude, longitude).rise }
+                .firstOrNull { it != null }
+        }
         return day.copy(
             moonPhase = day.moonPhase ?: phaseKeyForDayStart(day.dateMillis),
-            moonrise = day.moonrise ?: times.rise,
-            moonset = day.moonset ?: times.set,
+            moonrise = day.moonrise ?: rise,
+            moonset = day.moonset ?: set,
         )
     }
 
@@ -114,6 +128,22 @@ object MoonCalc {
         }
 
         return MoonTimes(formatLocalHour(riseHour), formatLocalHour(setHour))
+    }
+
+    fun moonAltitudeDegrees(millis: Long, latitude: Double, longitude: Double): Double =
+        moonAltitude(millis, latitude, longitude) / RAD
+
+    fun illuminationFraction(millis: Long): Double {
+        // 用同一时刻日月赤经/赤纬求距角，不拿固定朔望月锚点当当天月相。
+        val days = millis / DAY_MS.toDouble() - 0.5 + J1970 - J2000
+        val anomaly = (357.5291 + 0.98560028 * days) * RAD
+        val center = (1.9148 * sin(anomaly) + 0.02 * sin(2 * anomaly) + 0.0003 * sin(3 * anomaly)) * RAD
+        val sunLongitude = anomaly + center + 102.9372 * RAD + PI
+        val sunRa = rightAscension(sunLongitude, 0.0)
+        val sunDec = declination(sunLongitude, 0.0)
+        val moon = moonCoords(days)
+        val cosElongation = sin(sunDec) * sin(moon.second) + cos(sunDec) * cos(moon.second) * cos(sunRa - moon.first)
+        return ((1.0 - cosElongation) / 2.0).coerceIn(0.0, 1.0)
     }
 
     private fun moonAltitude(millis: Long, latitude: Double, longitude: Double): Double {

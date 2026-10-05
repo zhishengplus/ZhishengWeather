@@ -8,6 +8,30 @@ import org.junit.Test
 class WeatherConditionTest {
 
     @Test
+    fun chinaGenericPrecipitationPreservesPhaseWithoutInventingIntensity() {
+        val rain = WeatherCondition.xiaomiProfile("301", "weathercn:101160106")
+        val snow = WeatherCondition.xiaomiProfile("302", "weathercn:101160106")
+        assertEquals(WeatherCondition.RAIN, rain.condition)
+        assertEquals(PrecipitationPhase.RAIN, rain.phase)
+        assertEquals(WeatherCondition.SNOW, snow.condition)
+        assertEquals(PrecipitationPhase.SNOW, snow.phase)
+        org.junit.Assert.assertNull(rain.intensity)
+        org.junit.Assert.assertNull(snow.intensity)
+        assertEquals("雨", WeatherCondition.xiaomiLabel("301", "weathercn:101160106"))
+        assertEquals("雪", WeatherCondition.xiaomiLabel("302", "weathercn:101160106"))
+        assertEquals(WeatherCondition.UNKNOWN, WeatherCondition.fromXiaomi("301", "accu:123"))
+        assertEquals(WeatherCondition.UNKNOWN, WeatherCondition.fromCode("999999"))
+    }
+
+    @Test
+    fun chinaExtendedWindSnowAndFogAreNotMissingData() {
+        assertEquals(WeatherCondition.WIND, WeatherCondition.fromCode("33"))
+        assertEquals(WeatherCondition.SNOW, WeatherCondition.fromCode("34"))
+        assertEquals(WeatherCondition.FOG, WeatherCondition.fromCode("35"))
+        assertEquals("龙卷风", WeatherCondition.chinaLabel("33"))
+    }
+
+    @Test
     fun chinaCodesMapToFineGrainedConditions() {
         assertEquals(WeatherCondition.CLEAR, WeatherCondition.fromCode("00"))
         assertEquals(WeatherCondition.PARTLY_CLOUDY, WeatherCondition.fromCode("1"))

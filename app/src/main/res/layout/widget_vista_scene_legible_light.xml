@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent">
+<ImageView android:id="@+id/widget_surface" android:background="@drawable/widget_vista_clip_outline" android:clipToOutline="true" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:contentDescription="" android:src="@drawable/widget_vista_surface">
+</ImageView>
+<LinearLayout android:id="@+id/widget_content" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="16dp">
+<LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+<LinearLayout android:id="@+id/widget_city_hit" android:layout_width="match_parent" android:layout_height="24dp" android:orientation="horizontal" android:gravity="center_vertical">
+<ImageView android:id="@+id/widget_pin" android:layout_width="11dp" android:layout_height="11dp" android:scaleType="fitCenter" android:contentDescription="" android:src="@drawable/ph_map_pin">
+</ImageView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_city" android:layout_width="0dp" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="4dp" android:layout_weight="1">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_footer" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="8dp">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_badge" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="1dp" android:layout_height="3dp" android:importantForAccessibility="no">
+</TextView>
+<LinearLayout android:id="@+id/widget_scene_hero" android:layout_width="match_parent" android:layout_height="82dp" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="0.18">
+<LinearLayout android:id="@+id/widget_clock_hit" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="vertical" android:layout_weight="1.05" android:gravity="center_vertical">
+<TextClock android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_time" android:layout_width="match_parent" android:layout_height="wrap_content" android:format12Hour="h:mm" android:format24Hour="HH:mm" android:fontFamily="sans-serif" android:textStyle="bold" android:textSize="39sp" android:includeFontPadding="false" android:textColor="#1B3346" android:maxLines="1">
+</TextClock>
+<TextClock android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_date" android:layout_width="match_parent" android:layout_height="wrap_content" android:format12Hour="M月d日 E" android:format24Hour="M月d日 E" android:fontFamily="sans-serif" android:textStyle="normal" android:textSize="12sp" android:includeFontPadding="false" android:textColor="#496171" android:maxLines="1">
+</TextClock>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_lunar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="2dp">
+</TextView>
+</LinearLayout>
+<LinearLayout android:id="@+id/widget_weather_hit" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="vertical" android:layout_weight="1" android:gravity="center_vertical|end">
+<LinearLayout android:layout_width="wrap_content" android:layout_height="48dp" android:orientation="horizontal" android:gravity="center_vertical|end">
+<ImageView android:id="@+id/widget_icon" android:layout_width="46dp" android:layout_height="46dp" android:scaleType="fitCenter" android:contentDescription="">
+</ImageView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="34sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="4dp">
+</TextView>
+</LinearLayout>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="18dp" android:orientation="horizontal" android:gravity="end">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_condition" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_range" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="7dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="1dp" android:layout_height="4dp" android:importantForAccessibility="no">
+</TextView>
+<LinearLayout android:id="@+id/widget_scene_briefing" android:layout_width="match_parent" android:layout_height="40dp" android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="5dp" android:paddingEnd="7dp" android:layout_weight="0.08">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="2dp" android:layout_height="23dp" android:background="#527F98">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="8dp" android:layout_height="1dp">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_scene_briefing_text" android:layout_width="0dp" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#1B3346" android:fontFamily="sans-serif-medium" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="2" android:ellipsize="end" android:layout_weight="1">
+</TextView>
+<ImageView android:id="@+id/widget_scene_girl" android:layout_width="34dp" android:layout_height="34dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginStart="4dp" android:visibility="gone">
+</ImageView>
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="1dp" android:layout_height="7dp" android:importantForAccessibility="no">
+</TextView>
+<LinearLayout android:id="@+id/widget_metrics" android:layout_width="match_parent" android:layout_height="70dp" android:orientation="vertical">
+<LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:orientation="horizontal" android:gravity="center_vertical">
+<LinearLayout android:id="@+id/widget_metric_hit_1" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_label_1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+<LinearLayout android:id="@+id/widget_metric_hit_2" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_label_2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+<LinearLayout android:id="@+id/widget_metric_hit_3" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_label_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="1dp" android:layout_height="2dp" android:importantForAccessibility="no">
+</TextView>
+<LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:orientation="horizontal" android:gravity="center_vertical">
+<LinearLayout android:id="@+id/widget_metric_hit_4" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_label_4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+<LinearLayout android:id="@+id/widget_metric_hit_5" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_label_5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+<LinearLayout android:id="@+id/widget_metric_hit_6" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_label_6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_metric_6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="1dp" android:layout_height="7dp" android:importantForAccessibility="no">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_scene_hourly_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif-medium" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:text="接下来几小时">
+</TextView>
+<LinearLayout android:id="@+id/widget_hourly_forecast" android:layout_width="match_parent" android:layout_height="70dp" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="0.37">
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:layout_width="1dp" android:layout_height="7dp" android:importantForAccessibility="no">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_scene_day_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif-medium" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:text="未来五天 · 日历">
+</TextView>
+<LinearLayout android:id="@+id/widget_forecast" android:layout_width="match_parent" android:layout_height="66dp" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="0.37">
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_alarm_hit" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_alarm" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_alarm_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+<TextView android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="1sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:visibility="gone">
+</TextView>
+</FrameLayout>

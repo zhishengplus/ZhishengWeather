@@ -68,12 +68,14 @@ class DailyForecastScreenTest {
             dateMillis = 0L,
             precipProbability = 35,
             windSpeed = 18.0,
+            windDirectionDeg = 315.0,
+            aqi = 34,
             sunrise = "06:38",
         )
 
         assertTrue(forecastDetailLabels(empty, "kmh").isEmpty())
         assertEquals(
-            listOf("降水 35%", "风 18 km/h", "日出 06:38"),
+            listOf("降水 35%", "风 西北 · 18 km/h", "AQI 34", "日出 06:38"),
             forecastDetailLabels(available, "kmh"),
         )
     }

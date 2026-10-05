@@ -80,6 +80,7 @@ object QWeatherApi {
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
+        coerceInputValues = true
     }
 
     @Volatile private var cachedHost: String? = null
@@ -141,7 +142,9 @@ object QWeatherApi {
             }
         }
 
+    // 和风天气坐标接口按官方约 1 km 网格、最多 2 位小数接收坐标。
+    // 输入仍来自 GPS，而不是城市 ID；统一格式化可避免部分接口因超规格小数返回 4xx。
     fun lat(v: Double) = String.format(Locale.US, "%.2f", v)
     fun lonLat(c: com.zhisheng.weather.model.City) =
-        String.format(Locale.US, "%.2f,%.2f", c.longitude, c.latitude)
+        "${lat(c.longitude)},${lat(c.latitude)}"
 }

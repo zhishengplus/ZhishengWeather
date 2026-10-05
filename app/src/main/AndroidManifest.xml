@@ -20,6 +20,17 @@
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
 
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Only discover calendar entry points; no calendar data permission needed. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CALENDAR" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ZhishengApplication"
         android:allowBackup="true"
@@ -45,7 +56,8 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
         </activity>
 
         <!--
@@ -69,6 +81,35 @@
                 android:resource="@xml/shortcuts" />
         </activity-alias>
 
+        <activity android:name=".widget.WidgetConfigActivity" android:exported="true" android:label="桌面天气">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".widget.WidgetLaunchActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver android:name=".widget.WidgetPinReceiver" android:exported="false" />
+        <receiver android:name=".widget.FreshWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.intent.action.WALLPAPER_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".widget.VistaPulseWidgetProvider" android:label="枳生天气 · 澄空 · 时光气象" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vista_pulse" /></receiver>
+        <receiver android:name=".widget.VistaNowWidgetProvider" android:label="枳生天气 · 澄空 · 天气小窗" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vista_now" /></receiver>
+        <receiver android:name=".widget.VistaBandWidgetProvider" android:label="枳生天气 · 澄空 · 逐时天光" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vista_band" /></receiver>
+        <receiver android:name=".widget.VistaWeekWidgetProvider" android:label="枳生天气 · 澄空 · 日历天气" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vista_week" /></receiver>
+        <receiver android:name=".widget.VistaSceneWidgetProvider" android:label="枳生天气 · 澄空 · 天气全景" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vista_scene" /></receiver>
+        <receiver android:name=".widget.ClassicPulseWidgetProvider" android:label="枳生天气 · 经典 · 时间信号" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_pulse" /></receiver>
+        <receiver android:name=".widget.ClassicNowWidgetProvider" android:label="枳生天气 · 经典 · 微型观测站" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_now" /></receiver>
+        <receiver android:name=".widget.ClassicBandWidgetProvider" android:label="枳生天气 · 经典 · 出行监测" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_band" /></receiver>
+        <receiver android:name=".widget.ClassicWeekWidgetProvider" android:label="枳生天气 · 经典 · 五日趋势" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_week" /></receiver>
+        <receiver android:name=".widget.ClassicSceneWidgetProvider" android:label="枳生天气 · 经典 · 气象终端" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_scene" /></receiver>
+
         <activity-alias
             android:name=".IconClassic"
             android:enabled="false"
@@ -86,62 +127,23 @@
                 android:resource="@xml/shortcuts" />
         </activity-alias>
 
-        <!-- 桌面小组件：五档硬件终端规格，共用同一套快照与配色逻辑。 -->
-        <receiver
-            android:name=".widget.ZhishengWidgetNano"
-            android:exported="false"
-            android:label="@string/widget_label_nano">
+        <activity-alias
+            android:name=".IconLight"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_light"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher_light_round"
+            android:targetActivity=".MainActivity">
             <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info_nano" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.ZhishengWidgetSmall"
-            android:exported="false"
-            android:label="@string/widget_label_small">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_info_small" />
-        </receiver>
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity-alias>
 
-        <receiver
-            android:name=".widget.ZhishengWidgetMedium"
-            android:exported="false"
-            android:label="@string/widget_label_medium">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_info_medium" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.ZhishengWidgetLarge"
-            android:exported="false"
-            android:label="@string/widget_label_large">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_info_large" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.ZhishengWidgetTower"
-            android:exported="false"
-            android:label="@string/widget_label_tower">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info_tower" />
-        </receiver>
     </application>
 
 </manifest>

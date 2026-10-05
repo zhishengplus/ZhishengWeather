@@ -1,12 +1,79 @@
 package com.zhisheng.weather.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.element
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 
 // 和风天气新版 API 响应模型（weather/v1、weatheralert/v1、airquality/v1）
 // 与旧版 v7 模型（minutely / indices / geo）共存
 
 @Serializable
 data class QwVal(val value: Double? = null, val unit: String? = null)
+
+internal fun qwNumberFrom(element: JsonElement?): Double? = when (element) {
+    null, JsonNull -> null
+    is JsonPrimitive -> element.doubleOrNull ?: element.content.toDoubleOrNull()
+    is JsonObject -> qwNumberFrom(element["value"])
+    else -> null
+}
+
+internal fun qwValFrom(element: JsonElement?): QwVal? = when (element) {
+    null, JsonNull -> null
+    is JsonPrimitive -> element.doubleOrNull?.let { QwVal(it, null) }
+    is JsonObject -> QwVal(
+        value = qwNumberFrom(element["value"]),
+        unit = (element["unit"] as? JsonPrimitive)?.contentOrNull,
+    )
+    else -> null
+}
+
+internal object QwPrecipSerializer : KSerializer<QwPrecip> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("QwPrecip") {
+        element<QwVal?>("amount", isOptional = true)
+        element<QwVal?>("intensity", isOptional = true)
+        element<Double?>("probability", isOptional = true)
+        element<String?>("type", isOptional = true)
+    }
+
+    override fun deserialize(decoder: Decoder): QwPrecip {
+        val json = decoder as? JsonDecoder ?: return QwPrecip()
+        val element = json.decodeJsonElement()
+        if (element is JsonNull) return QwPrecip()
+        val obj = element as? JsonObject ?: return QwPrecip()
+        return QwPrecip(
+            amount = qwValFrom(obj["amount"]),
+            intensity = qwValFrom(obj["intensity"]),
+            probability = qwNumberFrom(obj["probability"]),
+            type = (obj["type"] as? JsonPrimitive)?.contentOrNull,
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: QwPrecip) {
+        val json = encoder as? JsonEncoder ?: return
+        json.encodeJsonElement(
+            buildJsonObject {
+                value.amount?.let { put("amount", json.json.encodeToJsonElement(QwVal.serializer(), it)) }
+                value.intensity?.let { put("intensity", json.json.encodeToJsonElement(QwVal.serializer(), it)) }
+                value.probability?.let { put("probability", JsonPrimitive(it)) }
+                value.type?.let { put("type", JsonPrimitive(it)) }
+            },
+        )
+    }
+}
 
 // icon 才带昼夜变体（晴天白天 100 / 夜间 150），code 恒为白天码。
 // 只读 code 会让夜里显示太阳（v0.0.2 修复），故两者都收，优先用 icon。
@@ -27,12 +94,12 @@ data class QwWind(
     val scale: Int? = null,
 )
 
-@Serializable
+@Serializable(with = QwPrecipSerializer::class)
 data class QwPrecip(
     val amount: QwVal? = null,
     // amount 是当前数据时段累计量；intensity 才是实时雨强（通常为 mm/h）。
     val intensity: QwVal? = null,
-    // weather/v1 使用 0..1 小数；旧代码按 Int 解析会让整份逐时/逐日响应失败。
+    // weather/v1 文档是 0..1 小数；实包也可能是百分数、字符串，或 {value, unit}。
     val probability: Double? = null,
     val type: String? = null,
 )
@@ -112,6 +179,8 @@ data class QwEventType(val name: String? = null, val code: String? = null)
 
 @Serializable
 data class QwAlert(
+    val id: String? = null,
+    val expireTime: String? = null,
     val headline: String? = null,
     val description: String? = null,
     val severity: String? = null,

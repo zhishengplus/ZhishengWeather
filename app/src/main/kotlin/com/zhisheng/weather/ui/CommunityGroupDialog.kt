@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.zhisheng.weather.ui.theme.zhishengScreen
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -30,6 +31,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -44,6 +46,7 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 import com.zhisheng.weather.i18n.uiText
 
 internal val CommunityQqGroup: String
@@ -61,7 +64,7 @@ fun CommunityGroupDialog(onClose: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ZhishengBg.copy(alpha = 0.86f))
+                .zhishengScreen()
                 .safeDrawingPadding()
                 .padding(12.dp),
             contentAlignment = Alignment.Center,
@@ -70,8 +73,7 @@ fun CommunityGroupDialog(onClose: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 440.dp)
-                    .background(ZhishengSurface, RectangleShape)
-                    .border(1.dp, ZhishengCardBorder, RectangleShape),
+                    .zhishengDialogPanel(),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
@@ -79,7 +81,7 @@ fun CommunityGroupDialog(onClose: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
                         Text(
-                            "COMM LINK / QQ",
+                            "QQ 交流群",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengCyan,
                             letterSpacing = 1.4.sp,
@@ -115,10 +117,13 @@ fun CommunityGroupDialog(onClose: () -> Unit) {
                         Text("CHANNEL ID", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
                         Text(
                             CommunityQqGroup,
+                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.titleMedium,
                             color = ZhishengMint,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.2.sp,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
                         )
                     }
 

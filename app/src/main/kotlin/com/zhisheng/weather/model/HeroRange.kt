@@ -26,6 +26,7 @@ object HeroTemps {
         yesterday: YesterdayInfo?,
         nowMillis: Long,
         zone: ZoneId = ZoneId.systemDefault(),
+        hourly: List<HourlyWeather> = emptyList(),
     ): HeroRange {
         val zonedNow = Instant.ofEpochMilli(nowMillis).atZone(zone)
         val hour = zonedNow.hour
@@ -36,20 +37,28 @@ object HeroTemps {
         val tomorrow = daily.firstOrNull { dayOf(it) == todayDate.plusDays(1) }
         val todayHigh = today?.high
         val todayLow = today?.low
+        // A daily minimum covers a calendar day, not tonight. Only use the
+        // tonight label when hourly forecasts cover now through early morning.
+        val start = zonedNow.withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli()
+        val end = todayDate.plusDays(1).atTime(8, 0).atZone(zone).toInstant().toEpochMilli()
+        val night = hourly.filter { it.timeMillis in start..end && it.temperature?.isFinite() == true }
+            .distinctBy { it.timeMillis }.sortedBy { it.timeMillis }
+        val gap = 3 * 60 * 60_000L
+        val coversNight = night.isNotEmpty() && night.first().timeMillis - start <= gap &&
+            end - night.last().timeMillis <= 2 * 60 * 60_000L &&
+            night.zipWithNext().all { (a, b) -> b.timeMillis - a.timeMillis <= gap }
+        val tonightLow = if (coversNight) night.mapNotNull { it.temperature }.minOrNull() else null
         return when {
             hour < DAY_START_HOUR -> HeroRange(
-                leftLabel = "昨低",
+                leftLabel = "昨晚最低",
                 left = yesterday?.low,
-                rightLabel = "今高",
+                rightLabel = "今天最高",
                 right = todayHigh,
             )
             hour >= NIGHT_START_HOUR -> HeroRange(
-                leftLabel = "夜低",
-                // 0.0.9-debug 修复：20 点后的「夜低」应指今夜将出现的最低温。
-                // 今日 low 是今晨已发生的过去值（8 月夜间降温时 21 点显示的
-                // 是早上 6 点的温度）；今夜最低通常落在明晨，取明日 low。
-                left = tomorrow?.low ?: todayLow,
-                rightLabel = "明高",
+                leftLabel = if (tonightLow != null) "今夜最低" else if (tomorrow?.low != null) "明日最低" else "今日最低",
+                left = tonightLow ?: tomorrow?.low ?: todayLow,
+                rightLabel = if (tomorrow?.high != null) "明天最高" else "今天最高",
                 right = tomorrow?.high ?: todayHigh,
             )
             else -> HeroRange(

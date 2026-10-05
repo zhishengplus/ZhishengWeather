@@ -1,0 +1,97 @@
+{
+  "package": "@meteocons/svg-static",
+  "version": "0.1.0",
+  "license": "MIT",
+  "assets": [
+    {
+      "name": "sun",
+      "slug": "clear-day",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/clear-day.svg",
+      "sha256": "48743c29f18f37a844737cddafceb2d6d194090cc59f70c2733d10a70a96218a"
+    },
+    {
+      "name": "moon",
+      "slug": "clear-night",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/clear-night.svg",
+      "sha256": "de9cbec8f7ef5611b693435396be57eb5ea3ea7889c40ca2cf47bfd4577e060a"
+    },
+    {
+      "name": "cloud_sun",
+      "slug": "partly-cloudy-day",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/partly-cloudy-day.svg",
+      "sha256": "630e0fe6e488a53745d5de6b8dc709e665edd1443488ac3782445bdd1376ee9a"
+    },
+    {
+      "name": "cloud_moon",
+      "slug": "partly-cloudy-night",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/partly-cloudy-night.svg",
+      "sha256": "5037008b15f5fb95245dc02cb60e03b5ee8da71497f16f56ec9c0d63c19021b1"
+    },
+    {
+      "name": "cloud",
+      "slug": "cloudy",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/cloudy.svg",
+      "sha256": "4946fe0f1d11975ff37176a9548de5d04d4eda297a1e8a9edadf60c2b0fcbcae"
+    },
+    {
+      "name": "clouds",
+      "slug": "overcast",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/overcast.svg",
+      "sha256": "b6db5c2b7ab6e49dd1661e009f6096c78655b93594c39816f15c09b03ab722c4"
+    },
+    {
+      "name": "rain",
+      "slug": "rain",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/rain.svg",
+      "sha256": "bd2300f05bcc4f98751adbda0489dd35cf3ac94761a8ad79f0255cdd9e150e4a"
+    },
+    {
+      "name": "drizzle",
+      "slug": "drizzle",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/drizzle.svg",
+      "sha256": "45fca64f036414f4297f920a5da6994dfe2e76182d9e2e1ff1643dcc517b3604"
+    },
+    {
+      "name": "bolt",
+      "slug": "thunderstorms",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/thunderstorms.svg",
+      "sha256": "268ad909236d7483d2906d2aec723171e6f812007ba6888dc803ee7367b74061"
+    },
+    {
+      "name": "sleet",
+      "slug": "sleet",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/sleet.svg",
+      "sha256": "d5151b8688ef3f7a2ad3acdebe09e32b40b9b2a7400c53683a95ed54686e781e"
+    },
+    {
+      "name": "snow",
+      "slug": "snow",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/snow.svg",
+      "sha256": "ab7f7a25b852f3d795cf76d6f70ffa47a9086f9f6ddd9d9c32bd05f2bc4f9d41"
+    },
+    {
+      "name": "fog",
+      "slug": "fog",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/fog.svg",
+      "sha256": "773194ee3c9e92543f69d892208d48ed862eab22f62fa9211b31e4eb4cd877f9"
+    },
+    {
+      "name": "haze",
+      "slug": "haze",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/haze.svg",
+      "sha256": "6c64805fc8c703712a6eb2791295334754c02963bb9b1f209e4f43f5c9c871d8"
+    },
+    {
+      "name": "sand",
+      "slug": "dust",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/dust.svg",
+      "sha256": "f2e642fccc1e04b8de5be2e90bc28cca71ae212e2d654bb542667e1a0d8d9cd7"
+    },
+    {
+      "name": "wind",
+      "slug": "wind",
+      "url": "https://unpkg.com/@meteocons/svg-static@0.1.0/fill/wind.svg",
+      "sha256": "763b60c7f1e7490a18c79250640f02eef80451527a65eb28341d2a690aaf6f06"
+    }
+  ]
+}

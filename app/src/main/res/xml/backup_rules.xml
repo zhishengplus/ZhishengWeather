@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
+    <exclude domain="file" path="datastore/scene_weather_cache.preferences_pb" />
     <exclude domain="file" path="datastore/secrets.preferences_pb" />
     <exclude domain="file" path="no_backup/datastore/secrets.preferences_pb" />
+    <exclude domain="file" path="datastore/known_places.preferences_pb" />
 </full-backup-content>

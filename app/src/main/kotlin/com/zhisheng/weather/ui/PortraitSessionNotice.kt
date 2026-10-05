@@ -21,6 +21,7 @@ import com.zhisheng.weather.ui.theme.ZhishengCard
 import com.zhisheng.weather.ui.theme.ZhishengCardBorder
 import com.zhisheng.weather.ui.theme.ZhishengMint
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
+import com.zhisheng.weather.ui.theme.zhishengCompactPanel
 
 /** Current-activity orientation override: visible until the user re-arms sensor rotation. */
 @Composable
@@ -32,8 +33,7 @@ internal fun PortraitSessionNotice(
         modifier = modifier
             .widthIn(max = 420.dp)
             .fillMaxWidth()
-            .background(ZhishengCard.copy(alpha = 0.96f), RectangleShape)
-            .border(1.dp, ZhishengCardBorder, RectangleShape)
+            .zhishengCompactPanel(containerColor = ZhishengCard.copy(alpha = 0.96f))
             .padding(start = 14.dp, top = 10.dp, end = 6.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

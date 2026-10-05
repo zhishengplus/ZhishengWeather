@@ -4,7 +4,7 @@ import com.zhisheng.weather.R
 
 // 天气条件 → 图标资源（单一真源，when 表达式强制穷尽）。
 // v0.0.4 合并原双份拷贝：ui/components/WeatherIcon.kt 的 mapOf 与
-// widget/ZhishengWidgetProvider.iconRes()——两处曾各自维护同一张 15 项映射，
+// Android drawable mapping and Compose weather rendering share the same condition names.
 // 新增条件枚举时编译器在此兜底。
 fun conditionIconRes(condition: WeatherCondition?): Int? = when (condition) {
     WeatherCondition.UNKNOWN -> null

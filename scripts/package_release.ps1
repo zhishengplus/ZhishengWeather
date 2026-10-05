@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.5-beta3',
+    [string]$Version = '0.1.5-beta10.1-public',
     [switch]$IncludeDevelopmentBuilds
 )
 
@@ -20,8 +20,9 @@ if (-not $versionLine -or $versionLine.Matches[0].Groups[1].Value -ne $Version) 
     throw "Requested version $Version does not match app/build.gradle.kts"
 }
 
+$publicFile = if ($Version.EndsWith('-public')) { "ZhishengWeather-v$Version.apk" } else { "ZhishengWeather-v$Version-public.apk" }
 $packages = [ordered]@{
-    'app\build\outputs\apk\publicRelease\app-publicRelease.apk' = "ZhishengWeather-v$Version-public.apk"
+    'app\build\outputs\apk\publicRelease\app-publicRelease.apk' = $publicFile
 }
 
 if ($IncludeDevelopmentBuilds) {
@@ -55,9 +56,17 @@ $hashLines | Set-Content -LiteralPath (Join-Path $DistDir 'SHA256.txt') -Encodin
 if (-not $IncludeDevelopmentBuilds) {
     $manifestPath = Join-Path $ProjectRoot 'update.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $publicFile = "ZhishengWeather-v$Version-public.apk"
     if ($manifest.versionName -ne $Version) {
         throw "update.json versionName does not match $Version"
+    }
+    $versionCodeLine = Select-String -LiteralPath $gradleFile -Pattern 'versionCode\s*=\s*(\d+)' |
+        Select-Object -First 1
+    if (-not $versionCodeLine) {
+        throw 'Cannot read versionCode from app/build.gradle.kts'
+    }
+    $expectedVersionCode = [long]$versionCodeLine.Matches[0].Groups[1].Value
+    if (-not $manifest.versionCode -or [long]$manifest.versionCode -ne $expectedVersionCode) {
+        throw "update.json versionCode does not match app/build.gradle.kts ($expectedVersionCode)"
     }
     if (-not $manifest.apkUrl.EndsWith("/$publicFile")) {
         throw "update.json apkUrl does not point to $publicFile"

@@ -23,7 +23,6 @@ fun ProvideAppLanguage(language: AppLanguage, content: @Composable () -> Unit) {
 fun uiText(text: String, language: AppLanguage = AppLanguageState.current): String {
     if (language != AppLanguage.JAPANESE || text.isBlank()) return text
     japaneseExact[text]?.let { return it }
-    japaneseWeatherCopy(text)?.let { return it }
 
     var localized = text
     dynamicJapaneseRules.forEach { (pattern, replacement) ->
@@ -33,6 +32,12 @@ fun uiText(text: String, language: AppLanguage = AppLanguageState.current): Stri
         localized = localized.replace(source, target)
     }
     return localized
+}
+
+/** Generated conversational briefings may use natural wording; provider facts must retain their values. */
+fun weatherBriefingText(text: String, language: AppLanguage = AppLanguageState.current): String {
+    if (language != AppLanguage.JAPANESE) return text
+    return japaneseWeatherCopy(text) ?: uiText(text, language)
 }
 
 private fun japaneseWeatherCopy(source: String): String? {
@@ -207,6 +212,8 @@ private val dynamicJapaneseRules = listOf(
 
 /** Full-sentence translations for primary flows. These are written as Japanese UI copy, not literal translations. */
 private val japaneseExact = mapOf(
+    "按桌面提供的尺寸缩放预览" to "ホーム画面から提供されたサイズに合わせた縮小プレビュー",
+    "参考预览，实际尺寸以桌面为准" to "参考プレビュー。実際のサイズはホーム画面で決まります",
     "设置" to "設定",
     "返回" to "戻る",
     "竖屏" to "縦画面",
@@ -322,6 +329,8 @@ private val japaneseExact = mapOf(
     "调整主页模块顺序" to "ホーム画面の並び順を変更",
     "恢复默认顺序" to "初期の並び順に戻す",
     "横屏待机界面" to "横画面の待受表示",
+    "防烧屏保护" to "焼き付き対策",
+    "横屏内容每 15 秒轻移 1 个像素，减少固定位置长期显示；只能降低烧屏风险" to "横画面の内容を15秒ごとに1ピクセル移動し、同じ位置での長時間表示を減らします。焼き付きを完全に防ぐことはできません",
     "本次已锁定竖屏" to "この起動中は縦画面に固定されています",
     "恢复自动旋转" to "自動回転に戻す",
     "> 恢复自动旋转" to "> 自動回転に戻す",
@@ -379,8 +388,12 @@ private val japaneseExact = mapOf(
     "主页播报" to "ホームのひとこと",
     "播报样式" to "表示スタイル",
     "简洁 Tips" to "シンプルTips",
-    "天气内容完全相同；简洁 Tips 不显示人物形象" to "天気の内容は同じです。シンプルTipsではキャラクターを表示しません",
+    "关闭" to "オフ",
+    "天气娘与 Tips 内容一致；关闭后主界面会完整收起播报区域" to "お天気ガールとTipsの内容は同じです。オフにするとホーム画面の表示領域も閉じます",
     "经典" to "クラシック",
+    "精确地址" to "詳細な住所",
+    "地址检索" to "住所検索",
+    "输入小区、街道或地点" to "施設名・通り・住所を入力",
     "首要污染物" to "主要汚染物質",
     "桌面组件底色" to "ウィジェット背景",
     "全透明" to "透明",
@@ -502,6 +515,7 @@ private val japanesePhrases = linkedMapOf(
     "枳生天气娘" to "枳生お天気ガール",
     "枳生天气" to "枳生天気",
     "当前城市" to "現在の地点",
+    "今日预报" to "今日の予報",
     "当前" to "現在",
     "正在" to "",
     "天气娘" to "お天気ガール",
@@ -509,6 +523,8 @@ private val japanesePhrases = linkedMapOf(
     "天气数据" to "天気データ",
     "天气" to "天気",
     "数据源" to "データソース",
+    "数据发布于" to "データ発表時刻",
+    "更新于" to "更新時刻",
     "数据" to "データ",
     "设置" to "設定",
     "城市" to "地点",

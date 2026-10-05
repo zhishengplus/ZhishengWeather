@@ -1,39 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">枳生天气</string>
-    <string name="widget_name">枳生天气</string>
-    <string name="widget_update_placeholder">尚未同步</string>
-    <string name="widget_refreshing">正在刷新…</string>
-    <string name="widget_refresh_desc">刷新天气</string>
-    <string name="widget_updated_at">%1$s更新</string>
-    <string name="widget_sync_hint">打开 App 同步数据</string>
-    <string name="widget_stale_hours">%1$d小时前</string>
-    <string name="widget_stale_expired">数据已过期</string>
-    <string name="widget_date_placeholder">--月--日 周-</string>
-    <string name="widget_details_placeholder">体感 -- · 湿度 --</string>
-    <string name="widget_value_placeholder">--</string>
-    <string name="widget_aqi_placeholder">AQI --</string>
-    <string name="widget_icon_desc">天气图标</string>
-    <string name="widget_trend_desc">未来六小时温度变化</string>
-    <string name="widget_daily_range_desc">逐日最低与最高温度范围</string>
-    <string name="widget_trend_label">未来 6 小时</string>
-    <string name="widget_life_label">生活</string>
-    <string name="widget_refresh_glyph" translatable="false">↻</string>
-    <string name="widget_range_placeholder" translatable="false">--°–--°</string>
-    <string name="widget_label_small">枳生天气 · 小</string>
-    <string name="widget_label_medium">枳生天气 · 中</string>
-    <string name="widget_label_large">枳生天气 · 大</string>
-    <string name="widget_label_nano">枳生天气 · 横向腕表</string>
-    <string name="widget_label_tower">枳生天气 · 竖向终端</string>
-    <string name="widget_desc_small">大字号实况 · 日期 · 高低温 · 体感湿度</string>
-    <string name="widget_desc_medium">大字号实况 · 日期 · 体感湿度 · 未来四小时</string>
-    <string name="widget_desc_large">完整实况 · 六小时温度轨迹 · 生活指数 · 七日预报 · 可刷新</string>
-    <string name="widget_desc_nano">4×1 横向腕表 · 城市 · 实况 · 呼吸状态灯</string>
-    <string name="widget_desc_tower">2×4 竖向终端 · 大图标 · 大温度 · 呼吸状态灯</string>
     <string name="shortcut_refresh_short">刷新天气</string>
-    <string name="shortcut_refresh_long">立即刷新当前城市</string>
+    <string name="shortcut_refresh_long">刷新天气</string>
     <string name="shortcut_search_short">搜索城市</string>
-    <string name="shortcut_search_long">搜索并切换城市</string>
+    <string name="shortcut_search_long">切换城市</string>
     <string name="shortcut_settings_short">设置</string>
-    <string name="shortcut_settings_long">打开枳生天气设置</string>
+    <string name="shortcut_settings_long">打开设置</string>
 </resources>

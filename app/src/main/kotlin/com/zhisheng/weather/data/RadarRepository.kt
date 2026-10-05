@@ -30,7 +30,7 @@ object RadarRepository {
     private const val COVERAGE_CACHE_MS = 24 * 60 * 60_000L
     private const val METADATA_MAX_STALE_MS = 45 * 60_000L
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -43,6 +43,7 @@ object RadarRepository {
     }
 
     suspend fun loadTimeline(city: City? = null): RadarTimeline = withContext(Dispatchers.IO) {
+        if (!ReleaseFeatures.radar) return@withContext RadarTimeline("", emptyList(), true)
         check(::directory.isInitialized) { "RadarRepository.init must be called first" }
         val (meta, stale) = loadMetadata()
             ?: return@withContext RadarTimeline("", emptyList(), true)
@@ -144,7 +145,7 @@ private data class RadarFrameDescriptor(
     val path: String,
 )
 
-private val radarMetaJson = Json { ignoreUnknownKeys = true; isLenient = true }
+private val radarMetaJson = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
 /** RainViewer 当前公开接口只提供过去两小时回波；-1 表示响应不可识别。 */
 internal fun rainviewerPastFrameCount(payload: String): Int {

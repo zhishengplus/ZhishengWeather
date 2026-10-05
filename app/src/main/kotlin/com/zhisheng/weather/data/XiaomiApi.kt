@@ -49,6 +49,7 @@ interface XiaomiApi {
         private val json = Json {
             ignoreUnknownKeys = true
             isLenient = true
+            coerceInputValues = true
         }
 
         private val okHttp = OkHttpClient.Builder()

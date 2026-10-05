@@ -76,6 +76,54 @@ val ZhishengLightSoftAccentPalette = ZhishengLightPalette.copy(
     cyan = Color(0xFF145B6B),
 )
 
+// beta6-2 · 磷光视界：保留磷光信号色，但让大面积底色更安静、层级更清楚。
+// 绿色用于实时数据与确认，青色用于导航与图表，琥珀只用于时间、标题和告警提示。
+val PhosphorVistaDarkPalette = ZhishengPalette(
+    isLight = false,
+    bg = Color(0xFF0A0E15),
+    surface = Color(0xFF1D242E),
+    card = Color(0xFF2D3541),
+    cardBorder = Color(0xFF50616C),
+    mint = Color(0xFF8EC9C2),
+    orange = Color(0xFFF2B56B),
+    cyan = Color(0xFF95C8EF),
+    red = Color(0xFFFF9CA0),
+    warning = Color(0xFFF1C96A),
+    text = Color(0xFFEDF3F4),
+    textSecondary = Color(0xFFB3C0C7),
+    textTertiary = Color(0xFFA7B7C2),
+)
+
+val PhosphorVistaDarkSoftAccentPalette = PhosphorVistaDarkPalette.copy(
+    mint = Color(0xFF85BFB9),
+    cyan = Color(0xFF8ABCDD),
+)
+
+val PhosphorVistaLightPalette = ZhishengPalette(
+    isLight = true,
+    bg = Color(0xFFF6F8FA),
+    surface = Color(0xFFFEFEFF),
+    card = Color(0xFFFFFFFF),
+    cardBorder = Color(0xFFDDE3E6),
+    mint = Color(0xFF1E555A),
+    orange = Color(0xFF9B4B0D),
+    cyan = Color(0xFF245780),
+    red = Color(0xFFB52D3A),
+    warning = Color(0xFF765700),
+    text = Color(0xFF19232E),
+    textSecondary = Color(0xFF40515F),
+    textTertiary = Color(0xFF435361),
+)
+
+// Meteocons cloud pixels are #E5EFFC. Compress RGB equally on light surfaces:
+// this preserves the hue relationships of sun/rain/cloud, and preserves alpha.
+internal const val VistaLightWeatherIconRgbScale = 0.58f
+
+val PhosphorVistaLightSoftAccentPalette = PhosphorVistaLightPalette.copy(
+    mint = Color(0xFF305359),
+    cyan = Color(0xFF345373),
+)
+
 val LocalZhishengPalette = staticCompositionLocalOf { ZhishengDarkPalette }
 
 // 兼容既有调用点的主题访问器：UI 里原有 `ZhishengText` 等全局 val 的调用处不用改，
@@ -92,3 +140,8 @@ val ZhishengWarning: Color @Composable get() = LocalZhishengPalette.current.warn
 val ZhishengText: Color @Composable get() = LocalZhishengPalette.current.text
 val ZhishengTextSecondary: Color @Composable get() = LocalZhishengPalette.current.textSecondary
 val ZhishengTextTertiary: Color @Composable get() = LocalZhishengPalette.current.textTertiary
+
+// Temperature graphics use a softer amber than small text, with no muddy hue interpolation.
+internal fun vistaTemperatureInk(high: Double?, light: Boolean): Color =
+    if ((high ?: 0.0) >= 25.0) { if (light) Color(0xFFD19A62) else Color(0xFFE4B678) }
+    else { if (light) Color(0xFF7099AF) else Color(0xFF8EBBD5) }

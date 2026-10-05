@@ -8,11 +8,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.CompositionLocalProvider
+import com.zhisheng.weather.ui.components.LocalWeatherContinuity
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -68,6 +73,7 @@ internal data class AtmosphereScenario(
     val condition: WeatherCondition,
     val night: Boolean = false,
     val thermal: ThermalModifier = ThermalModifier.NONE,
+    val minuteOfDay: Int = if (night) 22 * 60 else 12 * 60,
 )
 
 internal val atmosphereScenarios = listOf(
@@ -91,7 +97,14 @@ internal val atmosphereScenarios = listOf(
     AtmosphereScenario("WND", "大风", WeatherCondition.WIND),
     AtmosphereScenario("HOT", "酷热", WeatherCondition.CLEAR, thermal = ThermalModifier.HOT),
     AtmosphereScenario("ICE", "严寒", WeatherCondition.CLEAR, thermal = ThermalModifier.COLD),
-)
+).let { daytime ->
+    daytime + daytime.filter { !it.night && it.thermal == ThermalModifier.NONE &&
+        it.condition != WeatherCondition.CLEAR && it.condition != WeatherCondition.PARTLY_CLOUDY }
+        .map { it.copy(code = it.code + "N", name = it.name + "·夜", night = true, minuteOfDay = 22 * 60) } +
+        listOf(AtmosphereScenario("DAWN", "晨光", WeatherCondition.CLEAR, minuteOfDay = 6 * 60 + 31),
+            AtmosphereScenario("DUSK", "暮色", WeatherCondition.CLEAR, minuteOfDay = 19 * 60 + 42),
+            AtmosphereScenario("UNKNOWN", "暂无天气", WeatherCondition.UNKNOWN))
+}
 
 private val SIM_CITY = City(
     name = "模拟站",
@@ -111,7 +124,7 @@ fun AtmosphereLabScreen(
     var levelKey by rememberSaveable { mutableStateOf(initialLevel.key) }
     val scenario = atmosphereScenarios[scenarioIndex]
     val intensity = WeatherIntensity.entries[intensityIndex]
-    val level = AmbienceLevel.from(levelKey).let { if (it == AmbienceLevel.OFF) AmbienceLevel.VIVID else it }
+    val level = AmbienceLevel.from(levelKey)
     val data = remember(scenarioIndex, intensityIndex) { simulatedWeather(scenario, intensity) }
     val prefs = remember(level, scenario.condition) {
         DisplayPrefs(
@@ -121,17 +134,20 @@ fun AtmosphereLabScreen(
             showPrecip = scenario.condition.isPrecipitation,
             showTelemetry = true,
             showSpacetime = false,
-            scanlines = true,
+            scanlines = false,
             ambience = level,
             bootAnim = false,
         )
     }
 
+    // The preview is not the live city's shared element, even while an overlay animates.
+    CompositionLocalProvider(LocalWeatherContinuity provides null) {
     SimulatedWeatherSurface(
         data = data,
         city = SIM_CITY,
         prefs = prefs,
         night = scenario.night,
+        referenceTimeMillis = data.updateTime,
         header = {
             LabHeader(
                 scenario = scenario,
@@ -144,6 +160,7 @@ fun AtmosphereLabScreen(
                     levelKey = when (level) {
                         AmbienceLevel.SUBTLE -> AmbienceLevel.VIVID.key
                         AmbienceLevel.VIVID -> AmbienceLevel.INTENSE.key
+                        AmbienceLevel.INTENSE -> AmbienceLevel.OFF.key
                         else -> AmbienceLevel.SUBTLE.key
                     }
                 },
@@ -151,6 +168,7 @@ fun AtmosphereLabScreen(
             )
         },
     )
+    }
 }
 
 @Composable
@@ -165,8 +183,11 @@ private fun LabHeader(
     onCycleIntensity: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(ZhishengSurface).statusBarsPadding()) {
+        BoxWithConstraints {
+        val compact = com.zhisheng.weather.ui.theme.isPhosphorVista && (maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f)
+        Column {
         Row(
-            Modifier.fillMaxWidth().height(56.dp),
+            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
@@ -175,7 +196,7 @@ private fun LabHeader(
             Column(Modifier.weight(1f)) {
                 Text("氛围实验室", style = MaterialTheme.typography.titleMedium, color = ZhishengOrange, fontWeight = FontWeight.Bold)
                 Text(
-                    "SIMULATION / NO WRITE / ${scenario.code}",
+                    if (com.zhisheng.weather.ui.theme.isPhosphorVista) "天气效果预览" else "SIMULATION / NO WRITE / ${scenario.code}",
                     style = MaterialTheme.typography.labelSmall,
                     color = ZhishengTextTertiary,
                     letterSpacing = 1.1.sp,
@@ -183,10 +204,18 @@ private fun LabHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            LabCommand(level.cn, ZhishengCyan, onToggleLevel)
-            Spacer(Modifier.width(4.dp))
-            LabCommand(intensityLabel(intensity), ZhishengMint, onCycleIntensity)
-            Spacer(Modifier.width(8.dp))
+            if (!compact) {
+                LabCommand(level.cn, ZhishengCyan, onToggleLevel)
+                Spacer(Modifier.width(4.dp))
+                LabCommand(intensityLabel(intensity), ZhishengMint, onCycleIntensity)
+                Spacer(Modifier.width(8.dp))
+            }
+        }
+        if (compact) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            LabCommand("效果 · ${level.cn}", ZhishengCyan, onToggleLevel)
+            LabCommand("天气强度 · ${intensityLabel(intensity)}", ZhishengMint, onCycleIntensity)
+        }
+        }
         }
         Row(
             Modifier
@@ -199,7 +228,7 @@ private fun LabHeader(
             atmosphereScenarios.forEachIndexed { index, item ->
                 val selected = index == selectedIndex
                 Text(
-                    text = "${(index + 1).toString().padStart(2, '0')}//${item.name}",
+                    text = if (com.zhisheng.weather.ui.theme.isPhosphorVista) item.name else "${(index + 1).toString().padStart(2, '0')}//${item.name}",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (selected) ZhishengText else ZhishengTextSecondary,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
@@ -207,12 +236,12 @@ private fun LabHeader(
                         .background(if (selected) ZhishengOrange.copy(alpha = 0.14f) else ZhishengSurface)
                         .border(1.dp, if (selected) ZhishengOrange else ZhishengCardBorder)
                         .clickable(role = Role.Button) { onSelect(index) }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 14.dp),
                 )
             }
         }
         Text(
-            "沙盒数据只存在于当前页面，返回后立即丢弃；主页城市、缓存与数据源不受影响。",
+            "预览效果不会改变当前城市的天气。",
             style = MaterialTheme.typography.labelSmall,
             color = ZhishengTextTertiary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -223,11 +252,11 @@ private fun LabHeader(
 @Composable
 private fun LabCommand(label: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
     Text(
-        "[$label]",
+        if (com.zhisheng.weather.ui.theme.isPhosphorVista) label else "[$label]",
         style = MaterialTheme.typography.labelMedium,
         color = color,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.clickable(role = Role.Button, onClick = onClick).padding(horizontal = 4.dp, vertical = 10.dp),
+        modifier = Modifier.clickable(role = Role.Button, onClick = onClick).heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 14.dp),
     )
 }
 
@@ -239,7 +268,8 @@ private fun intensityLabel(v: WeatherIntensity): String = when (v) {
 }
 
 internal fun simulatedWeather(s: AtmosphereScenario, intensity: WeatherIntensity): WeatherData {
-    val now = System.currentTimeMillis()
+    val now = java.time.LocalDate.now(java.time.ZoneOffset.ofHours(8))
+        .atTime(s.minuteOfDay / 60, s.minuteOfDay % 60).toInstant(java.time.ZoneOffset.ofHours(8)).toEpochMilli()
     val phase = when (s.condition) {
         WeatherCondition.SNOW -> PrecipitationPhase.SNOW
         WeatherCondition.SLEET -> PrecipitationPhase.MIXED

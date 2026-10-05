@@ -17,6 +17,9 @@ data class City(
     val locationKey: String,
     val street: String? = null,
     val isFavorite: Boolean = false,
+    // 精确定位地址用 geo:* 作为自身身份；天气源仍可保留反查得到的城市键。
+    // 默认 null 保证旧版本保存的城市 JSON 可以直接迁移。
+    val weatherLocationKey: String? = null,
 ) {
     val displayName: String
         get() = listOf(name, street.orEmpty())
@@ -29,6 +32,9 @@ data class City(
             .filter(String::isNotBlank)
             .distinct()
             .joinToString(" · ")
+
+    val isPreciseLocation: Boolean
+        get() = locationKey.startsWith("geo:")
 }
 
 // 以下模型全部 @Serializable：离线缓存（WeatherCache）按城市持久化最近一次 WeatherData（v0.0.4）
@@ -93,6 +99,15 @@ data class YesterdayInfo(
     val low: Double? = null,
     val aqi: Int? = null,
     val condition: WeatherCondition? = null,
+    val dateMillis: Long? = null,
+    val weatherStart: WeatherCondition? = null,
+    val weatherEnd: WeatherCondition? = null,
+    val sunrise: String? = null,
+    val sunset: String? = null,
+    val windDirectionStartDeg: Double? = null,
+    val windDirectionEndDeg: Double? = null,
+    val windSpeedStart: Double? = null,
+    val windSpeedEnd: Double? = null,
 )
 
 @Serializable
@@ -104,6 +119,8 @@ data class TyphoonInfo(
     val id: String? = null,
     val active: Boolean = true,
     val source: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )
 
 @Serializable
@@ -129,6 +146,7 @@ data class DailyWeather(
     val humidity: Double? = null,
     val cloudCover: Double? = null,
     val uvIndex: Int? = null,
+    val aqi: Int? = null,
 )
 
 @Serializable
@@ -165,6 +183,26 @@ data class AlertInfo(
     val pubTime: String? = null,
     // 三源等级归一（和风 severity 英文枚举 / 小米 level 中文），UI 按档着色（v0.0.4）
     val severity: AlertLevel = AlertLevel.UNKNOWN,
+    val type: String? = null,
+    val id: String? = null,
+    val expiresAt: Long? = null,
+)
+
+/**
+ * 本次主天气源实际采用的位置。
+ *
+ * requested* 是用户选择/手机定位得到的原始坐标；provider* 是按供应商规则真正发出的坐标；
+ * matched* 仅在供应商返回其命中网格时记录。字段均带默认值，旧版缓存可直接反序列化。
+ */
+@Serializable
+data class WeatherLocationMatch(
+    val requestedLatitude: Double,
+    val requestedLongitude: Double,
+    val providerLatitude: Double,
+    val providerLongitude: Double,
+    val preciseGps: Boolean = false,
+    val matchedLatitude: Double? = null,
+    val matchedLongitude: Double? = null,
 )
 
 // 预警四档（国标蓝/黄/橙/红）
@@ -213,13 +251,20 @@ data class WeatherData(
     val daily: List<DailyWeather> = emptyList(),
     val aqi: AqiInfo? = null,
     val alerts: List<AlertInfo> = emptyList(),
+    // 气象源的观测/发布时间。用于判断源数据新鲜度，不能冒充用户刚刚刷新的时刻。
     val updateTime: Long? = null,
+    // 本次天气请求成功完成的时刻。首页和小组件的“UPD”优先显示它。
+    // 默认 null，保证旧版本持久化的缓存可以无损反序列化。
+    val fetchedAt: Long? = null,
     val rainNowcast: String? = null,
     // 未来 24 小时变化摘要，与短时降水文案严格分开，避免放在实况下方时看似自相矛盾。
     val forecastSummary: String? = null,
     val rainMinutes: List<MinutePrecip> = emptyList(),
     // 保留各源真实时间粒度；UI 不再把 5/15 分钟桶伪装成逐分钟数据。
     val rainMeta: RainMeta? = null,
+    // Separate model retrospective: never merge these samples into rain timing or current conditions.
+    val rainHistory: List<MinutePrecip> = emptyList(),
+    val rainHistorySource: String? = null,
     val carWashOk: Boolean? = null,
     val sportsOk: Boolean? = null,
     val extraIndices: List<LifeIndexExtra> = emptyList(),
@@ -229,6 +274,10 @@ data class WeatherData(
     val rainDistanceKm: Double? = null,
     val dataSource: String? = null,
     val blockSources: Map<String, String> = emptyMap(),
+    // 参与本次融合的源（仅枳生天气源输出时非空；OM 多模型成员归并为 "OPEN-METEO"）。
+    // 默认空保证旧缓存 JSON 无损反序列化。
+    val fusionSources: List<String> = emptyList(),
+    val locationMatch: WeatherLocationMatch? = null,
     val utcOffsetSeconds: Int? = null,
     val error: String? = null,
 ) {
@@ -309,6 +358,13 @@ enum class WeatherCondition(val label: String) {
                 "16", "28" -> profile(SNOW, raw, "CHINA", WeatherIntensity.HEAVY, PrecipitationPhase.SNOW)
                 "17" -> profile(SNOW, raw, "CHINA", WeatherIntensity.EXTREME, PrecipitationPhase.SNOW)
                 "19" -> profile(FREEZING_RAIN, raw, "CHINA", WeatherIntensity.MODERATE, PrecipitationPhase.FREEZING_RAIN, freezing = true)
+                // weathercn also returns generic precipitation codes in hourly forecasts.
+                // These codes do not specify intensity; do not turn them into heavy rain/snow.
+                "301" -> profile(RAIN, raw, "CHINA", phase = PrecipitationPhase.RAIN)
+                "302" -> profile(SNOW, raw, "CHINA", phase = PrecipitationPhase.SNOW)
+                "33" -> profile(WIND, raw, "CHINA", WeatherIntensity.EXTREME)
+                "34" -> profile(SNOW, raw, "CHINA", WeatherIntensity.LIGHT, PrecipitationPhase.SNOW)
+                "35" -> profile(FOG, raw, "CHINA", WeatherIntensity.LIGHT)
                 "18" -> profile(FOG, raw, "CHINA", WeatherIntensity.LIGHT)
                 "32", "57" -> profile(FOG, raw, "CHINA", WeatherIntensity.HEAVY)
                 "49", "58" -> profile(FOG, raw, "CHINA", WeatherIntensity.EXTREME)
@@ -424,6 +480,8 @@ enum class WeatherCondition(val label: String) {
             "26" to "小到中雪", "27" to "中到大雪", "28" to "大到暴雪",
             "29" to "浮尘", "30" to "扬沙", "31" to "强沙尘暴",
             "32" to "浓雾", "49" to "强浓雾",
+            "33" to "龙卷风", "34" to "弱高吹雪", "35" to "轻雾",
+            "301" to "雨", "302" to "雪",
             "53" to "霾", "54" to "中度霾", "55" to "重度霾", "56" to "严重霾",
             "57" to "大雾", "58" to "特强浓雾",
         )

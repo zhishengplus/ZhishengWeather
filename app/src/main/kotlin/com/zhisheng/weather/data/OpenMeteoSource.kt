@@ -7,6 +7,7 @@ import com.zhisheng.weather.model.HourlyWeather
 import com.zhisheng.weather.model.MinutePrecip
 import com.zhisheng.weather.model.RainMeta
 import com.zhisheng.weather.model.WeatherData
+import com.zhisheng.weather.model.WeatherLocationMatch
 import com.zhisheng.weather.model.wmoProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -23,7 +24,7 @@ import java.util.concurrent.TimeUnit
 // 与 OpenMeteoApi（只做补缺）分开：那个是补漏工具，这个是完整链路。
 object OpenMeteoSource {
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -46,6 +47,7 @@ object OpenMeteoSource {
         coroutineScope {
             val lat = city.latitude
             val lon = city.longitude
+            val cellSelection = openMeteoCellSelection(city.isPreciseLocation)
             val mainDeferred = async {
                 get<OmFull>(
                     "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
@@ -61,14 +63,14 @@ object OpenMeteoSource {
                         "&minutely_15=precipitation" +
                         // 页面只需要未来两小时。若不限制，forecast_days=16 会连带下载最多
                         // 16 天的 15 分钟数组，徒增首开耗时与流量。
-                        "&forecast_days=16&forecast_hours=24&forecast_minutely_15=9&timezone=auto"
+                        "&forecast_days=16&forecast_hours=24&forecast_minutely_15=9&timezone=auto$cellSelection"
                 )
             }
             val aqiDeferred = async {
                 get<OmAirResult>(
                     "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$lat&longitude=$lon" +
                         "&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi" +
-                        "&timezone=auto"
+                        "&timezone=auto$cellSelection"
                 )
             }
 
@@ -219,7 +221,7 @@ object OpenMeteoSource {
                 daily = daily,
                 aqi = aqiInfo,
                 alerts = emptyList(), // 公共源不提供官方预警
-                updateTime = epochOf(cur?.time) ?: System.currentTimeMillis(),
+                updateTime = epochOf(cur?.time),
                 // 不编 rainNowcast：接口没有短时降水文案。主屏一句话走分钟序列/温差。
                 rainMinutes = if (precip.size >= 2) precip else emptyList(),
                 rainMeta = precip.takeIf { it.size >= 2 }?.let {
@@ -227,6 +229,15 @@ object OpenMeteoSource {
                 },
                 dataSource = "OPEN-METEO",
                 blockSources = mapOf("current" to "OPEN-METEO", "hourly" to "OPEN-METEO", "daily" to "OPEN-METEO", "minutely" to "OPEN-METEO"),
+                locationMatch = WeatherLocationMatch(
+                    requestedLatitude = lat,
+                    requestedLongitude = lon,
+                    providerLatitude = lat,
+                    providerLongitude = lon,
+                    preciseGps = city.isPreciseLocation,
+                    matchedLatitude = m.latitude,
+                    matchedLongitude = m.longitude,
+                ),
                 utcOffsetSeconds = m.utc_offset_seconds,
             )
         }
@@ -282,6 +293,8 @@ object OpenMeteoSource {
 
 @Serializable
 data class OmFull(
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     val utc_offset_seconds: Int = 0,
     val current: OmCurrentFull? = null,
     val hourly: OpenMeteoHourly? = null,

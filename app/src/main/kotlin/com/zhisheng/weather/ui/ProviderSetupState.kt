@@ -16,7 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-enum class ProviderWizardKind { QWEATHER, CAIYUN, AMAP }
+enum class ProviderWizardKind { QWEATHER, CAIYUN, AMAP, BAIDU }
 
 enum class QweatherAuthMode { JWT, API_KEY }
 
@@ -31,6 +31,7 @@ internal object ProviderField {
     const val API_KEY = "api_key"
     const val CAIYUN_TOKEN = "caiyun_token"
     const val AMAP_KEY = "amap_key"
+    const val BAIDU_AK = "baidu_ak"
 }
 
 data class ProviderSetupUiState(
@@ -42,6 +43,7 @@ data class ProviderSetupUiState(
     val apiKey: String = "",
     val caiyunToken: String = "",
     val amapKey: String = "",
+    val baiduAk: String = "",
     val authMode: QweatherAuthMode = QweatherAuthMode.API_KEY,
     val keys: QwGeneratedKeys? = null,
     val status: ProviderSetupStatus = ProviderSetupStatus.IDLE,
@@ -54,6 +56,7 @@ data class ProviderSetupUiState(
         ProviderWizardKind.QWEATHER -> 5
         ProviderWizardKind.CAIYUN -> 4
         ProviderWizardKind.AMAP -> 3
+        ProviderWizardKind.BAIDU -> 3
     }
     val testing: Boolean get() = status == ProviderSetupStatus.TESTING
 }
@@ -80,9 +83,15 @@ internal interface ProviderSetupGateway {
         onStage: (ProviderTestStage) -> Unit,
     ): ProviderConnectionResult
 
+    suspend fun testBaidu(
+        ak: String,
+        onStage: (ProviderTestStage) -> Unit,
+    ): ProviderConnectionResult
+
     suspend fun saveQweather(candidate: QwRuntimeCreds)
     suspend fun saveCaiyun(token: String)
     suspend fun saveAmap(key: String)
+    suspend fun saveBaidu(ak: String)
 }
 
 private object RealProviderSetupGateway : ProviderSetupGateway {
@@ -101,9 +110,15 @@ private object RealProviderSetupGateway : ProviderSetupGateway {
         onStage: (ProviderTestStage) -> Unit,
     ) = ProviderConnectionTester.testAmap(key, onStage)
 
+    override suspend fun testBaidu(
+        ak: String,
+        onStage: (ProviderTestStage) -> Unit,
+    ) = ProviderConnectionTester.testBaidu(ak, onStage)
+
     override suspend fun saveQweather(candidate: QwRuntimeCreds) = SecretStore.saveQw(candidate)
     override suspend fun saveCaiyun(token: String) = SecretStore.saveCaiyun(token)
     override suspend fun saveAmap(key: String) = SecretStore.saveAmap(key)
+    override suspend fun saveBaidu(ak: String) = SecretStore.saveBaidu(ak)
 }
 
 internal suspend fun <T> verifyThenPersist(
@@ -111,7 +126,17 @@ internal suspend fun <T> verifyThenPersist(
     verify: suspend (T) -> ProviderConnectionResult,
     persist: suspend (T, ProviderConnectionResult) -> Unit,
 ): ProviderConnectionResult {
-    val verified = verify(candidate)
+    // Verification can also fail before the HTTP call (client setup, callbacks, or
+    // response handling). Keep those failures in the wizard, outside the UI scope.
+    val verified = try {
+        kotlinx.coroutines.withTimeout(25_000L) { verify(candidate) }
+    } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+        return ProviderConnectionResult(false, "验证超时", "请检查网络后重试，原配置未改变")
+    } catch (ce: CancellationException) {
+        throw ce
+    } catch (_: Exception) {
+        return ProviderConnectionResult(false, "验证未完成", "请检查网络、Key 类型和服务状态后重试，原配置未改变")
+    }
     if (!verified.ok) return verified
     return try {
         persist(candidate, verified)
@@ -143,6 +168,11 @@ internal fun validateProviderCandidate(state: ProviderSetupUiState): Map<String,
         ProviderWizardKind.AMAP -> {
             if (state.amapKey.isBlank()) {
                 errors[ProviderField.AMAP_KEY] = "请粘贴应用中的 Web 服务 API Key"
+            }
+        }
+        ProviderWizardKind.BAIDU -> {
+            if (state.baiduAk.isBlank()) {
+                errors[ProviderField.BAIDU_AK] = "请粘贴服务端应用的 AK"
             }
         }
     }
@@ -245,6 +275,7 @@ class ProviderSetupViewModel internal constructor(
     fun setApiKey(value: String) = edit(ProviderField.API_KEY) { copy(apiKey = value) }
     fun setCaiyunToken(value: String) = edit(ProviderField.CAIYUN_TOKEN) { copy(caiyunToken = value) }
     fun setAmapKey(value: String) = edit(ProviderField.AMAP_KEY) { copy(amapKey = value) }
+    fun setBaiduAk(value: String) = edit(ProviderField.BAIDU_AK) { copy(baiduAk = value) }
 
     fun setAuthMode(mode: QweatherAuthMode) {
         if (state.testing) return
@@ -323,6 +354,11 @@ class ProviderSetupViewModel internal constructor(
                     candidate = state.amapKey.trim(),
                     verify = { gateway.testAmap(it, ::enterStage) },
                     persist = { key, _ -> gateway.saveAmap(key) },
+                )
+                ProviderWizardKind.BAIDU -> verifyThenPersist(
+                    candidate = state.baiduAk.trim(),
+                    verify = { gateway.testBaidu(it, ::enterStage) },
+                    persist = { ak, _ -> gateway.saveBaidu(ak) },
                 )
             }
             val allCompleted = if (result.ok && state.activeStage != null) {

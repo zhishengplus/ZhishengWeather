@@ -39,6 +39,10 @@ data class AmapRuntimeCreds(val webServiceKey: String = "") {
     val ready: Boolean get() = webServiceKey.isNotBlank()
 }
 
+data class BaiduRuntimeCreds(val webServiceAk: String = "") {
+    val ready: Boolean get() = webServiceAk.isNotBlank()
+}
+
 data class RainviewerRuntimeCreds(val apiKey: String = "") {
     val ready: Boolean get() = apiKey.isNotBlank()
 }
@@ -69,6 +73,7 @@ object SecretStore {
     private val KEY_QW_API = stringPreferencesKey("qw_api_key")
     private val KEY_CAIYUN = stringPreferencesKey("caiyun_token")
     private val KEY_AMAP = stringPreferencesKey("amap_web_service_key")
+    private val KEY_BAIDU = stringPreferencesKey("baidu_web_service_ak")
     private val KEY_RAINVIEWER = stringPreferencesKey("rainviewer_api_key")
 
     @Volatile var qwRuntime: QwRuntimeCreds = QwRuntimeCreds()
@@ -76,6 +81,8 @@ object SecretStore {
     @Volatile var caiyunRuntime: CaiyunRuntimeCreds = CaiyunRuntimeCreds()
         private set
     @Volatile var amapRuntime: AmapRuntimeCreds = AmapRuntimeCreds()
+        private set
+    @Volatile var baiduRuntime: BaiduRuntimeCreds = BaiduRuntimeCreds()
         private set
     @Volatile var rainviewerRuntime: RainviewerRuntimeCreds = RainviewerRuntimeCreds()
         private set
@@ -103,6 +110,7 @@ object SecretStore {
                 )
                 caiyunRuntime = CaiyunRuntimeCreds(prefs[KEY_CAIYUN].orEmpty().trim())
                 amapRuntime = AmapRuntimeCreds(prefs[KEY_AMAP].orEmpty().trim())
+                baiduRuntime = BaiduRuntimeCreds(prefs[KEY_BAIDU].orEmpty().trim())
                 rainviewerRuntime = RainviewerRuntimeCreds(prefs[KEY_RAINVIEWER].orEmpty().trim())
             }
         }
@@ -134,6 +142,10 @@ object SecretStore {
         store.data.map { AmapRuntimeCreds(it[KEY_AMAP].orEmpty().trim()) }.distinctUntilChanged()
     }
 
+    val baiduRuntimeFlow: Flow<BaiduRuntimeCreds> by lazy {
+        store.data.map { BaiduRuntimeCreds(it[KEY_BAIDU].orEmpty().trim()) }.distinctUntilChanged()
+    }
+
     val rainviewerRuntimeFlow: Flow<RainviewerRuntimeCreds> by lazy {
         store.data.map { RainviewerRuntimeCreds(it[KEY_RAINVIEWER].orEmpty().trim()) }.distinctUntilChanged()
     }
@@ -154,6 +166,7 @@ object SecretStore {
 
     val caiyunReady: Boolean get() = caiyunRuntime.ready
     val amapReady: Boolean get() = amapRuntime.ready
+    val baiduReady: Boolean get() = baiduRuntime.ready
     val rainviewerReady: Boolean get() = rainviewerRuntime.ready
 
     suspend fun saveQw(creds: QwRuntimeCreds) {
@@ -186,6 +199,12 @@ object SecretStore {
         amapRuntime = next
     }
 
+    suspend fun saveBaidu(webServiceAk: String) {
+        val next = BaiduRuntimeCreds(webServiceAk.trim())
+        store.edit { it[KEY_BAIDU] = next.webServiceAk }
+        baiduRuntime = next
+    }
+
     suspend fun saveRainviewer(apiKey: String) {
         val next = RainviewerRuntimeCreds(apiKey.trim())
         store.edit { it[KEY_RAINVIEWER] = next.apiKey }
@@ -213,6 +232,11 @@ object SecretStore {
         amapRuntime = AmapRuntimeCreds()
     }
 
+    suspend fun clearBaidu() {
+        store.edit { it.remove(KEY_BAIDU) }
+        baiduRuntime = BaiduRuntimeCreds()
+    }
+
     suspend fun clearRainviewer() {
         store.edit { it.remove(KEY_RAINVIEWER) }
         rainviewerRuntime = RainviewerRuntimeCreds()
@@ -230,6 +254,10 @@ object SecretStore {
 
     suspend fun currentAmap(): AmapRuntimeCreds = amapRuntimeFlow.first().also { loaded ->
         if (loaded != amapRuntime) amapRuntime = loaded
+    }
+
+    suspend fun currentBaidu(): BaiduRuntimeCreds = baiduRuntimeFlow.first().also { loaded ->
+        if (loaded != baiduRuntime) baiduRuntime = loaded
     }
 
     suspend fun currentRainviewer(): RainviewerRuntimeCreds = rainviewerRuntimeFlow.first().also { loaded ->

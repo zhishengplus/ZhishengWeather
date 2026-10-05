@@ -13,6 +13,7 @@ import com.zhisheng.weather.model.Nowcast
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.model.WeatherIntensity
+import com.zhisheng.weather.model.WeatherLocationMatch
 import com.zhisheng.weather.model.WeatherProfile
 import com.zhisheng.weather.model.PrecipitationPhase
 import com.zhisheng.weather.model.alertLevelOf
@@ -46,7 +47,7 @@ interface CaiyunService {
 object CaiyunApi {
     val enabled: Boolean get() = SecretStore.caiyunReady
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -64,11 +65,13 @@ object CaiyunApi {
 object CaiyunSource {
 
     suspend fun fetch(city: City): WeatherData {
-        val token = SecretStore.caiyunRuntime.token
+        // Use the persisted snapshot returned by this read, not a separately updated
+        // background mirror which can still contain an older empty value.
+        val token = SecretStore.currentCaiyun().token
         if (token.isBlank()) return WeatherData(error = "未配置彩云天气 Token")
         return try {
-            val lng = String.format(java.util.Locale.US, "%.4f", city.longitude)
-            val lat = String.format(java.util.Locale.US, "%.4f", city.latitude)
+            val lng = caiyunCoordinate(city.longitude)
+            val lat = caiyunCoordinate(city.latitude)
             val body = CaiyunApi.service.weather(token, lng, lat)
             if (!body.status.equals("ok", true) || body.result == null) {
                 WeatherData(error = "彩云天气请求失败")
@@ -83,7 +86,7 @@ object CaiyunSource {
         } catch (ce: kotlinx.coroutines.CancellationException) {
             throw ce
         } catch (e: Exception) {
-            android.util.Log.w("ZhishengWeather", "彩云请求失败", e)
+            android.util.Log.w("ZhishengWeather", "彩云请求失败：${e.javaClass.simpleName}")
             WeatherData(error = "彩云天气请求失败（检查 Token 与网络）")
         }
     }
@@ -111,8 +114,15 @@ object CaiyunSource {
         val rt = r.realtime
         val fetchedAt = System.currentTimeMillis()
         val now = (providerUpdateTime ?: fetchedAt) / Nowcast.MINUTE_MS * Nowcast.MINUTE_MS
-        val precip2h = r.minutely?.precipitation2h ?: r.minutely?.precipitation
-        val minutes = precip2h?.let { Nowcast.minuteSeries(it.map { v -> v.toFloat() }, now) }.orEmpty()
+        val minutely = r.minutely?.takeIf { it.status == null || it.status.equals("ok", true) }
+        val precip2h = sequenceOf(minutely?.precipitation2h, minutely?.precipitation)
+            .firstOrNull { values -> values?.any { it != null && it.isFinite() && it >= 0.0 } == true }
+        // Keep the original index when a provider sample is invalid; dropping it first shifts time.
+        // metric:v2 is already mm/h, with one sample per minute from the current minute.
+        val minutes = precip2h.orEmpty().mapIndexedNotNull { index, value ->
+            value?.toFloat()?.takeIf { it.isFinite() && it >= 0f }
+                ?.let { MinutePrecip(now + index * Nowcast.MINUTE_MS, it) }
+        }
         val offsetHint = utcOffsetSeconds?.takeIf { it in -18 * 3_600..18 * 3_600 }
             ?: offsetSeconds(r.hourly?.temperature?.firstOrNull()?.datetime)
             ?: offsetSeconds(r.daily?.temperature?.firstOrNull()?.date)
@@ -149,7 +159,8 @@ object CaiyunSource {
                     h.visibility?.size ?: 0,
                     h.cloudrate?.size ?: 0,
                     h.airQuality?.aqi?.size ?: 0,
-                ).coerceAtMost(360)
+                // 首页只展示未来24小时；多保留一天用于跨发布时间刷新，避免把15天逐时全量写入缓存。
+                ).coerceAtMost(48)
                 (0 until n).mapNotNull { i ->
                     val temp = h.temperature?.getOrNull(i)
                     val apparent = h.apparentTemperature?.getOrNull(i)
@@ -267,17 +278,21 @@ object CaiyunSource {
                     detail = a.description,
                     level = a.code,
                     severity = alertLevelOf(a.code ?: a.title),
+                    id = a.alertId?.trim()?.takeIf(String::isNotEmpty),
+                    pubTime = a.pubtimestamp?.takeIf { it > 0L }
+                        ?.let { runCatching { java.time.Instant.ofEpochSecond(it).toString() }.getOrNull() },
                 )
             },
-            updateTime = providerUpdateTime ?: fetchedAt,
+            updateTime = providerUpdateTime,
             // 官方定义：minutely.description 是未来 2 小时短临，forecast_keypoint 是
             // 未来 24 小时变化。两者不能塞进同一个字段，否则“实况晴”下面紧接
             // “多云，今晚转雨”会被误读成同一时刻互相打架。
-            rainNowcast = r.minutely?.description,
+            rainNowcast = minutely?.description,
             forecastSummary = r.forecastKeypoint,
             rainMinutes = minutes,
             rainMeta = minutes.takeIf { it.isNotEmpty() }?.let {
-                RainMeta("CAIYUN", 1, now, horizonMinutes = it.size.coerceIn(30, 180))
+                RainMeta("CAIYUN", 1, now,
+                    horizonMinutes = ((it.last().timeMillis - now) / Nowcast.MINUTE_MS).toInt() + 1)
             },
             rainDistanceKm = rt?.precipitation?.nearest?.distance
                 ?.takeIf { it.isFinite() && it >= 0.0 }
@@ -285,6 +300,13 @@ object CaiyunSource {
             extraIndices = mapLifeIndices(r.daily?.lifeIndex),
             dataSource = "CAIYUN",
             blockSources = mapOf("current" to "CAIYUN", "hourly" to "CAIYUN", "daily" to "CAIYUN", "minutely" to "CAIYUN"),
+            locationMatch = WeatherLocationMatch(
+                requestedLatitude = city.latitude,
+                requestedLongitude = city.longitude,
+                providerLatitude = caiyunCoordinate(city.latitude).toDouble(),
+                providerLongitude = caiyunCoordinate(city.longitude).toDouble(),
+                preciseGps = city.isPreciseLocation,
+            ),
             utcOffsetSeconds = offsetHint,
         )
     }
@@ -423,3 +445,6 @@ object CaiyunSource {
         else -> skycon(code)?.label
     }
 }
+
+internal fun caiyunCoordinate(value: Double): String =
+    String.format(java.util.Locale.US, "%.6f", value)

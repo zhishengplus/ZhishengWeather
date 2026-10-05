@@ -1,10 +1,9 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
-/* Hallmark · macrostructure: asymmetric weather command deck · genre: atmospheric
- * theme: existing Zhisheng terminal · states: live · syncing · alert · empty · motion-reduced
- * contrast: pass
- */
 package com.zhisheng.weather.ui
 
+import com.zhisheng.weather.ui.components.weatherSharedBounds
+import com.zhisheng.weather.ui.home.dataSourceShortLabel
+import com.zhisheng.weather.ui.components.PhosphorIcon
+import com.zhisheng.weather.R
 import android.provider.Settings as AndroidSettings
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -73,12 +72,17 @@ import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 import com.zhisheng.weather.ui.theme.alertLevelColor
+import com.zhisheng.weather.ui.theme.zhishengScreen
+import com.zhisheng.weather.ui.theme.zhishengPanel
+import com.zhisheng.weather.ui.theme.zhishengCompactPanel
+import com.zhisheng.weather.ui.theme.isPhosphorVista
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.delay
+import androidx.lifecycle.repeatOnLifecycle
 
 /** 气象中枢：时间、当前天气、日照进度和未来趋势在同一画布上协同表达。 */
 @Composable
@@ -91,11 +95,17 @@ internal fun LandscapeWeatherCoreScreen(
     val data = uiState.weather
     val current = data?.current
     val offset = data?.utcOffsetSeconds
-    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(offset) {
+    val previewTime = LocalWeatherPreviewTime.current
+    var liveTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val nowMillis = previewTime ?: liveTime
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(offset, previewTime, lifecycle) {
+        if (previewTime != null) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
         while (true) {
-            nowMillis = System.currentTimeMillis()
-            delay(1_000L - nowMillis % 1_000L)
+            liveTime = System.currentTimeMillis()
+            delay(1_000L - liveTime % 1_000L)
+        }
         }
     }
     val zone = remember(offset) {
@@ -111,9 +121,14 @@ internal fun LandscapeWeatherCoreScreen(
     val night = isNightAt(today?.sunrise, today?.sunset, cityNow.hour * 60 + cityNow.minute)
     val hours = data?.hourly.orEmpty().filter { it.timeMillis >= nowMillis - 30 * 60_000L }.take(6)
 
-    Box(Modifier.fillMaxSize().background(ZhishengBg)) {
+    if (isPhosphorVista) {
+        VistaLandscapeWeatherCore(uiState, nowMillis, night, clock, seconds, date, onRefresh, onExitLandscape, onSettings)
+        return
+    }
+
+    Box(Modifier.fillMaxSize().zhishengScreen()) {
         WeatherAmbience(data, uiState.prefs.ambience, night = night)
-        WeatherCoreSignalField(night)
+        if (!isPhosphorVista) WeatherCoreSignalField(night)
         BoxWithConstraints(
             Modifier.fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -143,7 +158,7 @@ internal fun LandscapeWeatherCoreScreen(
                                 Text(
                                     date,
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = ZhishengOrange,
+                                    color = if (isPhosphorVista) ZhishengTextSecondary else ZhishengOrange,
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Spacer(Modifier.width(14.dp))
@@ -160,14 +175,14 @@ internal fun LandscapeWeatherCoreScreen(
                                     fontSize = clockSize,
                                     lineHeight = clockSize,
                                     color = ZhishengText,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = (-6).sp,
+                                    fontWeight = if (isPhosphorVista) FontWeight.Light else FontWeight.Bold,
+                                    letterSpacing = (if (isPhosphorVista) -4 else -6).sp,
                                 )
                                 Column(
                                     modifier = Modifier.padding(start = 12.dp, bottom = 11.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
-                                    Text("SEC", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                                    Text("秒", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
                                     Text(
                                         seconds,
                                         style = MaterialTheme.typography.headlineSmall,
@@ -182,24 +197,25 @@ internal fun LandscapeWeatherCoreScreen(
                             WeatherIcon(
                                 data?.let { phaseAwareCondition(current?.condition, it, nowMillis) }
                                     ?: current?.condition,
-                                Modifier.size(iconSize),
+                                Modifier.weatherSharedBounds("current-condition").size(iconSize),
                             )
                             Spacer(Modifier.width(12.dp))
                             Row(verticalAlignment = Alignment.Top) {
                                 Text(
                                     Fmt.temp(current?.temperature, uiState.tempUnit) ?: "--",
+                                    modifier = Modifier.weatherSharedBounds("current-temperature"),
                                     style = MaterialTheme.typography.displayMedium,
                                     color = ZhishengText,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = if (isPhosphorVista) FontWeight.Light else FontWeight.Bold,
                                 )
-                                Text("°", style = MaterialTheme.typography.headlineMedium, color = ZhishengOrange)
+                                Text("°", style = MaterialTheme.typography.headlineMedium, color = if (isPhosphorVista) ZhishengTextSecondary else ZhishengOrange)
                             }
                             Spacer(Modifier.width(14.dp))
                             Column {
                                 Text(
                                     current?.weatherText ?: current?.condition?.label ?: "等待天气数据",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = ZhishengCyan,
+                                    color = if (isPhosphorVista) ZhishengText else ZhishengCyan,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -216,6 +232,24 @@ internal fun LandscapeWeatherCoreScreen(
                             }
                         }
 
+                        // 与澄空版同样的预警呈现：横向版式里逐条列出，不只显示第一条。
+                        data?.alerts.orEmpty().forEach { alert ->
+                            Row(
+                                Modifier.padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("!", style = MaterialTheme.typography.labelMedium, color = ZhishengOrange, fontWeight = FontWeight.Bold)
+                                Text(
+                                    alert.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = alertLevelColor(alert.severity),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+
                         WeatherCoreSunTrack(today, cityNow.hour * 60 + cityNow.minute)
                     }
 
@@ -227,7 +261,7 @@ internal fun LandscapeWeatherCoreScreen(
                         high = Fmt.temp(today?.high, uiState.tempUnit)?.plus("°") ?: "--",
                         low = Fmt.temp(today?.low, uiState.tempUnit)?.plus("°") ?: "--",
                         humidity = current?.humidity?.let { "${it.toInt()}%" } ?: "--",
-                        alert = data?.alerts?.firstOrNull()?.title,
+                        aqi = data?.aqi?.value?.toString(),
                     )
                 }
                 Spacer(Modifier.height(6.dp))
@@ -237,13 +271,13 @@ internal fun LandscapeWeatherCoreScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        "SRC ${data?.dataSource ?: "--"}  ·  UPD ${data?.updateTime?.let { Fmt.clock(it, offset) } ?: "--:--"}",
+                        "数据源 ${dataSourceShortLabel(data?.dataSource)} · 更新 ${(data?.updateTime ?: data?.fetchedAt)?.let { Fmt.clock(it, offset) } ?: "暂无"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZhishengTextTertiary,
                         maxLines = 1,
                     )
                     Text(
-                        if (night) "NIGHT OPTICS / ACTIVE" else "DAYLIGHT VECTOR / ACTIVE",
+                        if (night) "夜间观测" else "日间观测",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZhishengMint,
                         letterSpacing = 1.2.sp,
@@ -268,11 +302,13 @@ private fun WeatherCoreTopRail(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).background(ZhishengOrange))
-            Spacer(Modifier.width(10.dp))
+            if (!isPhosphorVista) {
+                Box(Modifier.size(7.dp).background(ZhishengOrange))
+                Spacer(Modifier.width(10.dp))
+            }
             Column {
                 Text(city, style = MaterialTheme.typography.titleMedium, color = ZhishengText, fontWeight = FontWeight.Bold)
-                Text(
+                if (!isPhosphorVista) Text(
                     "ZHISHENG WEATHER CORE / ${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.labelSmall,
                     color = ZhishengTextTertiary,
@@ -282,7 +318,7 @@ private fun WeatherCoreTopRail(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "● ${if (loading) "SYNC" else "LIVE"}",
+                if (isPhosphorVista) (if (loading) "更新中" else "刷新天气") else "● ${if (loading) "SYNC" else "LIVE"}",
                 modifier = Modifier.clickable(role = Role.Button, onClick = onRefresh)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.labelMedium,
@@ -293,25 +329,26 @@ private fun WeatherCoreTopRail(
             Spacer(Modifier.width(6.dp))
             IconButton(
                 onClick = onSettings,
-                modifier = Modifier.size(38.dp).border(1.dp, ZhishengCardBorder),
+                modifier = Modifier.size(if (isPhosphorVista) 48.dp else 38.dp).zhishengCompactPanel(),
             ) {
-                Icon(Icons.Default.Settings, contentDescription = uiText("设置"), tint = ZhishengOrange, modifier = Modifier.size(19.dp))
+                if (isPhosphorVista) PhosphorIcon(R.drawable.ph_gear, uiText("设置"), Modifier.size(20.dp), ZhishengTextSecondary)
+                else Icon(Icons.Default.Settings, contentDescription = uiText("设置"), tint = ZhishengOrange, modifier = Modifier.size(19.dp))
             }
         }
     }
 }
 
 @Composable
-private fun WeatherCoreSunTrack(today: DailyWeather?, nowMinutes: Int) {
+internal fun WeatherCoreSunTrack(today: DailyWeather?, nowMinutes: Int) {
     val progress = sunTrackProgress(today?.sunrise, today?.sunset, nowMinutes)
     val borderColor = ZhishengCardBorder
     val orange = ZhishengOrange
     val cyan = ZhishengCyan
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("SUNRISE ${today?.sunrise ?: "--:--"}", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-            Text("SOLAR TRACK", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange, letterSpacing = 1.2.sp)
-            Text("SUNSET ${today?.sunset ?: "--:--"}", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("日出 ${today?.sunrise ?: "--:--"}", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("太阳轨迹", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange, letterSpacing = 1.2.sp)
+            Text("日落 ${today?.sunset ?: "--:--"}", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
         }
         Canvas(Modifier.fillMaxWidth().height(28.dp)) {
             val start = Offset(5f, size.height * 0.72f)
@@ -335,23 +372,24 @@ private fun WeatherVectorPanel(
     high: String,
     low: String,
     humidity: String,
-    alert: String?,
+    aqi: String?,
 ) {
     Column(
-        modifier.background(ZhishengSurface.copy(alpha = 0.64f))
-            .border(1.dp, ZhishengCardBorder)
+        modifier.zhishengPanel(containerColor = if (isPhosphorVista) ZhishengSurface else ZhishengSurface.copy(alpha = 0.64f))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("06H WEATHER VECTOR", style = MaterialTheme.typography.labelMedium, color = ZhishengOrange, letterSpacing = 1.3.sp)
-            Text("TEMP / PRECIP", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("未来六小时", style = MaterialTheme.typography.labelMedium, color = ZhishengOrange, letterSpacing = 1.3.sp)
+            Text("温度与降水", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
         }
         WeatherVectorGraph(hours, unit)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             hours.forEach { hour ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                     Text(Fmt.hour(hour.timeMillis, offset), style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    // 与澄空版一致：每小时也要能看到天气图标，而不是只有数字。
+                    WeatherIcon(hour.condition, Modifier.size(22.dp))
                     Text(
                         Fmt.temp(hour.temperature, unit)?.plus("°") ?: "--",
                         style = MaterialTheme.typography.titleSmall,
@@ -366,18 +404,17 @@ private fun WeatherVectorPanel(
                 }
             }
         }
+        if (hours.any { it.precipProb != null }) {
+            Text("百分比为降水概率", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             WeatherCoreDatum("最高", high)
             WeatherCoreDatum("最低", low)
             WeatherCoreDatum("湿度", humidity)
+            aqi?.let { WeatherCoreDatum("空气质量", it) }
         }
-        Text(
-            alert?.let { "! $it" } ?: "未来六小时趋势已就绪",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (alert != null) ZhishengOrange else ZhishengMint,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Text("未来六小时趋势已就绪", style = MaterialTheme.typography.labelSmall,
+            color = ZhishengMint, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -390,9 +427,9 @@ private fun WeatherCoreDatum(label: String, value: String) {
 }
 
 @Composable
-private fun WeatherVectorGraph(hours: List<HourlyWeather>, unit: String) {
+internal fun WeatherVectorGraph(hours: List<HourlyWeather>, unit: String) {
     val values = hours.map { hour ->
-        hour.temperature?.let { if (unit == "f") it * 9.0 / 5.0 + 32.0 else it }
+        hour.temperature?.takeIf(Double::isFinite)?.let { if (unit == "f") it * 9.0 / 5.0 + 32.0 else it }
     }
     val borderColor = ZhishengCardBorder
     val cyan = ZhishengCyan
@@ -403,12 +440,12 @@ private fun WeatherVectorGraph(hours: List<HourlyWeather>, unit: String) {
         val min = available.minOrNull() ?: 0.0
         val max = available.maxOrNull() ?: min + 1.0
         val span = (max - min).coerceAtLeast(1.0)
-        val step = if (hours.size > 1) size.width / (hours.size - 1) else size.width
+        val step = size.width / hours.size
         val path = Path()
         var started = false
         values.forEachIndexed { index, value ->
             if (value != null) {
-                val x = index * step
+                val x = (index + 0.5f) * step
                 val y = 10f + ((max - value) / span).toFloat() * (size.height - 30f)
                 if (!started) {
                     path.moveTo(x, y)
@@ -417,6 +454,8 @@ private fun WeatherVectorGraph(hours: List<HourlyWeather>, unit: String) {
                     path.lineTo(x, y)
                 }
                 drawCircle(cyan, if (index == 0) 4f else 2.5f, Offset(x, y))
+            } else {
+                started = false
             }
             val rain = (hours[index].precipProb ?: 0).coerceIn(0, 100) / 100f
             if (rain > 0f) {
@@ -430,7 +469,7 @@ private fun WeatherVectorGraph(hours: List<HourlyWeather>, unit: String) {
                 )
             }
         }
-        if (started) drawPath(path, cyan.copy(alpha = 0.78f), style = Stroke(width = 2f))
+        drawPath(path, cyan.copy(alpha = 0.78f), style = Stroke(width = 2f))
     }
 }
 

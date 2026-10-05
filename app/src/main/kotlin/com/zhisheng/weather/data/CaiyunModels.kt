@@ -101,8 +101,8 @@ data class CaiyunChnUsa(
 data class CaiyunMinutely(
     val status: String? = null,
     val description: String? = null,
-    @SerialName("precipitation_2h") val precipitation2h: List<Double>? = null,
-    val precipitation: List<Double>? = null,
+    @SerialName("precipitation_2h") val precipitation2h: List<Double?>? = null,
+    val precipitation: List<Double?>? = null,
 )
 
 @Serializable
@@ -243,4 +243,6 @@ data class CaiyunAlert(
     val description: String? = null,
     val code: String? = null,
     val status: String? = null,
+    val alertId: String? = null,
+    val pubtimestamp: Long? = null,
 )

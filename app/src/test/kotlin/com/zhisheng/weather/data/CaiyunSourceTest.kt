@@ -11,6 +11,71 @@ import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.model.WeatherIntensity
 
 class CaiyunSourceTest {
+    private val minuteCity = City("测试", "测试", 39.9, 116.4, "test")
+
+    @Test fun alertMappingKeepsOfficialIdentityAndPublishTime() {
+        val payload = """{"alert":{"status":"ok","content":[{"title":"测试市气象台发布大风蓝色预警","status":"预警中","code":"0501","alertId":"alert-fixture-1","pubtimestamp":1640733900}]}}"""
+        val result = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<CaiyunResult>(payload)
+        val alert = CaiyunSource.map(result, minuteCity).alerts.single()
+        assertEquals("alert-fixture-1", alert.id)
+        assertEquals("2021-12-28T23:25:00Z", alert.pubTime)
+        assertNull(alert.expiresAt)
+    }
+
+    @Test fun failedMinuteBlockDoesNotPublishAFalseDryForecast() {
+        val mapped = CaiyunSource.map(CaiyunResult(minutely = CaiyunMinutely(
+            status = "failed", description = "未来两小时无雨", precipitation2h = listOf(0.0))), minuteCity)
+        assertTrue(mapped.rainMinutes.isEmpty())
+        assertNull(mapped.rainMeta)
+        assertNull(mapped.rainNowcast)
+    }
+
+    @Test fun shortMinuteCoverageIsNotPaddedToThirtyMinutes() {
+        val mapped = CaiyunSource.map(CaiyunResult(minutely = CaiyunMinutely(
+            status = "ok", precipitation2h = listOf(0.0, 2.5))), minuteCity)
+        assertEquals(2, mapped.rainMeta?.horizonMinutes)
+        assertEquals(1, mapped.rainMeta?.intervalMinutes)
+        assertEquals(listOf(0f, 2.5f), mapped.rainMinutes.map { it.precip })
+    }
+
+    @Test fun missingMinuteSamplesKeepTheirTimestampsAndCoverage() {
+        val start = 1_800_000_000_000L
+        val payload = """{"minutely":{"status":"ok","precipitation_2h":[0,null,2.5]}}"""
+        val result = kotlinx.serialization.json.Json.decodeFromString<CaiyunResult>(payload)
+        val mapped = CaiyunSource.map(result, minuteCity, providerUpdateTime = start)
+        assertEquals(listOf(start, start + 120_000L), mapped.rainMinutes.map { it.timeMillis })
+        assertEquals(listOf(0f, 2.5f), mapped.rainMinutes.map { it.precip })
+        assertEquals(3, mapped.rainMeta?.horizonMinutes)
+    }
+
+    @Test fun absentOrInvalidMinutesStayUnavailableRatherThanZeroRain() {
+        listOf(null, CaiyunMinutely(precipitation2h = emptyList()),
+            CaiyunMinutely(precipitation2h = listOf(-1.0, Double.NaN))).forEach { block ->
+            val mapped = CaiyunSource.map(CaiyunResult(minutely = block), minuteCity)
+            assertTrue(mapped.rainMinutes.isEmpty())
+            assertNull(mapped.rainMeta)
+        }
+    }
+    @Test fun emptyTwoHourArrayFallsBackWithoutShiftingInvalidSamples() {
+        val start = 1_800_000_000_000L
+        val mapped = CaiyunSource.map(CaiyunResult(minutely = CaiyunMinutely(
+            precipitation2h = emptyList(), precipitation = listOf(.2, Double.NaN, .5))),
+            City("测试", "测试", 39.9, 116.4, "test"), providerUpdateTime = start)
+        assertEquals(listOf(start, start + 120_000L), mapped.rainMinutes.map { it.timeMillis })
+        assertEquals(listOf(.2f, .5f), mapped.rainMinutes.map { it.precip })
+    }
+
+    @Test fun validDryMinuteForecastIsNotReplacedByOneHourRain() {
+        val mapped = CaiyunSource.map(CaiyunResult(minutely = CaiyunMinutely(
+            precipitation2h = listOf(0.0, 0.0), precipitation = listOf(1.0))),
+            City("测试", "测试", 39.9, 116.4, "test"))
+        assertEquals(listOf(0f, 0f), mapped.rainMinutes.map { it.precip })
+    }
+
+    @Test
+    fun preciseCoordinatesKeepSixDecimalPlaces() {
+        assertEquals("118.765432", caiyunCoordinate(118.7654321))
+    }
 
     @Test
     fun forecastKeypointIsA24HourSummaryNotCurrentWeather() {

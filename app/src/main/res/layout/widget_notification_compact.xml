@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+<LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:orientation="horizontal" android:gravity="center_vertical">
+<ImageView android:id="@+id/notification_icon" android:layout_width="40dp" android:layout_height="40dp" android:scaleType="fitCenter" android:contentDescription="">
+</ImageView>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center" android:layout_marginStart="4dp" android:layout_marginEnd="12dp">
+<TextView android:id="@+id/notification_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.Compat.Notification.Title" android:textSize="28sp" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+</LinearLayout>
+<LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:orientation="vertical" android:layout_weight="1" android:gravity="end">
+<TextView android:id="@+id/notification_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.Compat.Notification.Title" android:textSize="13sp" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="end">
+</TextView>
+<TextView android:id="@+id/notification_condition" android:layout_width="match_parent" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.Compat.Notification" android:textSize="12sp" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="end" android:layout_marginTop="3dp">
+</TextView>
+</LinearLayout>
+</LinearLayout>
+</LinearLayout>

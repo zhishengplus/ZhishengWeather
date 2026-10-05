@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.zhisheng.weather.model.WeatherData
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -15,7 +17,7 @@ private val Context.weatherCacheStore: DataStore<Preferences> by preferencesData
 
 // 离线缓存：每城最近一次抓取成功的 WeatherData。
 // 断网 / 全部数据源失败 / 全局超时时的兜底展示源（v0.0.4）。
-// 与小组件的 WidgetCache 职责不同：这里缓存完整数据、按城市分键。
+// 缓存完整数据、按城市分键。
 @Serializable
 data class CachedWeather(
     val data: WeatherData,
@@ -38,15 +40,29 @@ object WeatherCache {
     private fun key(locationKey: String) = stringPreferencesKey("cached_$locationKey")
 
     suspend fun save(context: Context, locationKey: String, data: WeatherData) {
+        if (data.current == null || data.error != null) return
         val entry = CachedWeather(data = data, savedAtMillis = System.currentTimeMillis())
-        context.applicationContext.weatherCacheStore.edit {
-            it[key(locationKey)] = json.encodeToString(CachedWeather.serializer(), entry)
+        // 两个 DataStore 分开读取，避免在 weather_cache 的 edit 事务里悬挂读取城市 DataStore。
+        // 当前键始终保留，兼容“刚选中城市、城市流尚未完成刷新”的极短竞态窗口。
+        val validCacheKeys = CityRepository.savedCities()
+            .map { key(it.locationKey).name }
+            .toSet() + key(locationKey).name
+        context.applicationContext.weatherCacheStore.edit { prefs ->
+            val previous = prefs[key(locationKey)]?.let { raw ->
+                runCatching { json.decodeFromString(CachedWeather.serializer(), raw) }.getOrNull()
+            }
+            // A widget worker and a foreground request may finish out of order.
+            if ((previous?.data?.fetchedAt ?: 0L) > (data.fetchedAt ?: 0L)) return@edit
+            prefs[key(locationKey)] = json.encodeToString(CachedWeather.serializer(), entry)
+            prefs.asMap().keys
+                .filter { it.name.startsWith("cached_") && it.name !in validCacheKeys }
+                .forEach { prefs.remove(it) }
         }
     }
 
-    suspend fun load(context: Context, locationKey: String): CachedWeather? {
-        val raw = context.applicationContext.weatherCacheStore.data.first()[key(locationKey)] ?: return null
-        return try {
+    suspend fun load(context: Context, locationKey: String): CachedWeather? = withContext(Dispatchers.IO) {
+        val raw = context.applicationContext.weatherCacheStore.data.first()[key(locationKey)] ?: return@withContext null
+        try {
             json.decodeFromString(CachedWeather.serializer(), raw)
         } catch (_: Exception) {
             null

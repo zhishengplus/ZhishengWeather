@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -21,6 +22,17 @@ internal data class AmapLookupResult(
     val formattedAddress: String? = null,
     val info: String? = null,
     val infocode: String? = null,
+    val adcode: String? = null,
+)
+
+internal data class AmapPlaceResult(
+    val name: String,
+    val address: String?,
+    val district: String?,
+    val city: String?,
+    val province: String?,
+    val latitude: Double,
+    val longitude: Double,
 )
 
 private data class AmapRawResult(val result: AmapLookupResult, val root: JsonObject? = null)
@@ -31,7 +43,7 @@ private data class AmapRawResult(val result: AmapLookupResult, val root: JsonObj
  * 再逆地理编码；任一步失败都由调用方无感回退到系统 Geocoder。
  */
 internal object AmapApi {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -78,6 +90,43 @@ internal object AmapApi {
         }
     }
 
+    suspend fun searchPlaces(key: String, keyword: String, cityName: String? = null): List<AmapPlaceResult> {
+        val candidate = key.trim()
+        if (candidate.isEmpty() || keyword.trim().length < 2) return emptyList()
+        return try {
+            val query = linkedMapOf(
+                "key" to candidate,
+                "keywords" to keyword.trim(),
+                "offset" to "10",
+                "page" to "1",
+                "extensions" to "base",
+            )
+            cityName?.trim()?.takeIf(String::isNotBlank)?.let { query["city"] = it }
+            val raw = request(listOf("v3", "place", "text"), query)
+            if (!raw.result.ok) return emptyList()
+            (raw.root?.get("pois") as? JsonArray).orEmpty().mapNotNull { item ->
+                val poi = item.asObject() ?: return@mapNotNull null
+                val parts = poi.string("location")?.split(',') ?: return@mapNotNull null
+                val gcjLon = parts.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
+                val gcjLat = parts.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
+                val wgs = gcj02ToWgs84(gcjLat, gcjLon)
+                AmapPlaceResult(
+                    name = poi.string("name") ?: return@mapNotNull null,
+                    address = poi.string("address"),
+                    district = poi.string("adname"),
+                    city = poi.string("cityname"),
+                    province = poi.string("pname"),
+                    latitude = wgs.latitude,
+                    longitude = wgs.longitude,
+                )
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
     private suspend fun reverseGcj(key: String, location: String, cityName: String?): AmapLookupResult {
         val raw = request(
             path = listOf("v3", "geocode", "regeo"),
@@ -97,12 +146,14 @@ internal object AmapApi {
         val township = component?.string("township")
         val street = component?.get("streetNumber")?.asObject()?.string("street")
         val formatted = regeocode.string("formatted_address")
+        val adcode = component?.string("adcode")
         return AmapLookupResult(
             ok = true,
             street = amapStreetLabel(township, street, cityName),
             formattedAddress = formatted,
             info = raw.result.info,
             infocode = raw.result.infocode,
+            adcode = adcode,
         )
     }
 

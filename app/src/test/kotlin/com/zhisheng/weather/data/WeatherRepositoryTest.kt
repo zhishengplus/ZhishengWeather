@@ -2,12 +2,85 @@ package com.zhisheng.weather.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.zhisheng.weather.model.CurrentWeather
+import com.zhisheng.weather.model.HourlyWeather
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.WeatherData
+import kotlinx.serialization.json.Json
 
 class WeatherRepositoryTest {
+
+    @Test
+    fun parallelSupplementsKeepPrimaryValuesAndEachCompletedBlockProvenance() {
+        val base = WeatherData(
+            current = CurrentWeather(temperature = 21.0),
+            hourly = listOf(HourlyWeather(timeMillis = 1L, temperature = 21.0)),
+            blockSources = mapOf("current" to "XIAOMI", "hourly" to "XIAOMI"),
+            dataSource = "ZHISHENG",
+        )
+        val hourly = base.copy(
+            hourly = listOf(HourlyWeather(timeMillis = 2L, temperature = 22.0)),
+            blockSources = base.blockSources + ("hourly" to "OPEN-METEO"),
+        )
+        val current = base.copy(
+            current = base.current!!.copy(dewPoint = 10.0),
+            blockSources = base.blockSources + ("current-supplement" to "OPEN-METEO"),
+        )
+        val result = WeatherRepository.mergeCompletedSupplements(base, null, hourly, current)
+        assertEquals(21.0, result.current!!.temperature!!, 0.0)
+        assertEquals(10.0, result.current!!.dewPoint!!, 0.0)
+        assertEquals(2L, result.hourly.single().timeMillis)
+        assertEquals("OPEN-METEO", result.blockSources["hourly"])
+        assertEquals("XIAOMI", result.blockSources["current"])
+        assertEquals("OPEN-METEO", result.blockSources["current-supplement"])
+        assertEquals("ZHISHENG", result.dataSource)
+    }
+
+    @Test
+    fun missingSupplementsKeepUsablePrimaryWeatherIntact() {
+        val base = WeatherData(current = CurrentWeather(temperature = 21.0), dataSource = "XIAOMI")
+        assertEquals(base, WeatherRepository.mergeCompletedSupplements(base, null, null, null))
+    }
+
+    @Test
+    fun xiaomiHourlyGenericRainIsMappedWithoutDroppingTemperatureOrTime() {
+        val result = XiaomiForecastResult(forecastHourly = XiaomiForecastHourly(
+            temperature = XiaomiIntList(pubTime = "2026-09-18T03:00:00+08:00", value = listOf(16, 16, 15, 14)),
+            weather = XiaomiIntList(value = listOf(301, 301, 302, 999999)),
+        ))
+        val hours = WeatherRepository.mapXiaomiToWeatherData(result, "weathercn:101160106").hourly
+        assertEquals(listOf(WeatherCondition.RAIN, WeatherCondition.RAIN, WeatherCondition.SNOW, WeatherCondition.UNKNOWN), hours.map { it.condition })
+        assertEquals(listOf(16.0, 16.0, 15.0, 14.0), hours.map { it.temperature })
+        assertEquals(java.time.Instant.parse("2026-09-17T19:00:00Z").toEpochMilli(), hours.first().timeMillis)
+        assertEquals(3_600_000L, hours[1].timeMillis - hours[0].timeMillis)
+        assertEquals("301", hours.first().profile?.rawCode)
+    }
+
+    @Test
+    fun successfulFetchKeepsProviderTimeAndRecordsCompletionTimeSeparately() {
+        val providerTime = 1_725_000_000_000L
+        val fetchedAt = providerTime + 14 * 60_000L
+        val data = WeatherData(
+            current = CurrentWeather(temperature = 20.0),
+            updateTime = providerTime,
+        )
+
+        val marked = WeatherRepository.markSuccessfulFetch(data, fetchedAt)
+
+        assertEquals(providerTime, marked.updateTime)
+        assertEquals(fetchedAt, marked.fetchedAt)
+    }
+
+    @Test
+    fun failedFetchDoesNotPretendToHaveANewRefreshTime() {
+        val failed = WeatherData(error = "请求失败", updateTime = 1L)
+
+        val marked = WeatherRepository.markSuccessfulFetch(failed, 2L)
+
+        assertNull(marked.fetchedAt)
+    }
 
     @Test
     fun windDirectionHandlesCardinalAndBoundaryValues() {
@@ -38,24 +111,32 @@ class WeatherRepositoryTest {
         assertEquals(true, SourcePref.AUTO.matches("OPEN-METEO"))
         assertEquals(false, SourcePref.AUTO.matches("CAIYUN"))
         assertEquals(false, SourcePref.AUTO.matches("QWEATHER"))
+        // AUTO 不读融合源缓存（切换时重拉一次，语义严格一致）
+        assertEquals(false, SourcePref.AUTO.matches("ZHISHENG"))
         assertEquals(true, SourcePref.XIAOMI.matches("XIAOMI"))
         assertEquals(false, SourcePref.OPEN_METEO.matches("XIAOMI"))
         assertEquals(false, SourcePref.QWEATHER.matches("OPEN-METEO"))
         assertEquals(true, SourcePref.CAIYUN.matches("CAIYUN"))
         assertEquals(false, SourcePref.CAIYUN.matches("XIAOMI"))
         assertEquals(true, SourcePref.OPEN_METEO.matches("OPEN-METEO"))
+        // 枳生天气源身份只由 dataSource 确定
+        assertEquals(true, SourcePref.ZHISHENG.matches("ZHISHENG"))
+        assertEquals(false, SourcePref.ZHISHENG.matches("XIAOMI"))
+        assertEquals(false, SourcePref.XIAOMI.matches("ZHISHENG"))
     }
 
     @Test
     fun qweatherStaysHiddenUntilDeveloperMode() {
         assertEquals(
-            listOf(SourcePref.AUTO, SourcePref.XIAOMI, SourcePref.OPEN_METEO),
+            listOf(SourcePref.AUTO, SourcePref.ZHISHENG, SourcePref.XIAOMI, SourcePref.NMC, SourcePref.OPEN_METEO),
             SourcePref.visible(developerMode = false),
         )
         assertEquals(
             listOf(
                 SourcePref.AUTO,
+                SourcePref.ZHISHENG,
                 SourcePref.XIAOMI,
+                SourcePref.NMC,
                 SourcePref.OPEN_METEO,
                 SourcePref.CAIYUN,
                 SourcePref.QWEATHER,
@@ -72,6 +153,29 @@ class WeatherRepositoryTest {
         assertEquals(SourcePref.CAIYUN, SourcePref.CAIYUN.effective(developerMode = true))
         assertEquals(SourcePref.AUTO, SourcePref.AUTO.effective(developerMode = false))
         assertEquals(SourcePref.XIAOMI, SourcePref.XIAOMI.effective(developerMode = false))
+        // 旧版本持久化的 "amap"/"baidu" 偏好自动回落 AUTO
+        assertEquals(SourcePref.AUTO, SourcePref.from("amap"))
+        assertEquals(SourcePref.AUTO, SourcePref.from("baidu"))
+    }
+
+    @Test
+    fun xiaomiNowcastFillsDistanceTemplateInsteadOfLeakingPrintfToken() {
+        assertEquals(
+            "降水在 38 公里外",
+            WeatherRepository.fillXiaomiDistancePlaceholder("降水在 %d 公里外", "38"),
+        )
+        assertEquals(
+            "降水在 12.5 公里外",
+            WeatherRepository.fillXiaomiDistancePlaceholder("降水在 %s 公里外", "12.5"),
+        )
+        assertEquals(
+            "降水在附近",
+            WeatherRepository.fillXiaomiDistancePlaceholder("降水在 %d 公里外", null),
+        )
+        assertEquals(
+            "未来两小时无降水",
+            WeatherRepository.fillXiaomiDistancePlaceholder("未来两小时无降水", "38"),
+        )
     }
 
     @Test
@@ -108,6 +212,40 @@ class WeatherRepositoryTest {
         assertEquals(WeatherCondition.OVERCAST, merged.current?.condition)
         assertEquals(0.0, merged.current?.precipMm)
         assertEquals("OPEN-METEO", merged.blockSources["current-supplement"])
+    }
+
+    @Test
+    fun autoHourlyPrecipSupplementFillsXiaomiGapsWithoutReplacingProviderHours() {
+        val noon = java.time.Instant.parse("2026-09-07T04:00:00Z").toEpochMilli()
+        val xiaomi = listOf(
+            HourlyWeather(timeMillis = noon, temperature = 28.0, precipProb = null),
+            HourlyWeather(timeMillis = noon + 3_600_000L, temperature = 29.0, precipProb = 40),
+        )
+        val openMeteo = listOf(
+            HourlyWeather(timeMillis = noon, temperature = 17.0, precipProb = 15),
+            HourlyWeather(timeMillis = noon + 3_600_000L, temperature = 18.0, precipProb = 80),
+        )
+
+        val merged = WeatherRepository.mergeHourlyPrecipSupplement(xiaomi, openMeteo)
+
+        assertEquals(28.0, merged[0].temperature)
+        assertEquals(15, merged[0].precipProb)
+        assertEquals(40, merged[1].precipProb)
+        val alreadyFilled = xiaomi.map { it.copy(precipProb = 5) }
+        assertEquals(alreadyFilled, WeatherRepository.mergeHourlyPrecipSupplement(alreadyFilled, openMeteo))
+    }
+
+    @Test
+    fun nearlyExpiredHourlyForecastNeedsFallbackEvenWithTwoEntries() {
+        val now = java.time.Instant.parse("2026-09-27T02:30:00Z").toEpochMilli()
+        val hour = 3_600_000L
+        val short = listOf(
+            HourlyWeather(timeMillis = now - hour),
+            HourlyWeather(timeMillis = now + hour),
+        )
+        assertEquals(false, WeatherRepository.hasUsefulHourlyForecast(short, now))
+        val sufficient = (1..12).map { HourlyWeather(timeMillis = now + it * hour) }
+        assertEquals(true, WeatherRepository.hasUsefulHourlyForecast(sufficient, now))
     }
 
     @Test
@@ -150,6 +288,9 @@ class WeatherRepositoryTest {
         assertEquals(false, WeatherRepository.shouldSupplementWithOpenMeteo(SourcePref.CAIYUN))
         assertEquals(false, WeatherRepository.shouldSupplementWithOpenMeteo(SourcePref.XIAOMI))
         assertEquals(false, WeatherRepository.shouldSupplementWithOpenMeteo(SourcePref.OPEN_METEO))
+        assertEquals(false, WeatherRepository.shouldFillMissingHourlyPrecip(SourcePref.QWEATHER))
+        assertEquals(false, WeatherRepository.shouldFillMissingHourlyPrecip(SourcePref.XIAOMI))
+        assertEquals(false, WeatherRepository.shouldFillMissingHourlyPrecip(SourcePref.OPEN_METEO))
     }
 
     @Test
@@ -231,7 +372,126 @@ class WeatherRepositoryTest {
             java.time.Instant.parse("2026-08-31T01:45:00Z").toEpochMilli(),
             WeatherRepository.xiaomiUpdateMillis(result, fetchedAt),
         )
-        assertEquals(fetchedAt, WeatherRepository.xiaomiUpdateMillis(XiaomiForecastResult(), fetchedAt))
+        assertNull(WeatherRepository.xiaomiUpdateMillis(XiaomiForecastResult(), fetchedAt))
+    }
+
+    @Test
+    fun xiaomiMapperUsesProviderTimesDirectionsAndDailyAqiWithoutCrossSourceData() {
+        val result = XiaomiForecastResult(
+            current = XiaomiCurrent(
+                pubTime = "2026-09-02T21:30:00+08:00",
+                temperature = XiaomiUnitValue("°C", "28"),
+                weather = "1",
+            ),
+            forecastHourly = XiaomiForecastHourly(
+                pubTime = "2026-09-02T20:15:00+08:00",
+                temperature = XiaomiIntList(value = listOf(28)),
+                weather = XiaomiIntList(value = listOf(1)),
+                wind = XiaomiHourlyWind(
+                    listOf(XiaomiHourlyWindValue("2026-09-02T22:00:00+08:00", "315.95", "15.43")),
+                ),
+                aqi = XiaomiIntList(value = listOf(21)),
+            ),
+            forecastDaily = XiaomiForecastDaily(
+                pubTime = "2026-09-02T20:00:00+08:00",
+                temperature = XiaomiDailyTemperature(value = listOf(XiaomiFromTo("31", "23"))),
+                weather = XiaomiDailyWeather(value = listOf(XiaomiFromTo("1", "2"))),
+                aqi = XiaomiIntList(value = listOf(34)),
+                wind = XiaomiDailyWind(
+                    direction = XiaomiFromToList(listOf(XiaomiFromTo("350", "10"))),
+                    speed = XiaomiFromToList(listOf(XiaomiFromTo("12", "16"))),
+                ),
+            ),
+        )
+
+        val mapped = WeatherRepository.mapXiaomiToWeatherData(result, "weathercn:101280701")
+
+        assertEquals("XIAOMI", mapped.dataSource)
+        assertEquals(java.time.Instant.parse("2026-09-02T14:00:00Z").toEpochMilli(), mapped.hourly.single().timeMillis)
+        assertEquals(315.95, mapped.hourly.single().windDirectionDeg ?: -1.0, 0.001)
+        assertEquals(21, mapped.hourly.single().aqi)
+        assertNull(mapped.hourly.single().precipProb)
+        assertEquals(34, mapped.daily.single().aqi)
+        assertTrue((mapped.daily.single().windDirectionDeg ?: 180.0) < 1.0)
+    }
+
+    @Test
+    fun xiaomiIndicesOnlyFillMissingCurrentFields() {
+        val indices = XiaomiIndices(
+            listOf(
+                XiaomiIndexItem("feelsLike", "31"),
+                XiaomiIndexItem("humidity", "73"),
+                XiaomiIndexItem("pressure", "994"),
+                XiaomiIndexItem("uvIndex", "2"),
+            ),
+        )
+        val filled = WeatherRepository.mapXiaomiToWeatherData(
+            XiaomiForecastResult(current = XiaomiCurrent(temperature = XiaomiUnitValue(value = "28"), weather = "1"), indices = indices),
+        ).current
+        val preserved = WeatherRepository.mapXiaomiToWeatherData(
+            XiaomiForecastResult(
+                current = XiaomiCurrent(
+                    temperature = XiaomiUnitValue(value = "28"),
+                    feelsLike = XiaomiUnitValue(value = "29"),
+                    humidity = XiaomiUnitValue(value = "65"),
+                    pressure = XiaomiUnitValue("hPa", "1001"),
+                    uvIndex = "5",
+                    weather = "1",
+                ),
+                indices = indices,
+            ),
+        ).current
+
+        assertEquals(31.0, filled?.feelsLike ?: -1.0, 0.001)
+        assertEquals(73.0, filled?.humidity ?: -1.0, 0.001)
+        assertEquals(994.0, filled?.pressure ?: -1.0, 0.001)
+        assertEquals(2, filled?.uvIndex)
+        assertEquals(29.0, preserved?.feelsLike ?: -1.0, 0.001)
+        assertEquals(65.0, preserved?.humidity ?: -1.0, 0.001)
+        assertEquals(1001.0, preserved?.pressure ?: -1.0, 0.001)
+        assertEquals(5, preserved?.uvIndex)
+    }
+
+    @Test
+    fun xiaomiMapperKeepsYesterdayAlertAndTyphoonProviderDetails() {
+        val mapped = WeatherRepository.mapXiaomiToWeatherData(
+            XiaomiForecastResult(
+                alerts = listOf(XiaomiAlert(title = "台风白色预警", type = "台风", level = "白色")),
+                yesterday = XiaomiYesterday(
+                    date = "2026-09-01T12:00:00+08:00",
+                    tempMax = "31",
+                    tempMin = "23",
+                    aqi = "20",
+                    weatherStart = "8",
+                    weatherEnd = "4",
+                    sunRise = "2026-09-01T06:08:00+08:00",
+                    sunSet = "2026-09-01T18:44:00+08:00",
+                    windDircStart = "348",
+                    windDircEnd = "348",
+                    windSpeedStart = "16",
+                    windSpeedEnd = "16",
+                ),
+                typhoon = listOf(
+                    XiaomiTyphoon("科罗旺", "KROVANH", "2624", "TS", 23.7, 131.5, 18.0),
+                ),
+            ),
+        )
+
+        assertEquals("台风", mapped.alerts.single().type)
+        assertEquals("06:08", mapped.yesterday?.sunrise)
+        assertEquals("18:44", mapped.yesterday?.sunset)
+        assertEquals(348.0, mapped.yesterday?.windDirectionStartDeg ?: -1.0, 0.001)
+        assertEquals("2624", mapped.typhoons.single().id)
+        assertEquals("XIAOMI", mapped.typhoons.single().source)
+        assertEquals(23.7, mapped.typhoons.single().latitude ?: -1.0, 0.001)
+        assertEquals(131.5, mapped.typhoons.single().longitude ?: -1.0, 0.001)
+    }
+
+    @Test
+    fun dailyDirectionUsesCircularMeanAcrossNorth() {
+        assertEquals(0.0, WeatherRepository.meanDirectionDeg("350", "10") ?: -1.0, 0.001)
+        assertEquals(90.0, WeatherRepository.meanDirectionDeg("90", null) ?: -1.0, 0.001)
+        assertNull(WeatherRepository.meanDirectionDeg(null, "invalid"))
     }
 
     @Test
@@ -254,5 +514,28 @@ class WeatherRepositoryTest {
         )
         assertEquals(listOf("路况"), mapped.map { it.name })
         assertEquals(listOf("INDEX 21"), mapped.map { it.en })
+    }
+
+    @Test
+    fun xiaomiMinutelyMatchesTheRealArrayAndStringResponseShape() {
+        val parsed = Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+            coerceInputValues = true
+        }.decodeFromString<XiaomiForecastResult>(
+            """{
+                "current":{"temperature":{"value":"20"},"weather":"1"},
+                "minutely":{"precipitation":{
+                    "probability":[0,25,0,0],
+                    "weather":"1",
+                    "kmNum":0,
+                    "value":[0,0.2,0]
+                }}
+            }""".trimIndent(),
+        )
+
+        assertEquals(listOf(0.0, 25.0, 0.0, 0.0), parsed.minutely?.precipitation?.probability)
+        assertEquals("1", parsed.minutely?.precipitation?.weather)
+        assertEquals("0", parsed.minutely?.precipitation?.kmNum)
     }
 }

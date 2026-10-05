@@ -7,6 +7,15 @@ import org.junit.Test
 
 class WeatherConsistencyTest {
 
+    @Test fun previousForecastSurvivesTheExactHourCleanupBoundary() {
+        val now = java.time.Instant.parse("2026-09-07T08:00:00Z").toEpochMilli()
+        val previous = HourlyWeather(now - 3_600_000L, 21.0)
+        val data = WeatherData(hourly = listOf(HourlyWeather(now - 7_200_000L, 20.0), previous,
+            HourlyWeather(now, 22.0), HourlyWeather(now + 3_600_000L, 24.0)))
+        assertEquals(previous, WeatherConsistency.dropPastHourly(data, now).hourly.first())
+        assertEquals(now, WeatherConsistency.dropPastHourly(data, now + 59 * 60_000L).hourly.first().timeMillis)
+    }
+
     private val t0 = 1_700_000_000_000L
 
     @Test

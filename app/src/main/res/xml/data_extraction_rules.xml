@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="file" path="datastore/scene_weather_cache.preferences_pb" />
         <exclude domain="file" path="datastore/secrets.preferences_pb" />
         <exclude domain="file" path="no_backup/datastore/secrets.preferences_pb" />
+        <exclude domain="file" path="datastore/known_places.preferences_pb" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="file" path="datastore/scene_weather_cache.preferences_pb" />
         <exclude domain="file" path="datastore/secrets.preferences_pb" />
         <exclude domain="file" path="no_backup/datastore/secrets.preferences_pb" />
+        <exclude domain="file" path="datastore/known_places.preferences_pb" />
     </device-transfer>
 </data-extraction-rules>

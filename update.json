@@ -1,8 +1,8 @@
 {
-  "versionCode": 20260974,
-  "versionName": "0.1.5-beta10.1-public",
-  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.1-public/ZhishengWeather-v0.1.5-beta10.1-public.apk",
-  "sha256": "6CC4AFD74E11158F769D48EED29FFB49FFB074B7222045EEEC79120741AC4E11",
-  "notes": "修复桌面天气小组件左上角多余的小字；改进更新检查和安装包下载，国内网络优先使用 Gitee。",
-  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.1-public"
+  "versionCode": 20261028,
+  "versionName": "0.1.5-beta10.3-public",
+  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.3-public/ZhishengWeather-v0.1.5-beta10.3-public.apk",
+  "sha256": "A577A077D04E131C5BA373876DEED514B37984651565E208078C33B045348EBF",
+  "notes": "10.1 → 10.3 累计更新\n\n• 小组件比例、清晰度、预览与字号调节优化，长摘要可换行。\n• 编辑底栏改为轻透玻璃，选项可完整滚动；点击跳转和添加反馈更完善。\n• 定位重进、收藏固定与城市去重修复。\n• 紫外线、刷新时间及多项天气读数修正。\n• 可开关的日照天光融入主页与五款澄空组件，保留透明度和字色。\n• 横屏待机增加轻微移位保护，移除开屏动画；更新说明重新设计。",
+  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public"
 }

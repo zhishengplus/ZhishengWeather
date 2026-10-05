@@ -7,10 +7,12 @@ import org.junit.Test
 
 class HomeBriefingStyleTest {
     @Test
-    fun weatherGirlRemainsDefaultAndTipsIsOptional() {
-        assertEquals(HomeBriefingStyle.WEATHER_GIRL, HomeBriefingStyle.from(null))
-        assertEquals(HomeBriefingStyle.WEATHER_GIRL, HomeBriefingStyle.from("unknown"))
+    fun textTipsAreDefaultAndWeatherGirlRemainsOptIn() {
+        assertEquals(HomeBriefingStyle.TIPS, HomeBriefingStyle.from(null))
+        assertEquals(HomeBriefingStyle.TIPS, HomeBriefingStyle.from("unknown"))
+        assertEquals(HomeBriefingStyle.WEATHER_GIRL, HomeBriefingStyle.from("weather_girl"))
         assertEquals(HomeBriefingStyle.TIPS, HomeBriefingStyle.from("tips"))
+        assertEquals(HomeBriefingStyle.OFF, HomeBriefingStyle.from("off"))
     }
 
     @Test
@@ -26,10 +28,12 @@ class HomeBriefingStyleTest {
         ).readText()
 
         assertTrue(settings.contains("\"天气娘\" to \"weather_girl\""))
-        assertTrue(settings.contains("\"简洁 Tips\" to \"tips\""))
+        assertTrue(settings.contains("(if (isPhosphorVista) \"文字提示\" else \"简洁 Tips\") to \"tips\""))
+        assertTrue(settings.contains("\"关闭\" to \"off\""))
         assertTrue(home.contains("HomeBriefingStyle.WEATHER_GIRL ->"))
         assertTrue(home.contains("HomeBriefingStyle.TIPS ->"))
-        assertTrue(home.contains("text = \"TIPS //\""))
+        assertTrue(home.contains("HomeBriefingStyle.OFF -> Unit"))
+        assertTrue(home.contains("text = if (isPhosphorVista) \"天气提示\" else \"TIPS //\""))
         assertTrue(home.contains("maxLines = if (copy.detail == null) 2 else 1"))
         assertTrue(home.contains("不能把关键动作截成省略号"))
     }

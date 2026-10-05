@@ -1,10 +1,9 @@
-/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
-/* Hallmark · genre: atmospheric technical utility · macrostructure: Workbench · design-system: design.md · designed-as-app */
 package com.zhisheng.weather.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +27,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import com.zhisheng.weather.ui.theme.isPhosphorVista
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -43,6 +49,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhisheng.weather.R
+import com.zhisheng.weather.data.WeatherRepository
 import com.zhisheng.weather.model.BriefingEmote
 import com.zhisheng.weather.model.City
 import com.zhisheng.weather.model.DailyWeather
@@ -59,6 +66,7 @@ import com.zhisheng.weather.ui.theme.ZhishengReading
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.zhishengScreen
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -118,14 +126,25 @@ fun DailyForecastScreen(
     utcOffsetSeconds: Int?,
     onBack: () -> Unit,
 ) {
+    val nowMillis = weatherPresentationTime()
     val visibleDays = days.take(15)
-    val trackDays = listOfNotNull(yesterdayForecastDay(yesterday, utcOffsetSeconds)) + visibleDays
+    if (isPhosphorVista) {
+        VistaForecastScreen(city, visibleDays, yesterday, tempUnit, windUnit, utcOffsetSeconds, onBack)
+        return
+    }
+    val trackDays = listOfNotNull(yesterdayForecastDay(yesterday, utcOffsetSeconds, nowMillis)) + visibleDays
     val pageTitle = if (visibleDays.size >= 15) "15日天气预报" else "${visibleDays.size}日天气预报"
     val sectionTitle = if (visibleDays.size >= 15) "未来十五日" else "未来${visibleDays.size}日"
+    // 经典工作台与新主题详情页同逻辑：默认选中最接近今天的一天，
+    // 点选任意一列都停在同一个“当日详情”面板上，字段集与 Vista 页一致。
+    var selectedMillis by rememberSaveable(city?.locationKey) { mutableStateOf<Long?>(null) }
+    val selectedDay = trackDays.firstOrNull { it.dateMillis == selectedMillis }
+        ?: trackDays.firstOrNull { forecastTemporalLabel(it.dateMillis, utcOffsetSeconds, nowMillis) == "今天" }
+        ?: trackDays.firstOrNull()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(ZhishengBg)
+            .zhishengScreen()
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
@@ -134,7 +153,7 @@ fun DailyForecastScreen(
             Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
                 TerminalPanel(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 20.dp)) {
-                        Text("FORECAST CHANNEL / EMPTY", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange)
+                        Text("暂无预报", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange)
                         Spacer(Modifier.height(8.dp))
                         Text("当前城市暂未返回逐日预报", style = MaterialTheme.typography.titleMedium, color = ZhishengText)
                         Spacer(Modifier.height(4.dp))
@@ -155,13 +174,46 @@ fun DailyForecastScreen(
                 TerminalPanel(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 ) {
-                    ForecastWorkbench(trackDays, tempUnit, windUnit, utcOffsetSeconds)
+                    ForecastWorkbench(
+                        trackDays, tempUnit, windUnit, utcOffsetSeconds,
+                        selectedMillis = selectedDay?.dateMillis,
+                        onSelect = { selectedMillis = it },
+                    )
                 }
             }
-            item { FeatureSectionTitle(2, "天气娘简报", "WEATHER GIRL") }
+            selectedDay?.let { day ->
+                item { FeatureSectionTitle(2, "当日详情", "DAY DETAIL") }
+                item {
+                    TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Text(
+                                "${forecastTemporalLabel(day.dateMillis, utcOffsetSeconds)} · ${forecastDateLabel(day.dateMillis, utcOffsetSeconds)} · ${day.weatherText?.takeIf { it.isNotBlank() } ?: day.condition?.label ?: "天气预报"}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = ZhishengText,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val facts = vistaForecastFacts(day, windUnit)
+                            if (facts.isEmpty()) {
+                                Text("暂无当日详情", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                            }
+                            facts.forEach { (label, value) ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(label, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                                    Spacer(Modifier.weight(1f))
+                                    Text(value, style = MaterialTheme.typography.labelLarge, color = ZhishengText)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item { FeatureSectionTitle(3, "天气娘简报", "WEATHER GIRL") }
             item {
                 ForecastSummaryPanel(
-                    digest = buildForecastDigest(visibleDays, tempUnit, utcOffsetSeconds, city?.locationKey.orEmpty()),
+                    digest = buildForecastDigest(visibleDays, tempUnit, utcOffsetSeconds, city?.locationKey.orEmpty(), nowMillis),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 )
             }
@@ -177,19 +229,35 @@ internal fun yesterdayForecastDay(
     yesterday ?: return null
     if (yesterday.high == null && yesterday.low == null && yesterday.condition == null) return null
     val zone = Fmt.zoneId(utcOffsetSeconds)
-    val dateMillis = Instant.ofEpochMilli(nowMillis)
+    val dateMillis = yesterday.dateMillis ?: Instant.ofEpochMilli(nowMillis)
         .atZone(zone)
         .toLocalDate()
         .minusDays(1)
         .atStartOfDay(zone)
         .toInstant()
         .toEpochMilli()
+    val start = yesterday.weatherStart?.takeIf { it != WeatherCondition.UNKNOWN }
+    val end = yesterday.weatherEnd?.takeIf { it != WeatherCondition.UNKNOWN }
+    val weatherText = when {
+        start != null && end != null && start != end -> "${start.label}转${end.label}"
+        start != null -> start.label
+        end != null -> end.label
+        else -> yesterday.condition?.label
+    }
     return DailyWeather(
         dateMillis = dateMillis,
         high = yesterday.high,
         low = yesterday.low,
         condition = yesterday.condition,
-        weatherText = yesterday.condition?.label,
+        weatherText = weatherText,
+        windSpeed = listOfNotNull(yesterday.windSpeedStart, yesterday.windSpeedEnd).maxOrNull(),
+        windDirectionDeg = WeatherRepository.meanDirectionDeg(
+            yesterday.windDirectionStartDeg?.toString(),
+            yesterday.windDirectionEndDeg?.toString(),
+        ),
+        sunrise = yesterday.sunrise,
+        sunset = yesterday.sunset,
+        aqi = yesterday.aqi,
     )
 }
 
@@ -222,7 +290,7 @@ private fun ForecastMeta(city: City?, count: Int, tempUnit: String) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "已接收 $count 日预报 · ${Fmt.unitSuffix(tempUnit)}",
+                "未来 $count 天 · ${Fmt.unitSuffix(tempUnit)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = ZhishengTextTertiary,
             )
@@ -242,13 +310,17 @@ private fun ForecastWorkbench(
     tempUnit: String,
     windUnit: String,
     utcOffsetSeconds: Int?,
+    selectedMillis: Long?,
+    onSelect: (Long) -> Unit,
 ) {
     val palette = LocalZhishengPalette.current
     val scrollState = rememberScrollState()
-    val columnWidth = 86.dp
-    val boardHeight = 400.dp
-    val chartTop = 132.dp
-    val chartBottom = 226.dp
+    // 大字号适配两主题一致：经典页此前固定 1f，系统字体放大时列内文字会互相挤压。
+    val layoutScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val columnWidth = (if (isPhosphorVista) 112.dp else 86.dp) * layoutScale
+    val boardHeight = 430.dp * layoutScale
+    val chartTop = (if (isPhosphorVista) 136.dp else 132.dp) * layoutScale
+    val chartBottom = 226.dp * layoutScale
     val totalWidth = columnWidth * days.size
     val converted = days.flatMap { day ->
         listOfNotNull(
@@ -270,17 +342,17 @@ private fun ForecastWorkbench(
             Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("DAY", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("日间", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
             Spacer(Modifier.weight(1f))
             Box(Modifier.size(6.dp).background(ZhishengOrange))
             Spacer(Modifier.width(5.dp))
-            Text("HIGH", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("最高", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
             Spacer(Modifier.width(12.dp))
             Box(Modifier.size(6.dp).background(ZhishengCyan))
             Spacer(Modifier.width(5.dp))
-            Text("LOW", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("最低", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
             Spacer(Modifier.weight(1f))
-            Text("NIGHT", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+            Text("夜间", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
         }
         HorizontalDivider(color = ZhishengCardBorder, thickness = 1.dp)
         Box(Modifier.fillMaxWidth().height(boardHeight).horizontalScroll(scrollState)) {
@@ -306,6 +378,14 @@ private fun ForecastWorkbench(
                             palette.orange,
                             topLeft = Offset(columnPx * todayIndex, 0f),
                             size = Size(columnPx, 3.dp.toPx()),
+                        )
+                    }
+                    val selectedIndex = days.indexOfFirst { it.dateMillis == selectedMillis }
+                    if (selectedIndex >= 0) {
+                        drawRect(
+                            palette.mint.copy(alpha = 0.05f),
+                            topLeft = Offset(columnPx * selectedIndex, 0f),
+                            size = Size(columnPx, size.height),
                         )
                     }
                     repeat(days.size + 1) { index ->
@@ -367,7 +447,11 @@ private fun ForecastWorkbench(
 
                 Row(Modifier.width(totalWidth).height(boardHeight)) {
                     days.forEach { day ->
-                        ForecastDayColumn(day, tempUnit, windUnit, utcOffsetSeconds, columnWidth, ::yOffset)
+                        ForecastDayColumn(
+                            day, tempUnit, windUnit, utcOffsetSeconds, columnWidth, ::yOffset,
+                            selected = day.dateMillis == selectedMillis,
+                            onClick = { onSelect(day.dateMillis) },
+                        )
                     }
                 }
             }
@@ -396,15 +480,19 @@ private fun ForecastDayColumn(
     utcOffsetSeconds: Int?,
     width: Dp,
     yOffset: (Double) -> Dp,
+    selected: Boolean,
+    onClick: () -> Unit,
 ) {
+    val layoutScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     val visual = forecastDayNightVisual(day)
     val temporalLabel = forecastTemporalLabel(day.dateMillis, utcOffsetSeconds)
     val isToday = temporalLabel == "今天"
     val isYesterday = temporalLabel == "昨天"
-    Box(Modifier.width(width).height(400.dp).alpha(if (isYesterday) 0.58f else 1f)) {
+    Box(Modifier.width(width).height(430.dp * layoutScale).alpha(if (isYesterday) 0.58f else 1f)
+        .clickable(role = Role.Button, onClickLabel = "查看当日详情", onClick = onClick)) {
         Text(
             temporalLabel,
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = 12.dp),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = 12.dp * layoutScale),
             style = MaterialTheme.typography.labelLarge,
             color = if (isToday) ZhishengOrange else ZhishengTextSecondary,
             fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
@@ -412,15 +500,15 @@ private fun ForecastDayColumn(
         )
         Text(
             forecastDateLabel(day.dateMillis, utcOffsetSeconds),
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = 34.dp),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = 34.dp * layoutScale),
             style = MaterialTheme.typography.labelSmall,
             color = ZhishengTextTertiary,
             maxLines = 1,
         )
-        WeatherIcon(visual.dayCondition, Modifier.align(Alignment.TopCenter).offset(y = 62.dp).size(30.dp))
+        WeatherIcon(visual.dayCondition, Modifier.align(Alignment.TopCenter).offset(y = 62.dp * layoutScale).size(30.dp))
         Text(
             visual.dayLabel,
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = 95.dp).padding(horizontal = 4.dp),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = 95.dp * layoutScale).padding(horizontal = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             color = ZhishengTextSecondary,
             maxLines = 1,
@@ -429,7 +517,7 @@ private fun ForecastDayColumn(
         day.high?.let { raw ->
             Text(
                 Fmt.temp(raw, tempUnit)?.let { "$it°" } ?: "—",
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = yOffset(convertTemperature(raw, tempUnit)) - 22.dp),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = yOffset(convertTemperature(raw, tempUnit)) - 22.dp * layoutScale),
                 style = MaterialTheme.typography.titleSmall,
                 color = ZhishengOrange,
                 fontWeight = FontWeight.Bold,
@@ -438,7 +526,7 @@ private fun ForecastDayColumn(
         day.low?.let { raw ->
             Text(
                 Fmt.temp(raw, tempUnit)?.let { "$it°" } ?: "—",
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = yOffset(convertTemperature(raw, tempUnit)) + 7.dp),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = yOffset(convertTemperature(raw, tempUnit)) + 7.dp * layoutScale),
                 style = MaterialTheme.typography.titleSmall,
                 color = ZhishengCyan,
                 fontWeight = FontWeight.Bold,
@@ -451,17 +539,17 @@ private fun ForecastDayColumn(
                 yOffset(convertTemperature(low, tempUnit))) / 2f
             Text(
                 rangeLabel,
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = rangeCenter - 7.dp),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = rangeCenter - 7.dp * layoutScale),
                 color = ZhishengTextTertiary,
                 fontSize = 10.sp,
                 letterSpacing = 0.4.sp,
                 maxLines = 1,
             )
         }
-        WeatherIcon(visual.nightCondition, Modifier.align(Alignment.TopCenter).offset(y = 259.dp).size(28.dp))
+        WeatherIcon(visual.nightCondition, Modifier.align(Alignment.TopCenter).offset(y = 259.dp * layoutScale).size(28.dp))
         Text(
             visual.nightLabel,
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = 291.dp).padding(horizontal = 4.dp),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = 291.dp * layoutScale).padding(horizontal = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             color = ZhishengTextSecondary,
             maxLines = 1,
@@ -469,12 +557,23 @@ private fun ForecastDayColumn(
         )
         forecastDetailLabels(day, windUnit).forEachIndexed { index, label ->
             Text(
-                label,
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = 323.dp + 26.dp * index),
+                if (isPhosphorVista) label.replace("AQI", "空气质量") else label,
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = (323.dp + 26.dp * index) * layoutScale),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (label.startsWith("降水")) ZhishengCyan else ZhishengTextSecondary,
+                color = when {
+                    label.startsWith("降水") -> ZhishengCyan
+                    label.startsWith("AQI") -> forecastAqiColor(day.aqi)
+                    else -> ZhishengTextSecondary
+                },
                 maxLines = 1,
                 textAlign = TextAlign.Center,
+            )
+        }
+        // 选中列底部画一条信号色下划线：与右侧“当日详情”面板同指一天。
+        if (selected) {
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp)
+                    .background(ZhishengMint),
             )
         }
     }
@@ -489,13 +588,25 @@ internal fun forecastDateLabel(epochMillis: Long, utcOffsetSeconds: Int?): Strin
 
 internal fun forecastDetailLabels(day: DailyWeather, windUnit: String): List<String> = buildList {
     Fmt.probability(day.precipProbability)?.let { add("降水 $it") }
-    day.windSpeed
+    val speed = day.windSpeed
         ?.takeIf { it.isFinite() && it >= 0.0 }
         ?.let { Fmt.wind(it, windUnit) }
-        ?.let { add("风 $it") }
+    val direction = WeatherRepository.windDirection(day.windDirectionDeg)
+    listOfNotNull(direction, speed).takeIf { it.isNotEmpty() }
+        ?.let { add("风 ${it.joinToString(" · ")}") }
+    day.aqi?.takeIf { it in 0..1_000 }?.let { add("AQI $it") }
     day.sunrise
         ?.takeIf { it.isNotBlank() }
         ?.let { add("日出 $it") }
+}
+
+@Composable
+internal fun forecastAqiColor(value: Int?) = when {
+    value == null -> ZhishengTextTertiary
+    value <= 50 -> ZhishengMint
+    value <= 100 -> ZhishengCyan
+    value <= 150 -> ZhishengOrange
+    else -> androidx.compose.ui.graphics.Color(0xFFE45C5C)
 }
 
 internal fun forecastTemperatureRangeLabel(day: DailyWeather, tempUnit: String): String? {
@@ -525,6 +636,7 @@ internal fun buildForecastDigest(
     tempUnit: String,
     utcOffsetSeconds: Int?,
     seedKey: String = "",
+    nowMillis: Long = System.currentTimeMillis(),
 ): ForecastDigest {
     if (days.isEmpty()) {
         return ForecastDigest(
@@ -537,7 +649,7 @@ internal fun buildForecastDigest(
             highDate = "—",
             lowValue = "—",
             lowDate = "—",
-            rainValue = "0 日",
+            rainValue = "—",
             rangeValue = "—",
         )
     }
@@ -549,9 +661,15 @@ internal fun buildForecastDigest(
 
     fun isRain(day: DailyWeather): Boolean {
         if (isSnow(day)) return false
-        return day.condition?.isPrecipitation == true ||
-            "雨" in day.weatherText.orEmpty() ||
-            (day.precipProbability ?: 0) >= 30
+        return forecastHasRainSignal(day)
+    }
+
+    val precipitationKnownDays = days.count { day ->
+        day.precipMm?.let { it.isFinite() && it >= 0.0 } == true ||
+            day.precipProbability?.let { it in 0..100 } == true ||
+            forecastDayNightVisual(day).let {
+                it.dayCondition != WeatherCondition.UNKNOWN || it.nightCondition != WeatherCondition.UNKNOWN
+            }
     }
 
     val rainDays = days.count { isRain(it) }
@@ -559,9 +677,14 @@ internal fun buildForecastDigest(
     val wetDays = rainDays + snowDays
     var streak = 0
     var maxWetStreak = 0
+    var previousDate: java.time.LocalDate? = null
     for (day in days) {
-        streak = if (isRain(day) || isSnow(day)) streak + 1 else 0
+        val date = Instant.ofEpochMilli(day.dateMillis).atZone(Fmt.zoneId(utcOffsetSeconds)).toLocalDate()
+        streak = if (isRain(day) || isSnow(day)) {
+            if (previousDate?.plusDays(1) == date) streak + 1 else 1
+        } else 0
         if (streak > maxWetStreak) maxWetStreak = streak
+        previousDate = date
     }
 
     val highDays = days.filter { it.high != null }
@@ -585,9 +708,14 @@ internal fun buildForecastDigest(
     val hazeSandDays = days.count { it.condition in setOf(WeatherCondition.HAZE, WeatherCondition.SAND) || "霾" in it.weatherText.orEmpty() || "沙" in it.weatherText.orEmpty() }
     val maxHigh = days.mapNotNull { it.high }.maxOrNull() ?: Double.NEGATIVE_INFINITY
     val minLow = days.mapNotNull { it.low }.minOrNull() ?: Double.POSITIVE_INFINITY
-    val todayWet = days.firstOrNull()?.let { isRain(it) || isSnow(it) } ?: false
-    val tomorrowWet = days.getOrNull(1)?.let { isRain(it) || isSnow(it) } ?: false
-    val tomorrowSnow = days.getOrNull(1)?.let { isSnow(it) } ?: false
+    val today = Instant.ofEpochMilli(nowMillis).atZone(Fmt.zoneId(utcOffsetSeconds)).toLocalDate()
+    fun dayAt(date: java.time.LocalDate) = days.firstOrNull {
+        Instant.ofEpochMilli(it.dateMillis).atZone(Fmt.zoneId(utcOffsetSeconds)).toLocalDate() == date
+    }
+    val todayWet = dayAt(today)?.let { isRain(it) || isSnow(it) } ?: false
+    val tomorrow = dayAt(today.plusDays(1))
+    val tomorrowWet = tomorrow?.let { isRain(it) || isSnow(it) } ?: false
+    val tomorrowSnow = tomorrow?.let(::isSnow) ?: false
     var wetRuns = 0
     var inWetRun = false
     for (day in days) {
@@ -826,6 +954,10 @@ internal fun buildForecastDigest(
             ), days, utcOffsetSeconds, seedKey, 103)
             emote = if (sunnyDays * 2 >= n) BriefingEmote.SUNNY else BriefingEmote.CLOUDY
         }
+        wetDays == 0 && precipitationKnownDays < n -> {
+            headline = "降水预报还不完整，临近出门再看看更新。"
+            emote = BriefingEmote.CLOUDY
+        }
         sunnyDays * 3 >= n * 2 -> {
             headline = forecastPick(listOf(
                 "接下来晴天居多，洗晒和户外都能安排。",
@@ -886,13 +1018,15 @@ internal fun buildForecastDigest(
         ), days, utcOffsetSeconds, seedKey, 59)
         snowDays >= 1 ->
             "我看到有 $snowDays 天可能下雪，路面结冰要当心。"
+        precipitationKnownDays < n -> "降水数据还不完整，暂时不能判断有没有雨雪。"
         else -> forecastPick(listOf(
             "目前没看到明显降水，洗晒和出行都比较省心。",
             "这段时间没有明显降水，行程可以放心安排。",
             "接下来没看到降水的影子，出行和洗晒都放心。",
         ), days, utcOffsetSeconds, seedKey, 61)
     }
-    val overview = "$temperatureCopy$wetCopy"
+    val incompleteCopy = if (wetDays > 0 && precipitationKnownDays < n) "部分日期的降水数据暂缺。" else ""
+    val overview = "$temperatureCopy$wetCopy$incompleteCopy"
 
     val note = forecastPick(listOf(
         "越往后的天气越容易变，这页每天打开都会是新的。",
@@ -916,7 +1050,7 @@ internal fun buildForecastDigest(
         highDate = hottest?.let { forecastMetricDate(it, utcOffsetSeconds, firstYear) } ?: "—",
         lowValue = lowText,
         lowDate = coldest?.let { forecastMetricDate(it, utcOffsetSeconds, firstYear) } ?: "—",
-        rainValue = "$wetDays 日",
+        rainValue = if (wetDays == 0 && precipitationKnownDays < n) "—" else "$wetDays 日",
         rangeValue = rangeValue,
     )
 }
@@ -951,6 +1085,7 @@ private fun List<Double>.averageOrNull(): Double? = if (isEmpty()) null else ave
 internal fun forecastHasRainSignal(day: DailyWeather): Boolean =
     day.condition?.isPrecipitation == true ||
         (day.precipProbability ?: 0) >= 30 ||
+        day.precipMm?.let { it.isFinite() && it > 0.0 } == true ||
         day.weatherText.orEmpty().let { "雨" in it || "雪" in it }
 
 @Composable

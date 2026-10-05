@@ -69,7 +69,9 @@ object Fmt {
         DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.US)
             .format(Instant.ofEpochMilli(epochMillis).atZone(zone(utcOffsetSeconds)))
 
-    fun coordinates(latitude: Double, longitude: Double): String {
+    // 坐标精度只用于定位和请求；标题栏固定显示两位，避免精确定位后数字抢占城市信息。
+    @Suppress("UNUSED_PARAMETER")
+    fun coordinates(latitude: Double, longitude: Double, precise: Boolean = false): String {
         val latitudeDirection = if (latitude < 0.0) "S" else "N"
         val longitudeDirection = if (longitude < 0.0) "W" else "E"
         return String.format(
@@ -80,6 +82,17 @@ object Fmt {
             abs(longitude),
             longitudeDirection,
         )
+    }
+
+    /** 将 AQI 计算标准写成“国标/美标”，避免用户把“美国”误认为定位或数据来源。 */
+    fun aqiStandardLabel(standard: String?): String? = when (standard?.trim()) {
+        null, "" -> null
+        "中国", "国标" -> "国标"
+        "美国", "美标" -> "美标"
+        "欧洲", "欧标" -> "欧标"
+        "日本", "日标" -> "日标"
+        "QWeather", "QAQI" -> "QAQI"
+        else -> standard.trim()
     }
 
     fun temp(celsius: Double?, unit: String): String? = celsius?.let {

@@ -120,7 +120,11 @@ fun rememberWorldHeadingDegrees(latitude: Double? = null, longitude: Double? = n
     var heading by remember { mutableStateOf<Float?>(null) }
 
     DisposableEffect(lifecycleOwner) {
-        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        if (sensorManager == null) {
+            heading = null
+            return@DisposableEffect onDispose { }
+        }
         val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: sensorManager.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR)
         if (sensor == null) {
@@ -145,7 +149,8 @@ fun rememberWorldHeadingDegrees(latitude: Double? = null, longitude: Double? = n
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
         fun bind() {
-            sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
+            // 罗盘只用于阅读方向，不需要游戏级约50Hz采样；UI级足够顺滑且明显省电。
+            sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
         }
         fun unbind() {
             sensorManager.unregisterListener(listener)

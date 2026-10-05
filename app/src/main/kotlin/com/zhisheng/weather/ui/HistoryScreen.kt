@@ -1,5 +1,5 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
-/* Hallmark · genre: atmospheric technical utility · macrostructure: Long Document · design-system: DESIGN.md · designed-as-app */
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.zhisheng.weather.ui
 
 import androidx.compose.foundation.Canvas
@@ -9,6 +9,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -73,7 +78,16 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.zhishengScreen
+import com.zhisheng.weather.ui.theme.isPhosphorVista
+import com.zhisheng.weather.ui.theme.zhishengCompactPanel
+import com.zhisheng.weather.ui.theme.zhishengPanel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import kotlinx.coroutines.delay
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -114,7 +128,24 @@ fun HistoryScreen(
     utcOffsetSeconds: Int?,
     onBack: () -> Unit,
 ) {
-    val today = remember(city?.locationKey, utcOffsetSeconds) { LocalDate.now(cityZone(utcOffsetSeconds)) }
+    var today by remember(city?.locationKey, utcOffsetSeconds) {
+        mutableStateOf(LocalDate.now(cityZone(utcOffsetSeconds)))
+    }
+    // 跨午夜校正：定时到城市时区的下一个午夜翻转"今天"；App 回前台也立即校正一次
+    //（挂后台跨天的场景，定时器可能还没到点）。已选日期不动，"回到今天"自动归位。
+    LaunchedEffect(city?.locationKey, utcOffsetSeconds) {
+        while (true) {
+            val zone = cityZone(utcOffsetSeconds)
+            val now = LocalDateTime.now(zone)
+            val untilNextMidnight = Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay(zone))
+            delay(untilNextMidnight.toMillis() + 50L)
+            today = LocalDate.now(zone)
+        }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val fresh = LocalDate.now(cityZone(utcOffsetSeconds))
+        if (fresh != today) today = fresh
+    }
     // 海外城市的时区可能晚于城市列表首帧到达；把时区也作为保存键，
     // 避免在当地跨日边界仍沿用手机时区初始化出的错误日期。
     var selectedEpochDay by rememberSaveable(city?.locationKey, utcOffsetSeconds) {
@@ -129,7 +160,7 @@ fun HistoryScreen(
     var state by remember(city?.locationKey, retry) {
         mutableStateOf<HistoryScreenState>(HistoryScreenState.Loading(0, years))
     }
-    var recentState by remember(city?.locationKey, retry) { mutableStateOf<RecentWeekState>(RecentWeekState.Loading) }
+    var recentState by remember(city?.locationKey, today, retry) { mutableStateOf<RecentWeekState>(RecentWeekState.Loading) }
 
     LaunchedEffect(city?.locationKey, selectedDate, years, retry, view) {
         if (view != HistoryView.SAME_DAY) return@LaunchedEffect
@@ -162,18 +193,19 @@ fun HistoryScreen(
             recentState = RecentWeekState.Error("先在主页选择一座城市", "回主页选中城市后再进来")
             return@LaunchedEffect
         }
-        recentState = RecentWeekState.Loading
+        val previous = recentState
+        if (previous !is RecentWeekState.Ready) recentState = RecentWeekState.Loading
         recentState = try {
             RecentWeekState.Ready(HistoricalWeatherRepository.loadPastWeek(city, today))
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Exception) {
-            RecentWeekState.Error("过去7天数据读取失败")
+            if (previous is RecentWeekState.Ready) previous else RecentWeekState.Error("过去7天数据读取失败")
         }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(ZhishengBg)
+        modifier = Modifier.fillMaxSize().zhishengScreen()
             .statusBarsPadding().navigationBarsPadding(),
     ) {
         FeaturePageHeader("天气回看", "WEATHER MEMORY", onBack)
@@ -224,12 +256,12 @@ fun HistoryScreen(
 private fun HistoryViewToggle(selected: HistoryView, onSelect: (HistoryView) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp)
-            .height(50.dp).background(ZhishengSurface).border(1.dp, ZhishengCardBorder),
+            .heightIn(min = 52.dp).selectableGroup().then(if (isPhosphorVista) Modifier.zhishengCompactPanel() else Modifier.background(ZhishengSurface).border(1.dp, ZhishengCardBorder)),
     ) {
         HistoryViewChoice("过去7天", "RECENT LOG", selected == HistoryView.RECENT_WEEK, Modifier.weight(1f)) {
             onSelect(HistoryView.RECENT_WEEK)
         }
-        Box(Modifier.width(1.dp).fillMaxSize().background(ZhishengCardBorder))
+        if (!isPhosphorVista) Box(Modifier.width(1.dp).height(52.dp).background(ZhishengCardBorder))
         HistoryViewChoice("往年同日", "YEAR TRACE", selected == HistoryView.SAME_DAY, Modifier.weight(1f)) {
             onSelect(HistoryView.SAME_DAY)
         }
@@ -246,47 +278,30 @@ private fun HistoryViewChoice(
 ) {
     val accent = if (selected) ZhishengMint else ZhishengTextSecondary
     Column(
-        modifier.fillMaxSize().clickable(role = Role.Button, onClickLabel = "查看$title", onClick = onClick),
+        modifier.heightIn(min = 52.dp).selectable(selected = selected, role = Role.Tab, onClick = onClick).padding(vertical = 8.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-        Text(code, style = MaterialTheme.typography.labelSmall, color = if (selected) ZhishengCyan else ZhishengTextTertiary, letterSpacing = 0.8.sp)
+        if (!isPhosphorVista) Text(code, style = MaterialTheme.typography.labelSmall, color = if (selected) ZhishengCyan else ZhishengTextTertiary, letterSpacing = 0.8.sp)
         if (selected) Box(Modifier.align(Alignment.CenterHorizontally).width(54.dp).height(2.dp).background(accent))
     }
 }
 
 @Composable
 private fun RecentWeekLoading() {
-    FeatureBootLoader(
-        channel = "RECENT WEATHER LOG",
-        lines = listOf(
-            "RECENT PORT ......... OPEN",
-            "LOCK COMPLETE DAYS ... OK",
-            "FETCH 7-DAY TRACE ......",
-            "BUILD DAILY LOG ........",
-        ),
-        status = "正在读取过去7天",
-    )
+    Text("正在读取过去7天…", Modifier.padding(20.dp),
+        style = MaterialTheme.typography.bodyMedium, color = ZhishengTextSecondary)
 }
 
 @Composable
 private fun HistoryLoading(completed: Int, total: Int) {
-    FeatureBootLoader(
-        channel = "WEATHER ARCHIVE",
-        lines = listOf(
-            "ARCHIVE PORT ........ OPEN",
-            "RESOLVE DATE INDEX ... OK",
-            "FETCH CLIMATE RECORDS ...",
-            "BUILD YEAR TRACE ..... ${if (total == 0) "--" else "$completed/$total"}",
-        ),
-        status = if (completed == 0) "正在定位这一天的往年天气" else "已找到 $completed 年，继续读取其余年份",
-        progress = if (total > 0) completed / total.toFloat() else 0f,
-    )
+    Text(if (completed == 0) "正在读取往年天气…" else "正在读取往年天气  $completed / $total",
+        Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium, color = ZhishengTextSecondary)
 }
 
 @Composable
-private fun RecentWeekContent(
+internal fun RecentWeekContent(
     city: City,
     week: RecentWeatherWeek,
     tempUnit: String,
@@ -299,12 +314,13 @@ private fun RecentWeekContent(
         contentPadding = PaddingValues(bottom = 36.dp),
     ) {
         item {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+                .then(if (isPhosphorVista) Modifier.zhishengPanel().padding(18.dp) else Modifier)) {
                 Text(
                     range.dates,
                     style = MaterialTheme.typography.headlineSmall.copy(fontSize = 24.sp, lineHeight = 28.sp),
                     color = ZhishengOrange,
-                    maxLines = 1,
+                    maxLines = 2,
                 )
                 Text(
                     "${range.years} · ${city.displayName} · 过去7天",
@@ -324,19 +340,19 @@ private fun RecentWeekContent(
                 )
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    "只显示已经结束的日期；今天的数据尚未完整，不进入统计。",
+                    if (isPhosphorVista) "最近七个完整日期，不含今天。" else "只显示已经结束的日期；今天的数据尚未完整，不进入统计。",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = ZhishengReading),
                     color = ZhishengTextTertiary,
                 )
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     SummaryMetric("平均高温", summary.averageHigh?.let { "${Fmt.temp(it, tempUnit)}°" } ?: "记录不足")
                     SummaryMetric("平均低温", summary.averageLow?.let { "${Fmt.temp(it, tempUnit)}°" } ?: "记录不足")
                     SummaryMetric("累计降水", formatMm(week.totalPrecipitationMm))
                 }
             }
         }
-        item { FeatureSectionTitle(1, "七日观测带", "7-DAY WEATHER STRIP") }
+        item { FeatureSectionTitle(1, if (isPhosphorVista) "七日天气" else "七日观测带", "7-DAY WEATHER STRIP") }
         item {
             Text(
                 "横向滑动，每列是一天的天气、温度、降水和风速。",
@@ -350,13 +366,13 @@ private fun RecentWeekContent(
         item {
             TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("OPEN-METEO // RECENT ARCHIVE", style = MaterialTheme.typography.labelMedium, color = ZhishengCyan)
+                    Text("Open-Meteo · 近期历史档案", style = MaterialTheme.typography.labelMedium, color = ZhishengCyan)
                     Text(
-                        "过去7天来自 Forecast API 的近期归档，是滚动的七个完整自然日，不是固定的周一到周日。它适合回看天气变化，但仍是格点化数据，不等同于当地单个气象站原始观测。",
+                        if (isPhosphorVista) "显示最近七个完整日期的天气，不含尚未结束的今天。数据由 Open-Meteo 提供，代表当地整体天气，可能与附近气象站的记录有差异。" else "过去7天来自 Forecast API 的近期归档，是滚动的七个完整自然日，不是固定的周一到周日。它适合回看天气变化，但仍是格点化数据，不等同于当地单个气象站原始观测。",
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = ZhishengReading),
                         color = ZhishengTextSecondary,
                     )
-                    Text("CACHE // 当天成功读取后保存在本机", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    Text(if (isPhosphorVista) "已获取的记录会保存在手机上" else "CACHE // 当天成功读取后保存在本机", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
                 }
             }
         }
@@ -431,7 +447,7 @@ private fun HistoryContent(
         item {
             TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("OPEN-METEO // BEST MATCH", style = MaterialTheme.typography.labelMedium, color = ZhishengCyan)
+                    Text("Open-Meteo · 历史天气", style = MaterialTheme.typography.labelMedium, color = ZhishengCyan)
                     Text(
                         "往年数据来自历史再分析：观测与模型共同还原当地天气，不等同于单个气象站的原始记录。近5年或10年是逐年同日样本，不是30年气候平均。",
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = ZhishengReading),
@@ -449,7 +465,7 @@ private fun HistoryContent(
                             color = ZhishengTextSecondary,
                         )
                     }
-                    Text("CACHE // 已成功的往年记录保存在本机", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
+                    Text(if (isPhosphorVista) "已获取的往年记录会保存在手机上" else "CACHE // 已成功的往年记录保存在本机", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
                 }
             }
         }
@@ -504,7 +520,7 @@ private fun HistoryHero(
             lineHeight = 18.sp,
         )
         Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             SummaryMetric("平均高温", summary.averageHigh?.let { "${Fmt.temp(it, tempUnit)}°" } ?: "记录不足")
             SummaryMetric("平均低温", summary.averageLow?.let { "${Fmt.temp(it, tempUnit)}°" } ?: "记录不足")
             SummaryMetric(
@@ -551,13 +567,14 @@ private fun DateNavigator(
                 subtitle,
                 style = MaterialTheme.typography.labelSmall,
                 color = ZhishengTextTertiary,
-                maxLines = 1,
+                maxLines = if (isPhosphorVista) 3 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         if (!isToday) {
             Box(
-                Modifier.height(44.dp).clickable(role = Role.Button, onClickLabel = "回到今天", onClick = onToday)
+                Modifier.height(if (isPhosphorVista) 48.dp else 44.dp)
+                    .clickable(role = Role.Button, onClickLabel = "回到今天", onClick = onToday)
                     .padding(horizontal = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -571,7 +588,8 @@ private fun DateNavigator(
 @Composable
 private fun DateArrow(label: String, description: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).border(1.dp, ZhishengCardBorder)
+        Modifier.size(if (isPhosphorVista) 48.dp else 44.dp)
+            .then(if (isPhosphorVista) Modifier.zhishengCompactPanel() else Modifier.border(1.dp, ZhishengCardBorder))
             .clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -589,9 +607,10 @@ private fun SummaryMetric(label: String, value: String) {
 
 @Composable
 private fun YearRangeToggle(years: Int, onYearsChange: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(44.dp).background(ZhishengSurface).border(1.dp, ZhishengCardBorder)) {
+    Row(Modifier.fillMaxWidth().height(if (isPhosphorVista) 52.dp else 44.dp).selectableGroup()
+        .then(if (isPhosphorVista) Modifier.zhishengCompactPanel() else Modifier.background(ZhishengSurface).border(1.dp, ZhishengCardBorder))) {
         YearChoice("近5年", years == 5, Modifier.weight(1f)) { onYearsChange(5) }
-        Box(Modifier.width(1.dp).height(44.dp).background(ZhishengCardBorder))
+        if (!isPhosphorVista) Box(Modifier.width(1.dp).height(44.dp).background(ZhishengCardBorder))
         YearChoice("近10年", years == 10, Modifier.weight(1f)) { onYearsChange(10) }
     }
 }
@@ -600,7 +619,7 @@ private fun YearRangeToggle(years: Int, onYearsChange: (Int) -> Unit) {
 private fun YearChoice(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val color = if (selected) ZhishengMint else ZhishengTextSecondary
     Box(
-        modifier = modifier.fillMaxSize().clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+        modifier = modifier.fillMaxSize().selectable(selected = selected, role = Role.Tab, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
@@ -612,23 +631,19 @@ private fun YearChoice(label: String, selected: Boolean, modifier: Modifier, onC
 private fun TemperatureBandPanel(review: HistoricalReview, forecast: DailyWeather?, tempUnit: String) {
     TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("每条竖线是一年的低温到高温", style = MaterialTheme.typography.bodySmall.copy(fontFamily = ZhishengReading), color = ZhishengTextSecondary)
-                Spacer(Modifier.weight(1f))
                 Text("${review.days.size} 年", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange)
             }
             Spacer(Modifier.height(9.dp))
             TemperatureBandChart(review.days, forecast)
             Spacer(Modifier.height(7.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LegendMark(ZhishengCyan, "低温")
-                Spacer(Modifier.width(12.dp))
                 LegendMark(ZhishengOrange, "高温")
                 if (forecast != null) {
-                    Spacer(Modifier.width(12.dp))
                     LegendMark(ZhishengMint, "今年预报", outlined = true)
                 }
-                Spacer(Modifier.weight(1f))
                 Text(
                     "均高 ${review.summary.averageHigh?.let { Fmt.temp(it, tempUnit) } ?: "?"}° / 均低 ${review.summary.averageLow?.let { Fmt.temp(it, tempUnit) } ?: "?"}°",
                     style = MaterialTheme.typography.labelSmall,
@@ -643,10 +658,13 @@ private fun TemperatureBandPanel(review: HistoricalReview, forecast: DailyWeathe
 private fun RecentWeekWeatherStrip(days: List<HistoricalDay>, tempUnit: String, windUnit: String) {
     val palette = LocalZhishengPalette.current
     val ordered = remember(days) { days.sortedBy(HistoricalDay::date) }
-    val columnWidth = 88.dp
-    val stripHeight = 350.dp
-    val chartTop = 152.dp
-    val chartBottom = 244.dp
+    val vista = isPhosphorVista
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val layoutScale = if (vista) fontScale else 1f
+    val columnWidth = 88.dp * layoutScale
+    val stripHeight = 350.dp * layoutScale
+    val chartTop = 152.dp * layoutScale
+    val chartBottom = 244.dp * layoutScale
     val values = ordered.flatMap { listOfNotNull(it.low, it.high) }
     val min = (values.minOrNull() ?: 0.0) - 1.0
     val max = (values.maxOrNull() ?: min + 1.0) + 1.0
@@ -687,7 +705,7 @@ private fun RecentWeekWeatherStrip(days: List<HistoricalDay>, tempUnit: String, 
                             size = Size(columnPx, size.height),
                         )
                     }
-                    repeat(ordered.size + 1) { index ->
+                    if (!vista) repeat(ordered.size + 1) { index ->
                         drawLine(
                             palette.cardBorder.copy(alpha = 0.72f),
                             Offset(columnPx * index, 0f),
@@ -734,7 +752,7 @@ private fun RecentWeekWeatherStrip(days: List<HistoricalDay>, tempUnit: String, 
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Text(
-                                    if (latest) "昨天" else weekdayLabel(day.localDate),
+                                    weekdayLabel(day.localDate),
                                     style = MaterialTheme.typography.labelLarge,
                                     color = if (latest) palette.mint else palette.textSecondary,
                                     fontWeight = if (latest) FontWeight.Bold else FontWeight.Normal,
@@ -763,7 +781,7 @@ private fun RecentWeekWeatherStrip(days: List<HistoricalDay>, tempUnit: String, 
                             day.high?.let { high ->
                                 Text(
                                     "${Fmt.temp(high, tempUnit)}°",
-                                    modifier = Modifier.fillMaxWidth().offset(y = yOffset(high) - 27.dp),
+                                    modifier = Modifier.fillMaxWidth().offset(y = yOffset(high) - 27.dp * layoutScale),
                                     textAlign = TextAlign.Center,
                                     style = MaterialTheme.typography.labelLarge,
                                     color = palette.text,
@@ -773,7 +791,7 @@ private fun RecentWeekWeatherStrip(days: List<HistoricalDay>, tempUnit: String, 
                             day.low?.let { low ->
                                 Text(
                                     "${Fmt.temp(low, tempUnit)}°",
-                                    modifier = Modifier.fillMaxWidth().offset(y = yOffset(low) + 8.dp),
+                                    modifier = Modifier.fillMaxWidth().offset(y = yOffset(low) + 8.dp * layoutScale),
                                     textAlign = TextAlign.Center,
                                     style = MaterialTheme.typography.labelLarge,
                                     color = palette.text,
@@ -918,7 +936,8 @@ private fun RecordItem(label: String, value: String, modifier: Modifier) {
 
 @Composable
 private fun HistoricalYearCard(day: HistoricalDay, tempUnit: String, windUnit: String) {
-    TerminalPanel(Modifier.width(232.dp).height(154.dp)) {
+    val scale = if (isPhosphorVista) LocalDensity.current.fontScale.coerceAtLeast(1f) else 1f
+    TerminalPanel(Modifier.width(232.dp * scale).height(154.dp * scale)) {
         Column(Modifier.fillMaxSize().padding(13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(day.localDate.year.toString(), style = MaterialTheme.typography.titleLarge, color = ZhishengOrange)

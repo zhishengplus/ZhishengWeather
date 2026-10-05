@@ -1,8 +1,3 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
-/* Hallmark · component: searchable contributor ledger · genre: atmospheric · theme: existing Zhisheng terminal
- * states: default · focus · filtered · matched · empty
- * contrast: pass
- */
 package com.zhisheng.weather.ui
 
 import androidx.compose.foundation.background
@@ -33,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.zhisheng.weather.ui.theme.zhishengScreen
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
@@ -51,6 +47,9 @@ import com.zhisheng.weather.ui.theme.ZhishengSurface
 import com.zhisheng.weather.ui.theme.ZhishengText
 import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
+import com.zhisheng.weather.ui.theme.zhishengDialogPanel
+import com.zhisheng.weather.ui.theme.zhishengCompactPanel
+import com.zhisheng.weather.ui.theme.isPhosphorVista
 
 @Composable
 fun ContributorsDialog(onClose: () -> Unit) {
@@ -61,7 +60,7 @@ fun ContributorsDialog(onClose: () -> Unit) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ZhishengBg.copy(alpha = 0.82f))
+                .zhishengScreen()
                 .safeDrawingPadding()
                 .padding(12.dp),
             contentAlignment = Alignment.Center,
@@ -95,8 +94,7 @@ fun ContributorsDialog(onClose: () -> Unit) {
                     .fillMaxWidth()
                     .widthIn(max = 520.dp)
                     .heightIn(max = panelMaxHeight)
-                    .background(ZhishengSurface, RectangleShape)
-                    .border(1.dp, ZhishengCardBorder, RectangleShape),
+                    .zhishengDialogPanel(),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
@@ -104,7 +102,7 @@ fun ContributorsDialog(onClose: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
                         Text(
-                            "COMMUNITY / ${CommunityContributors.size}",
+                            "${CommunityContributors.size} 位社区贡献者",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengCyan,
                             letterSpacing = 1.4.sp,
@@ -237,8 +235,7 @@ private fun ContributorSearchField(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(ZhishengBg)
-                    .border(1.dp, ZhishengCardBorder, RectangleShape)
+                    .zhishengCompactPanel(containerColor = ZhishengBg)
                     .padding(start = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -261,7 +258,8 @@ private fun ContributorSearchField(
                 )
                 if (query.isNotBlank()) {
                     Box(
-                        modifier = Modifier.size(44.dp).clickable(role = Role.Button, onClick = onClear),
+                        modifier = Modifier.size(if (isPhosphorVista) 48.dp else 44.dp)
+                            .clickable(role = Role.Button, onClick = onClear),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("×", style = MaterialTheme.typography.titleMedium, color = ZhishengTextSecondary)

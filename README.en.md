@@ -1,3 +1,8 @@
+> 无密钥源码导出版 / Key-free source export. Read SOURCE_EXPORT.md before building or publishing.
+
+> Latest public release: **0.1.5 Beta10.3**. Improved widget layouts and editing, saved locations and weather readings; optional daylight colours integrated with the home and Vista widgets.
+> [Gitee primary download](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public) · [GitHub alternate download](https://github.com/zhishengplus/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public)
+
 ![Zhisheng Weather · ZHISHENG WEATHER TERMINAL](assets/banner.png)
 
 <p align="center">
@@ -128,6 +133,28 @@ If you feel like supporting the project, scan the QR code below. Leave the name 
 3. The first launch shows Beijing. Use search to save your own cities.
 
 The APK is distributed through GitHub. Android may ask you to allow the current app to install unknown-source files. That prompt refers to the download channel; Zhisheng Weather is not requesting another system permission.
+
+## Version 0.1.5-beta5
+
+- Adds a current-location action to the city list, using Android's while-in-use and precise/approximate permission choices
+- Keeps distinct precise addresses within the same city, with a clear six-favorite limit
+- Supports fused and vendor location providers; all four providers start from the GPS point, Open-Meteo uses its nearest grid for precise locations, and QWeather receives coordinates at its documented precision
+- Pins city actions inside a bottom safe area so Add City remains reachable on short and edge-to-edge screens
+- Locks the 2×2 widget to a 110dp square and removes the extra gap after weather alerts
+
+- Restores the compact five-day home forecast and caps the hourly carousel at 24 readable slots, with fixed positions for conditions, rain chance, and high/low temperatures
+- Adds a dedicated 15-day view with a dimmed yesterday column and a more natural character-led outlook summary
+- Adds the previous seven days, same-date comparisons, and five- or ten-year history views; each record names its year and unusable records are omitted instead of shown as placeholders
+- Adds map-style radar controls, frame scrubbing, and smooth playback, with separate messages for clear nearby echoes and unavailable coverage
+- Adds typhoon tracks with observed positions, intensity, wind radii, forecasts from multiple agencies, cache time, and clear stale-data notices
+- Separates character briefings from alerts and tailors guidance to temperature, wind, precipitation, air quality, humidity, UV, visibility, and time of day; a text-only Tips mode is also available
+- Rechecks temperature, wind, precipitation, pressure, visibility, and air-quality handling across QWeather, Caiyun, Xiaomi, and Open-Meteo without substituting unrelated values for missing fields
+- Reorganizes Settings and adds Japanese UI, home briefing choices, and transparent, glass, or opaque widget backgrounds
+- Makes the new Weather Hub the default landscape style while retaining the classic view; full Settings and a return-to-portrait control are available in landscape
+- Adds city favorites that stay above regular cities while preserving the order within each group
+- Checks for updates quietly at launch and shows a badge in Settings when one is available, without pop-ups or automatic downloads
+- Fixes landscape cold-start routing on affected Samsung and realme devices, plus night icons, alert colors, short-term precipitation, and large-screen layouts
+- Expands the community contributor list to 558 names
 
 ## Version 0.1.5-beta3
 
@@ -279,7 +306,6 @@ qw.private_key=<single-line Ed25519 private key>
 ./scripts/package_release.ps1 -IncludeDevelopmentBuilds  # also package local development variants
 ```
 
-The bundled `keystore/public.jks` only keeps public builds upgrade-compatible with each other. It is not a private signing identity.
 
 Main stack: Kotlin 2.0.21, Jetpack Compose, Material 3, ViewModel / StateFlow, Retrofit, OkHttp, kotlinx-serialization, DataStore, and BouncyCastle. `minSdk 26`, `targetSdk 34`. See [CONTRIBUTING.md](CONTRIBUTING.md) for code layout and commit conventions.
 

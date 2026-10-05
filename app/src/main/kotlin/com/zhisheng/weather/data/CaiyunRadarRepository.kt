@@ -41,7 +41,7 @@ object CaiyunRadarRepository {
     private const val FORECAST_URL = "https://api.caiyunapp.com/v1/radar/forecast_images"
     private const val IMAGE_CACHE_TTL_MS = 5 * 60_000L
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
