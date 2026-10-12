@@ -265,13 +265,13 @@ class AppUpdateTest {
     }
 
     @Test
-    fun buildTypesOnlyAllowTheFormalPublicPackageToSelfUpdate() {
+    fun keyFreeExportDisablesSelfUpdateForEveryBuildType() {
         val gradle = sequenceOf(
             File("build.gradle.kts"),
             File("app/build.gradle.kts"),
         ).first { it.isFile }.readText()
 
-        assertTrue(gradle.contains("buildConfigField(\"boolean\", \"CAN_SELF_UPDATE\", \"true\")"))
+        assertFalse(gradle.contains("buildConfigField(\"boolean\", \"CAN_SELF_UPDATE\", \"true\")"))
         assertTrue(gradle.contains("buildConfigField(\"boolean\", \"CAN_SELF_UPDATE\", \"false\")"))
     }
 
