@@ -4,12 +4,13 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 
-/** Switches between the three manifest launcher aliases without restarting the app. */
+/** Switches manifest launcher aliases without restarting the app. */
 object AppIconManager {
     private const val CHARACTER_ALIAS = "com.zhisheng.weather.IconCharacter"
     // 保留旧 alias 名称，避免已选择经典图标的升级用户短暂丢失桌面入口。
     private const val DARK_ALIAS = "com.zhisheng.weather.IconClassic"
     private const val LIGHT_ALIAS = "com.zhisheng.weather.IconLight"
+    private const val MINIMAL_ALIAS = "com.zhisheng.weather.IconMinimal"
 
     fun apply(context: Context, style: AppIconStyle): Boolean = runCatching {
         val appContext = context.applicationContext
@@ -18,6 +19,7 @@ object AppIconManager {
             AppIconStyle.CHARACTER to ComponentName(appContext.packageName, CHARACTER_ALIAS),
             AppIconStyle.DARK to ComponentName(appContext.packageName, DARK_ALIAS),
             AppIconStyle.LIGHT to ComponentName(appContext.packageName, LIGHT_ALIAS),
+            AppIconStyle.MINIMAL to ComponentName(appContext.packageName, MINIMAL_ALIAS),
         )
         val selected = aliases.getValue(style)
 

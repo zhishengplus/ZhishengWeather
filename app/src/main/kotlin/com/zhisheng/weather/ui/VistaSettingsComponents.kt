@@ -129,8 +129,8 @@ internal fun VistaSettingInfo(
             Box(Modifier.weight(1f)) {
         if (stacked) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                SettingTitle(label, titleInk)
-                SettingDescription(value, ink)
+                SettingTitle(label, titleInk, Modifier.fillMaxWidth())
+                SettingDescription(value, ink, Modifier.fillMaxWidth())
             }
         } else Row(verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -182,13 +182,13 @@ internal fun VistaSettingSource(
 }
 
 @Composable
-private fun SettingTitle(label: String, color: Color) {
-    Text(label, color = color, fontWeight = FontWeight.Medium,
+private fun SettingTitle(label: String, color: Color, modifier: Modifier = Modifier) {
+    Text(label, modifier, color = color, fontWeight = FontWeight.Medium,
         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 22.sp))
 }
 
 @Composable
-private fun SettingDescription(value: String, color: Color) {
-    Text(value, color = color,
+private fun SettingDescription(value: String, color: Color, modifier: Modifier = Modifier) {
+    Text(value, modifier, color = color,
         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp))
 }

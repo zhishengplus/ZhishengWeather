@@ -9,6 +9,9 @@ import java.time.ZoneOffset
 // 枳生天气 · UI 数据模型
 
 @Serializable
+enum class CoordinateKind { UNKNOWN, DEVICE, ADMINISTRATIVE, PLACE }
+
+@Serializable
 data class City(
     val name: String,
     val affiliation: String,
@@ -20,6 +23,14 @@ data class City(
     // 精确定位地址用 geo:* 作为自身身份；天气源仍可保留反查得到的城市键。
     // 默认 null 保证旧版本保存的城市 JSON 可以直接迁移。
     val weatherLocationKey: String? = null,
+    val coordinateKind: CoordinateKind = CoordinateKind.UNKNOWN,
+    val locationAccuracyMeters: Float? = null,
+    val locationSampleTimeMillis: Long? = null,
+    val precisePermissionGranted: Boolean = false,
+    val addressSource: String? = null,
+    val locationProvider: String? = null,
+    val countryCode: String? = null,
+    val countryName: String? = null,
 ) {
     val displayName: String
         get() = listOf(name, street.orEmpty())
@@ -35,6 +46,20 @@ data class City(
 
     val isPreciseLocation: Boolean
         get() = locationKey.startsWith("geo:")
+
+    // The legacy flag above chooses coordinate-based weather routing. It is not
+    // evidence of GPS quality, especially for manually selected POIs/regions.
+    val coordinateLabel: String
+        get() = when (coordinateKind) {
+            CoordinateKind.ADMINISTRATIVE -> "区域位置"
+            CoordinateKind.PLACE -> "地点位置"
+            CoordinateKind.DEVICE -> "设备位置"
+            CoordinateKind.UNKNOWN -> if (isPreciseLocation) "坐标位置" else "城市位置"
+        }
+
+    val hasMeasuredPrecision: Boolean
+        get() = coordinateKind == CoordinateKind.DEVICE && precisePermissionGranted &&
+            locationAccuracyMeters?.let { it.isFinite() && it > 0f && it <= 100f } == true
 }
 
 // 以下模型全部 @Serializable：离线缓存（WeatherCache）按城市持久化最近一次 WeatherData（v0.0.4）
@@ -203,6 +228,9 @@ data class WeatherLocationMatch(
     val preciseGps: Boolean = false,
     val matchedLatitude: Double? = null,
     val matchedLongitude: Double? = null,
+    val dataResolution: String? = null,
+    val matchedRegionName: String? = null,
+    val providerCoordinateSystem: String? = null,
 )
 
 // 预警四档（国标蓝/黄/橙/红）
@@ -274,6 +302,10 @@ data class WeatherData(
     val rainDistanceKm: Double? = null,
     val dataSource: String? = null,
     val blockSources: Map<String, String> = emptyMap(),
+    // 配置摘要只含单向散列，绝不持久化凭据；旧缓存保持可读。
+    val configurationFingerprint: String? = null,
+    val moduleEvidence: Map<String, WeatherModuleEvidence> = emptyMap(),
+    val sourceDiagnostics: Map<String, String> = emptyMap(),
     // 参与本次融合的源（仅枳生天气源输出时非空；OM 多模型成员归并为 "OPEN-METEO"）。
     // 默认空保证旧缓存 JSON 无损反序列化。
     val fusionSources: List<String> = emptyList(),
@@ -296,6 +328,16 @@ data class WeatherData(
         return daily.filter { !cityDate(it.dateMillis, utcOffsetSeconds).isBefore(today) }
     }
 }
+
+@Serializable
+data class WeatherModuleEvidence(
+    val source: String,
+    val observationTime: Long? = null,
+    val fetchedAt: Long? = null,
+    val requestedLatitude: Double? = null,
+    val requestedLongitude: Double? = null,
+    val locationScope: String = "请求地点",
+)
 
 fun cityZone(utcOffsetSeconds: Int?): ZoneId =
     utcOffsetSeconds

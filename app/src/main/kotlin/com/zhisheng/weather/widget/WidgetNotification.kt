@@ -26,9 +26,12 @@ import java.util.Locale
 object WidgetNotification {
     const val CHANNEL = "weather_widget_live"
     fun isEnabled(context: Context) = WidgetStore.notification(context).enabled
-    suspend fun refresh(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun refresh(context: Context, runReminderChecks: Boolean = true) = withContext(Dispatchers.IO) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return@withContext
-        WeatherAlertNotification.refresh(context)
+        if (runReminderChecks) {
+            WeatherAlertNotification.refresh(context)
+            com.zhisheng.weather.data.WeatherReminderNotification.refresh(context)
+        }
         val setting = WidgetStore.notification(context)
         if (!setting.enabled) { manager.cancel(R.id.widget_notification_id); return@withContext }
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@withContext

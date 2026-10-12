@@ -39,9 +39,8 @@ class AppIconTest {
             .first { it.getAttribute("android:name") == ".MainActivity" }
         assertEquals(0, main.getElementsByTagName("category").length)
         assertTrue(settings.contains("\"应用图标\""))
-        assertTrue(settings.contains("\"天气娘\" to \"character\""))
-        assertTrue(settings.contains("\"深色\" to \"dark\""))
-        assertTrue(settings.contains("\"浅色\" to \"light\""))
+        assertEquals(listOf("天气娘" to "character", "深色" to "dark", "浅色" to "light", "简约" to "minimal"),
+            AppIconStyle.entries.map { it.cn to it.key })
         assertTrue(settings.contains("AppIconManager.apply(context, selected)"))
     }
 

@@ -39,6 +39,7 @@ internal fun CityWeatherList(ui: HomeUiState, modifier: Modifier, onAdd: () -> U
     val glass = isPhosphorVista && LocalHomeSurfaceStyle.current == HomeSurfaceStyle.FRAGRANCE_GLASS
     val weather = remember { mutableStateMapOf<String, CachedWeather>() }
     val located by CityRepository.locatedCityKey.collectAsState(initial = null)
+    val modules by SettingsRepository.moduleSources.collectAsState(initial = ModuleSourcePolicy())
     var editing by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
     val visibleCityKeys by remember(list) {
@@ -48,29 +49,35 @@ internal fun CityWeatherList(ui: HomeUiState, modifier: Modifier, onAdd: () -> U
     }
     val clock = if (LocalVistaSoftGlow.current) LocalVistaGlowPhase.current
         else rememberVistaGlowPhase(active && ui.prefs.ambience != AmbienceLevel.OFF)
-    LaunchedEffect(active, ui.cities.map { it.locationKey }, ui.weather, ui.sourcePref) {
+    LaunchedEffect(active, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) }, ui.weather, ui.sourcePref, modules) {
         if (!active) return@LaunchedEffect
         val now = System.currentTimeMillis()
+        suspend fun usable(city: City, entry: CachedWeather?, at: Long): CachedWeather? =
+            usableCityWeatherCache(entry, ui.sourcePref, at,
+                configurationCompatible = entry?.let { WeatherRepository.cacheCompatible(it.data, ui.sourcePref) } ?: false, city = city)
         val savedKeys = ui.cities.map { it.locationKey }.toSet()
         weather.keys.toList().forEach { key ->
-            if (key !in savedKeys || usableCityWeatherCache(weather[key], ui.sourcePref, now) == null) weather.remove(key)
+            val city = ui.cities.firstOrNull { it.locationKey == key }
+            if (key !in savedKeys || city == null || usable(city, weather[key], now) == null) weather.remove(key)
         }
         ui.cities.forEach { city ->
             val disk = try {
-                withContext(Dispatchers.IO) { WeatherCache.load(context, city.locationKey) }
+                withContext(Dispatchers.IO) { WeatherCache.load(context, city) }
             } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
-            val cached = chooseCityWeatherCache(weather[city.locationKey], disk, ui.sourcePref, now)
+            val cached = listOfNotNull(usable(city, weather[city.locationKey], now), usable(city, disk, now)).maxByOrNull { it.savedAtMillis }
             if (cached == null) weather.remove(city.locationKey) else weather[city.locationKey] = cached
         }
         ui.selectedCity?.let { city -> ui.weather?.let { data ->
             val live = CachedWeather(data, data.fetchedAt ?: data.updateTime ?: now)
-            usableCityWeatherCache(live, ui.sourcePref, now)?.let { weather[city.locationKey] = it }
+            usable(city, live, now)?.let { weather[city.locationKey] = it }
         } }
-        ui.cities.filter { cityWeatherNeedsRefresh(weather[it.locationKey], ui.sourcePref, now) }.forEach { city ->
+        ui.cities.forEach { city ->
+            val existing = usable(city, weather[city.locationKey], now)
+            if (existing != null && now - existing.savedAtMillis < CITY_WEATHER_REFRESH_MS) return@forEach
             try {
                 val result = withTimeoutOrNull(15_000) { WeatherRepository.fetchWeather(city, ui.sourcePref) }
                 val fetchedAt = System.currentTimeMillis()
-                val entry = result?.let { usableCityWeatherCache(CachedWeather(it, fetchedAt), ui.sourcePref, fetchedAt) }
+                val entry = result?.let { usable(city, CachedWeather(it, fetchedAt), fetchedAt) }
                 if (entry != null) {
                     weather[city.locationKey] = entry
                     withContext(Dispatchers.IO) { WeatherCache.save(context, city.locationKey, entry.data) }

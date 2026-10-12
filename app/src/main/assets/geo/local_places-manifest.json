@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "datasetVersion": "geonames-20261011",
+  "count": 3749,
+  "sha256": "620a42944b05ce16aae86ccd7e27a320405f1cb930e6db9b555cfca1f2de1a3b",
+  "bytes": 911711,
+  "license": "CC-BY-4.0",
+  "attribution": "GeoNames",
+  "source": "https://download.geonames.org/export/dump/",
+  "inputs": {
+    "CN.zip": "09dd67aaac8f6f9920a08eb8f2a61d8203aec96160053be9c658a4ed329a1916",
+    "HK.zip": "4f7088d3275880a36ef6959fcbb4a528e88c52d5b75a665e1273034622fd5090",
+    "MO.zip": "02e9541fc26bc48f301e2c5c8bbd6b3cbd0abc437395625cffe65341219a4188",
+    "TW.zip": "f72dcf2985ed61e0963e496745ee0475b8426ff39597b30cb3c700ab992ce87f"
+  },
+  "scope": "ADM1/ADM2/ADM3 records in pinned CN/HK/MO/TW exports; representative points, no boundaries or POIs; not a complete official subdivision list",
+  "profile": {
+    "CN": {
+      "records": 3329,
+      "withoutChineseName": 43,
+      "missingParent": 85
+    },
+    "HK": {
+      "records": 18,
+      "withoutChineseName": 7,
+      "missingParent": 0
+    },
+    "MO": {
+      "records": 8,
+      "withoutChineseName": 1,
+      "missingParent": 0
+    },
+    "TW": {
+      "records": 394,
+      "withoutChineseName": 0,
+      "missingParent": 0
+    }
+  }
+}

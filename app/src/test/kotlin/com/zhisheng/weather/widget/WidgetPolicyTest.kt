@@ -31,7 +31,7 @@ class WidgetPolicyTest {
     }
     @Test fun invalidSettingsCannotCreateUnboundedLayoutsOrDuplicateMetrics() {
         val cfg = WidgetConfig(opacity = -1, textScale = 100f, intervalMinutes = 1, iconSet = "unknown", metrics = listOf("wind", "wind", "bogus", "air", "feels", "uv")).normalized()
-        assertEquals(0, cfg.opacity); assertEquals(1.25f, cfg.textScale); assertEquals(30, cfg.intervalMinutes)
+        assertEquals(0, cfg.opacity); assertEquals(2f, cfg.textScale); assertEquals(30, cfg.intervalMinutes)
         assertEquals(WidgetIconSet.WUJIE.key, cfg.iconSet)
         assertEquals(listOf("wind", "air", "feels", "uv"), cfg.metrics)
     }

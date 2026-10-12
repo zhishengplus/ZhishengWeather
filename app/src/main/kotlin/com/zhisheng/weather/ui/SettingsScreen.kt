@@ -161,6 +161,7 @@ fun SettingsScreen(
     onShowWhatsNew: () -> Unit,
     availableUpdate: AppUpdateInfo?,
     initialSection: Int = 0,
+    activeWeather: com.zhisheng.weather.model.WeatherData? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -186,11 +187,11 @@ fun SettingsScreen(
     val showTyphoon by SettingsRepository.showTyphoon.collectAsState(initial = true)
     val source by SettingsRepository.sourcePref.collectAsState(initial = SourcePref.AUTO)
     val developerMode by SettingsRepository.developerMode.collectAsState(initial = false)
-    val ambience by SettingsRepository.ambience.collectAsState(initial = AmbienceLevel.VIVID)
-    val livingSky by SettingsRepository.livingSky.collectAsState(initial = false)
+    val ambience by SettingsRepository.ambience.collectAsState(initial = AmbienceLevel.INTENSE)
+    val livingSky by SettingsRepository.livingSky.collectAsState(initial = true)
     val scanlines by SettingsRepository.scanlines.collectAsState(initial = true)
     val softGlow by SettingsRepository.softGlow.collectAsState(initial = false)
-    val softGlowLevel by SettingsRepository.softGlowLevel.collectAsState(initial = com.zhisheng.weather.data.SoftGlowLevel.SUBTLE)
+    val softGlowLevel by SettingsRepository.softGlowLevel.collectAsState(initial = com.zhisheng.weather.data.SoftGlowLevel.FLOWING)
     val usageStatistics by SettingsRepository.usageStatistics.collectAsState(initial = false)
     val locationEnabled by SettingsRepository.locationEnabled.collectAsState(initial = false)
     val preciseLocationEnabled by SettingsRepository.preciseLocationEnabled.collectAsState(initial = false)
@@ -225,6 +226,8 @@ fun SettingsScreen(
     val caiyunRt by SecretStore.caiyunRuntimeFlow.collectAsState(initial = SecretStore.caiyunRuntime)
     val amapRt by SecretStore.amapRuntimeFlow.collectAsState(initial = SecretStore.amapRuntime)
     val baiduRt by SecretStore.baiduRuntimeFlow.collectAsState(initial = SecretStore.baiduRuntime)
+    val seniverseRt by SecretStore.seniverseRuntimeFlow.collectAsState(initial = SecretStore.seniverseRuntime)
+    val mojiRt by SecretStore.mojiRuntimeFlow.collectAsState(initial = SecretStore.mojiRuntime)
 
     var permDenied by remember { mutableStateOf(false) }
     // 0.0.9-debug 修复：原为普通 remember，Activity 配置变更重建时向导弹窗
@@ -238,7 +241,10 @@ fun SettingsScreen(
     var showCommunityGroup by remember { mutableStateOf(false) }
     var showAppUpdate by remember { mutableStateOf(false) }
     var developerToolsExpanded by rememberSaveable { mutableStateOf(false) }
-    var sourcePickerExpanded by rememberSaveable { mutableStateOf(false) }
+    var showSourceManager by rememberSaveable { mutableStateOf(false) }
+    var sourceManagerModules by rememberSaveable { mutableStateOf(false) }
+    var showSourceComparison by remember { mutableStateOf(false) }
+    val comparisonCity by com.zhisheng.weather.data.CityRepository.selectedCity.collectAsState(initial = null)
     var moduleOrderExpanded by rememberSaveable { mutableStateOf(false) }
     var telemetryItemsExpanded by rememberSaveable { mutableStateOf(false) }
     var lifeIndexItemsExpanded by rememberSaveable { mutableStateOf(false) }
@@ -362,34 +368,13 @@ fun SettingsScreen(
             )
             InlineGroupLabel("天气数据")
             CardBox {
-                if (isPhosphorVista) {
-                    InfoRow("天气来源", if (source == SourcePref.AUTO) "自动选择" else source.cn,
-                        onClick = { sourcePickerExpanded = !sourcePickerExpanded })
-                    Text("${activeCityName ?: "当前城市"} · ${if (sourceLoading) "天气更新中" else sourceName(activeSource)?.let { "当前使用 $it" } ?: "等待天气数据"}",
-                        fontSize = 12.sp, lineHeight = 18.sp, color = ZhishengTextSecondary,
-                        modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 16.dp))
-                }
-                if (!isPhosphorVista || sourcePickerExpanded) {
-                if (isPhosphorVista) {
-                    SettingsDivider()
-                    Text(sourceHint(source, activeSource, activeSupplementSources, activeCityName, sourceLoading),
-                        fontSize = 12.sp, lineHeight = 18.sp, color = ZhishengTextSecondary,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp))
-                }
-                listOf(SourcePref.AUTO, SourcePref.ZHISHENG, SourcePref.XIAOMI, SourcePref.NMC, SourcePref.OPEN_METEO).forEachIndexed { i, p ->
-                    if (i > 0) SettingsDivider()
-                    SourceRow(
-                        pref = p,
-                        description = sourceDescription(p),
-                        selected = source == p,
-                        status = sourceStatus(p, source == p, activeSource, sourceLoading),
-                        onClick = { scope.launch { SettingsRepository.setSourcePref(p) } },
-                    )
-                }
-                }
+                InfoRow("天气来源", if (source == SourcePref.AUTO) "自动选择" else source.cn,
+                    onClick = { sourceManagerModules = false; showSourceManager = true })
+                Text("${if (sourceLoading) "天气更新中" else sourceName(activeSource)?.let { "当前使用 $it" } ?: "等待天气数据"} · 可按模块设置",
+                    fontSize = 12.sp, lineHeight = 18.sp, color = ZhishengTextSecondary,
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 16.dp))
             }
 
-            Spacer(Modifier.height(8.dp))
             InlineGroupLabel(
                 "位置服务",
                 if (locationEnabled) "已开启 · 仅在打开时复核" else "已关闭 · 不读取位置权限",
@@ -410,7 +395,7 @@ fun SettingsScreen(
                     ToggleRow(
                         "街道级精确定位",
                         if (preciseLocationEnabled) {
-                            "开启·定位时可选择精确位置；识别失败自动回退到城市"
+                            "开启·系统定位与街道识别无需 Key；精度不足保留坐标"
                         } else {
                             "关闭·仅使用城市级大致位置"
                         },
@@ -472,39 +457,24 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            InlineGroupLabel("高级接入", "自有数据源与效果预览")
+            InlineGroupLabel("数据接入", "自有服务凭据保存在本机")
             CardBox {
                 // 高级选项只在启用时展开，常用设置保持在前。
                 ToggleRow(
                     "开发者模式",
-                    if (developerMode) "已开启 · 可配置彩云、和风及地理服务" else "配置自有天气与地理服务凭据",
+                    if (developerMode) "已开启 · 管理个人天气与地理服务" else "配置自有天气与地理服务凭据",
                     developerMode,
                 ) {
                     if (developerMode) developerToolsExpanded = false
                     scope.launch { SettingsRepository.setDeveloperMode(!developerMode) }
                 }
                 if (!isPhosphorVista || developerMode) {
-                listOf(SourcePref.CAIYUN, SourcePref.QWEATHER).forEach { p ->
-                    SettingsDivider()
-                    SourceRow(
-                        pref = p,
-                        description = sourceDescription(p),
-                        selected = source == p,
-                        status = if (developerMode) {
-                            sourceStatus(p, source == p, activeSource, sourceLoading)
-                        } else {
-                            "需开启" to false
-                        },
-                        enabled = developerMode,
-                        onClick = { scope.launch { SettingsRepository.setSourcePref(p) } },
-                    )
-                }
                 SettingsDivider()
                 ActionRow(
                     label = if (developerToolsExpanded) {
-                        "> 收起开发者工具"
+                        "> 收起接入管理"
                     } else {
-                        if (ReleaseFeatures.weatherAtmosphere) "> 数据源接入 / 氛围实验室" else "> 数据源接入"
+                        "> 管理自有服务接入"
                     },
                     enabled = developerMode,
                     color = ZhishengCyan,
@@ -538,7 +508,7 @@ fun SettingsScreen(
                     ) { scope.launch { SecretStore.clearQw() } }
                     SettingsDivider()
                     ActionRow(
-                        label = if (amapRt.ready) "> 高德地理服务 · 已配置 · 重新配置" else "> 高德地理服务 · 接入",
+                        label = if (amapRt.ready) "> 高德服务 · 已配置 · 重新配置" else "> 高德服务 · 接入",
                         enabled = true,
                         color = ZhishengCyan,
                     ) { wizard = ProviderWizardKind.AMAP }
@@ -550,7 +520,7 @@ fun SettingsScreen(
                     ) { scope.launch { SecretStore.clearAmap() } }
                     SettingsDivider()
                     ActionRow(
-                        label = if (baiduRt.ready) "> 百度地理服务 · 已配置 · 重新配置" else "> 百度地理服务 · 接入",
+                        label = if (baiduRt.ready) "> 百度服务 · 已配置 · 重新配置" else "> 百度服务 · 接入",
                         enabled = true,
                         color = ZhishengCyan,
                     ) { wizard = ProviderWizardKind.BAIDU }
@@ -560,16 +530,15 @@ fun SettingsScreen(
                         enabled = baiduRt.ready,
                         color = ZhishengOrange,
                     ) { scope.launch { SecretStore.clearBaidu() } }
-                    if (ReleaseFeatures.weatherAtmosphere) {
                     SettingsDivider()
-                    InlineGroupLabel("效果预览", "模拟数据不会写入主页")
+                    ActionRow(if (seniverseRt.ready) "> 心知天气 · 已配置 · 重新配置" else "> 心知天气 · 个人免费版接入", true, ZhishengCyan) { wizard = ProviderWizardKind.SENIVERSE }
                     SettingsDivider()
-                    ActionRow(
-                        label = "> 氛围实验室 · 预览全部天气效果",
-                        enabled = true,
-                        color = ZhishengMint,
-                    ) { onAtmosphereLab() }
-                    }
+                    ActionRow("> 清除本机心知 Key", seniverseRt.ready, ZhishengOrange) { scope.launch { SecretStore.clearSeniverse() } }
+                    SettingsDivider()
+                    ActionRow(if (mojiRt.ready) "> 墨迹天气 · 已配置 · 重新配置" else "> 墨迹天气 · 个人订阅接入", true, ZhishengCyan) { wizard = ProviderWizardKind.MOJI }
+                    SettingsDivider()
+                    ActionRow("> 清除本机墨迹凭据", mojiRt.ready, ZhishengOrange) { scope.launch { SecretStore.clearMoji() } }
+
 
                 }
                 }
@@ -854,14 +823,16 @@ fun SettingsScreen(
                     }
                 }
                 SettingsDivider()
+                if (developerMode && ReleaseFeatures.weatherAtmosphere) {
+                    ActionRow(label = "天气效果预览", enabled = true, color = ZhishengCyan) { onAtmosphereLab() }
+                    SettingsDivider()
+                }
                 if (!isPhosphorVista) ToggleRow("CRT 扫描线", "整屏细横纹，终端质感", scanlines) {
                     scope.launch { SettingsRepository.setScanlines(!scanlines) }
                 }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-            InlineGroupLabel("设备与桌面")
             InlineGroupLabel("横屏待机")
             CardBox {
                 ToggleRow("横屏待机界面", "开启后旋转显示桌面时钟；关闭后锁定竖屏", landscapeStandby) {
@@ -898,6 +869,8 @@ fun SettingsScreen(
                     )
                 }
             }
+            InlineGroupLabel("刷新与天气提醒")
+            CardBox { AutomationSettingsPanel(showHeader = false) }
             InlineGroupLabel("小组件与通知栏")
             CardBox {
                 ActionRow(
@@ -926,18 +899,20 @@ fun SettingsScreen(
             }
             InlineGroupLabel("图标与屏幕")
             CardBox {
-                SegmentRow(
-                    "应用图标",
-                    listOf("天气娘" to "character", "深色" to "dark", "浅色" to "light"),
-                    appIconStyle.key,
-                    hint = "深色与浅色随主题联动；天气娘始终保持，不跟随主题",
-                ) { value ->
+                val iconOptions = AppIconStyle.entries.map { it.cn to it.key }
+                val selectIcon: (String) -> Unit = { value ->
                     val selected = AppIconStyle.from(value)
                     scope.launch {
                         if (AppIconManager.apply(context, selected)) {
                             SettingsRepository.setAppIconStyle(selected)
                         }
                     }
+                }
+                val iconHint = "深色与浅色随主题联动；天气娘和简约图标独立保持"
+                if (isPhosphorVista) {
+                    SettingsChoiceRow("应用图标", iconOptions, appIconStyle.key, iconHint, selectIcon)
+                } else {
+                    SegmentRow("应用图标", iconOptions, appIconStyle.key, iconHint, onPick = selectIcon)
                 }
                 SettingsDivider()
                 ToggleRow("常亮屏幕", "看天气时不自动息屏", keepScreenOn) {
@@ -988,7 +963,7 @@ fun SettingsScreen(
                 SettingsDivider()
                 LinkRow(
                     "用户交流 QQ 群",
-                    CommunityQqGroup,
+                    "2 群 · $CommunityQqGroup",
                     accent = ZhishengMint,
                     forceSingleLine = true,
                 ) { showCommunityGroup = true }
@@ -1017,6 +992,8 @@ fun SettingsScreen(
                     }
                 }
             }
+            InlineGroupLabel("帮助与诊断")
+            CardBox { Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) { WeatherDiagnosticsButton() } }
             InlineGroupLabel("隐私与权限")
             CardBox {
                 ToggleRow("设备与版本统计", "", usageStatistics, onInfo = { showStatisticsInfo = true }) {
@@ -1024,6 +1001,8 @@ fun SettingsScreen(
                 }
                 SettingsDivider()
                 InfoRow("权限", "网络；位置可选；安装更新时才调用系统安装")
+                SettingsDivider()
+                InfoRow("位置与搜索", "城市与区县可离线搜索；系统地址服务可能联网。个人高德 Key 可增强街道和地点，关闭或失效时回退系统服务。")
             }
             Spacer(Modifier.height(20.dp))
             Text(
@@ -1033,7 +1012,7 @@ fun SettingsScreen(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
             Text(
-                "数据来源：和风 / 彩云 / 小米公开接口 / 中央气象台 / 腾讯天气 / 中国天气网 / Open-Meteo / RainViewer / 枳生天气源（多源融合）",
+                "数据来源：和风 / 彩云 / 心知 / 墨迹（个人接入） / 小米公开接口 / 中央气象台 / 腾讯天气 / 中国天气网 / Open-Meteo / RainViewer / GeoNames（地名，CC BY 4.0） / 枳生天气源（多源融合）",
                 style = MaterialTheme.typography.labelSmall,
                 color = ZhishengTextTertiary.copy(alpha = 0.75f),
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp, bottom = 12.dp),
@@ -1062,7 +1041,27 @@ fun SettingsScreen(
     }
     }
 
+    if (showSourceManager) WeatherSourceManager(
+        primary = source, weather = activeWeather, comparisonAvailable = comparisonCity != null,
+        initialModules = sourceManagerModules,
+        onDismiss = { showSourceManager = false },
+        onPrimarySelected = { selected -> SettingsRepository.setSourcePref(selected) },
+        onCompare = { if (comparisonCity != null) { sourceManagerModules = true; showSourceManager = false; showSourceComparison = true } },
+        onManageProviders = {
+            showSourceManager = false
+            developerToolsExpanded = true
+            scope.launch {
+                repeat(2) { androidx.compose.runtime.withFrameNanos { } }
+                // Data access is the last group. Wait for its expanded layout, then
+                // reveal the actual management actions instead of an already-visible label.
+                dataScrollState.animateScrollTo(dataScrollState.maxValue)
+            }
+        },
+    )
     if (showLivingSkyPreview) LivingSkyPreviewDialog { showLivingSkyPreview = false }
+    if (showSourceComparison) comparisonCity?.let { city ->
+        WeatherSourceComparison(city = city, onDismiss = { showSourceComparison = false; showSourceManager = true })
+    }
     wizard?.let { kind ->
         ProviderWizard(kind = kind, onClose = { wizard = null })
     }
@@ -1237,6 +1236,12 @@ private fun sourceDescription(p: SourcePref): String = when (p) {
     SourcePref.CAIYUN -> if (CaiyunApi.enabled) "Token 已配置·本机接入" else "在下方填写 Token"
     SourcePref.XIAOMI -> "免配置·国内覆盖"
     SourcePref.OPEN_METEO -> "免配置·全球覆盖"
+    SourcePref.AMAP -> "自有 Web 服务 Key · 区县实况与每日预报"
+    SourcePref.BAIDU -> "自有 AK 与天气权限 · 区县天气，字段依权限"
+    SourcePref.TENCENT -> "免配置 · 城市天气与日预报，网站通道"
+    SourcePref.WEATHERCN -> "免配置 · 城市实况与当日预报"
+    SourcePref.SENIVERSE -> "个人免费 Key · 城市实况、3天预报与基础指数"
+    SourcePref.MOJI -> "个人 AppCode · 按订阅返回实况与日预报"
 }
 
 private fun sourceStatus(
@@ -1255,6 +1260,11 @@ private fun sourceStatus(
         SourcePref.CAIYUN -> if (CaiyunApi.enabled) "已配置" to true else "未配置" to false
         SourcePref.XIAOMI -> "可用" to true
         SourcePref.OPEN_METEO -> "可用" to true
+        SourcePref.AMAP -> if (SecretStore.amapRuntime.ready) "已配置" to true else "未配置" to false
+        SourcePref.BAIDU -> if (SecretStore.baiduRuntime.ready) "已配置" to true else "未配置" to false
+        SourcePref.TENCENT, SourcePref.WEATHERCN -> "可用" to true
+        SourcePref.SENIVERSE -> if (SecretStore.seniverseRuntime.ready) "已配置" to true else "未配置" to false
+        SourcePref.MOJI -> if (SecretStore.mojiRuntime.ready) "已配置" to true else "未配置" to false
     }
 }
 
@@ -1266,6 +1276,12 @@ private fun sourceMatches(pref: SourcePref, activeSource: String?): Boolean = wh
     SourcePref.OPEN_METEO -> activeSource == "OPEN-METEO"
     SourcePref.ZHISHENG -> activeSource == "ZHISHENG"
     SourcePref.AUTO -> false
+    SourcePref.AMAP -> activeSource == "AMAP"
+    SourcePref.BAIDU -> activeSource == "BAIDU"
+    SourcePref.TENCENT -> activeSource == "TENCENT"
+    SourcePref.WEATHERCN -> activeSource == "WEATHERCN"
+    SourcePref.SENIVERSE -> activeSource == "SENIVERSE"
+    SourcePref.MOJI -> activeSource == "MOJI"
 }
 
 private fun sourceName(activeSource: String?): String? = when (activeSource) {
@@ -1275,6 +1291,12 @@ private fun sourceName(activeSource: String?): String? = when (activeSource) {
     "OPEN-METEO" -> "Open-Meteo"
     "NMC" -> "中央气象台"
     "ZHISHENG" -> "枳生天气源"
+    "AMAP" -> "高德天气"
+    "BAIDU" -> "百度天气"
+    "TENCENT" -> "腾讯天气"
+    "WEATHERCN" -> "中国天气网"
+    "SENIVERSE" -> "心知天气"
+    "MOJI" -> "墨迹天气"
     else -> activeSource
 }
 

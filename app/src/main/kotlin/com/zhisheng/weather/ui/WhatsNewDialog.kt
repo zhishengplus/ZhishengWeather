@@ -47,7 +47,8 @@ import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import com.zhisheng.weather.ui.theme.isPhosphorVista
 import kotlinx.coroutines.launch
 
-internal const val WhatsNewVersion = "0.1.5-beta10.3-public"
+internal const val WhatsNewVersion = "0.1.5-beta10.5"
+internal val WhatsNewVersionRange = "10.3 → 10.5"
 internal const val WhatsNewPreferenceFile = "zhisheng_whats_new"
 internal const val WhatsNewSeenKey = "last_seen_version"
 
@@ -97,7 +98,7 @@ internal fun WhatsNewDialogContent(
                     Text("枳生天气", color = p.textSecondary, fontSize = 13.sp, fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 }
-                Text("BETA 10.3", color = p.cyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                Text("BETA ${WhatsNewVersion.substringAfter("beta")}", color = p.cyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(p.cyan.copy(alpha = .07f))
                         .padding(horizontal = 9.dp, vertical = 6.dp))
                 if (largeText) Spacer(Modifier.weight(1f))
@@ -125,7 +126,7 @@ internal fun WhatsNewDialogContent(
                             Text("更新说明", color = p.text, fontSize = 22.sp, lineHeight = 30.sp,
                                 fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.SansSerif,
                                 modifier = Modifier.weight(1f).semantics { heading() })
-                            Text("10.1 → 10.3", color = p.cyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Text(WhatsNewVersionRange, color = p.cyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                         }
                     } else {
                     Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 20.dp, top = 16.dp, bottom = 22.dp),
@@ -135,10 +136,10 @@ internal fun WhatsNewDialogContent(
                                 fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.SansSerif,
                                 modifier = Modifier.semantics { heading() })
                             Spacer(Modifier.height(10.dp))
-                            Text("10.1  →  10.3", color = p.cyan, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                            Text(WhatsNewVersionRange, color = p.cyan, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
                             if (!compactHeader) {
                                 Spacer(Modifier.height(6.dp))
-                                Text("最近的变化，都在这里。", color = p.textSecondary, fontSize = 13.sp,
+                                Text("本次新增、改进与问题修正。", color = p.textSecondary, fontSize = 13.sp,
                                     lineHeight = 20.sp, fontFamily = FontFamily.SansSerif)
                             }
                         }
@@ -157,15 +158,15 @@ internal fun WhatsNewDialogContent(
                             Text("这次，先看看这些", color = p.textSecondary, fontSize = 12.sp,
                                 fontFamily = FontFamily.SansSerif)
                             Spacer(Modifier.height(10.dp))
-                            Text("桌面小组件，更清楚了", color = p.text, fontSize = 17.sp, lineHeight = 25.sp,
+                            Text("把日常操作补完整", color = p.text, fontSize = 17.sp, lineHeight = 25.sp,
                                 fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.SansSerif)
                             Spacer(Modifier.height(5.dp))
-                            Text("比例与字号一起调整。\n摘要能换行，点击更顺手。", color = p.textSecondary,
+                            Text("组件编辑更清楚，预报按日期查看。\n提醒、回看和诊断补齐操作与状态。", color = p.textSecondary,
                                 fontSize = 13.sp, lineHeight = 21.sp, fontFamily = FontFamily.SansSerif)
                             Spacer(Modifier.height(12.dp))
                             HorizontalDivider(color = p.cyan.copy(alpha = .13f))
                             Spacer(Modifier.height(12.dp))
-                            Text("收藏地点更稳 · 天气读数更一致", color = p.cyan, fontSize = 12.sp,
+                            Text("字号与空间一起适配 · 缺失数据如实说明", color = p.cyan, fontSize = 12.sp,
                                 lineHeight = 19.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.SansSerif)
                         }
                     }
@@ -222,6 +223,8 @@ internal fun WhatsNewDialogContent(
 private fun ReleaseSection(section: ReleaseNotesSection) {
     val p = LocalZhishengPalette.current
     val icon = when (section.id) {
+        "sources" -> R.drawable.ph_cloud
+        "refresh" -> R.drawable.ph_clock
         "widgets" -> R.drawable.ph_cloud
         "cities" -> R.drawable.ph_map_pin
         "weather" -> R.drawable.ph_cloud_rain

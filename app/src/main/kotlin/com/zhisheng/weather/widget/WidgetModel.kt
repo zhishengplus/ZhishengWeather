@@ -24,7 +24,7 @@ enum class WidgetIconSet(val key: String, val title: String, val subtitle: Strin
     companion object { fun from(value: String?) = entries.firstOrNull { it.key == value } ?: WUJIE }
 }
 internal const val WidgetMinimumNumberScale = .85f
-internal const val WidgetMaximumNumberScale = 1.25f
+internal const val WidgetMaximumNumberScale = 2f
 internal fun normalizedWidgetNumberScale(value: Float): Float =
     if (value.isFinite()) value.coerceIn(WidgetMinimumNumberScale, WidgetMaximumNumberScale) else 1f
 
@@ -37,6 +37,11 @@ data class WidgetConfig(
     val text: String = "auto",
     val opacity: Int = 88,
     val textScale: Float = 1f,
+    val detailScale: Float = 1f,
+    val boldText: Boolean = false,
+    val showClock: Boolean = true,
+    val showForecast: Boolean = true,
+    val showPrecipitation: Boolean = false,
     val protectText: Boolean = true,
     val intervalMinutes: Int = 30,
     val showLunar: Boolean = true,
@@ -53,6 +58,7 @@ data class WidgetConfig(
     val clickWeather: String = "app",
 ) {
     fun normalized() = copy(opacity = opacity.coerceIn(0, 100), textScale = normalizedWidgetNumberScale(textScale),
+        detailScale = if (detailScale.isFinite()) detailScale.coerceIn(.85f, 1.5f) else 1f,
         intervalMinutes = intervalMinutes.coerceIn(30, 120),
         iconSet = WidgetIconSet.from(iconSet).key,
         // The removed alarm display left configs whose time tap pointed at "alarm";
@@ -64,6 +70,9 @@ data class WidgetConfig(
         fun defaults(style: WidgetStyle) = WidgetConfig(theme = if (style == WidgetStyle.CLASSIC) "dark" else "light")
     }
 }
+internal fun widgetReadablePreset(config: WidgetConfig) = config.copy(opacity = 100, text = "auto", protectText = true,
+    textScale = maxOf(config.textScale, 1f), detailScale = maxOf(config.detailScale, 1.15f), boldText = true).normalized()
+internal fun widgetTransparentPreset(config: WidgetConfig) = config.copy(opacity = 0, protectText = true).normalized()
 val metricLabels = linkedMapOf("feels" to "体感", "humidity" to "湿度", "wind" to "风力", "air" to "空气", "pressure" to "气压", "uv" to "紫外线", "rain" to "降水概率")
 internal fun migrateWeatherClick(config: WidgetConfig, updated: Boolean): WidgetConfig =
     config.normalized()
@@ -74,6 +83,22 @@ internal fun migrateWeatherClick(config: WidgetConfig, updated: Boolean): Widget
 object WidgetStore {
     private val json = Json { ignoreUnknownKeys = true }
     private fun prefs(c: Context) = c.applicationContext.getSharedPreferences("widget_beta9", Context.MODE_PRIVATE)
+    private var weatherCacheMigrated = false
+    @Synchronized private fun weatherPrefs(c: Context): android.content.SharedPreferences {
+        val cache = c.applicationContext.getSharedPreferences("widget_weather_cache", Context.MODE_PRIVATE)
+        if (!weatherCacheMigrated) {
+            val old = prefs(c)
+            val entries = widgetWeatherCacheEntries(old.all)
+            val copied = cache.edit().apply {
+                entries.forEach { (key, value) -> if (!cache.contains(key)) putString(key, value) }
+            }.commit()
+            // Remove legacy cache only after the durable copy succeeded. Retrying
+            // cannot overwrite a newer snapshot or touch config/notification/pin.
+            if (copied) weatherCacheMigrated = old.edit().apply { entries.keys.forEach { remove(it) } }.commit()
+        }
+        return cache
+    }
+    internal fun migrateWeatherCache(c: Context) { weatherPrefs(c) }
     fun config(c: Context, id: Int, style: WidgetStyle = WidgetStyle.VISTA): WidgetConfig = runCatching {
         val p = prefs(c)
         p.getString("config_$id", null)?.let {
@@ -92,11 +117,11 @@ object WidgetStore {
     fun delete(c: Context, id: Int) { prefs(c).edit().remove("config_$id").remove("action_migrated_$id").remove("weather_click_20260943_$id").apply() }
     fun hasConfig(c: Context, id: Int) = prefs(c).contains("config_$id")
     fun recentCities(c: Context): List<City> = runCatching {
-        prefs(c).getString("recent_cities", null)?.let { json.decodeFromString<List<City>>(it) }
+        weatherPrefs(c).getString("recent_cities", null)?.let { json.decodeFromString<List<City>>(it) }
     }.getOrNull().orEmpty()
     fun rememberCity(c: Context, city: City) {
         val list = (listOf(city) + recentCities(c)).distinctBy { it.locationKey }.take(12)
-        prefs(c).edit().putString("recent_cities", json.encodeToString(kotlinx.serialization.builtins.ListSerializer(City.serializer()), list)).apply()
+        weatherPrefs(c).edit().putString("recent_cities", json.encodeToString(kotlinx.serialization.builtins.ListSerializer(City.serializer()), list)).apply()
     }
     fun preparePin(c: Context, style: WidgetStyle, kind: WidgetKind, config: WidgetConfig): String {
         val token = UUID.randomUUID().toString()
@@ -128,12 +153,12 @@ object WidgetStore {
         return entry.configApplied && WidgetRuntime.instance(c, id) != null
     }
     fun snapshot(c: Context, key: String): WidgetSnapshot? = runCatching {
-        prefs(c).getString("snapshot_$key", null)?.let { json.decodeFromString<WidgetSnapshot>(it) }
+        weatherPrefs(c).getString("snapshot_$key", null)?.let { json.decodeFromString<WidgetSnapshot>(it) }
     }.getOrNull()
     @Synchronized fun publish(c: Context, city: City, weather: WeatherData) {
         if (weather.current == null || weather.error != null || weather.fetchedAt == null) return
         if ((snapshot(c, city.locationKey)?.weather?.fetchedAt ?: 0L) > weather.fetchedAt) return
-        prefs(c).edit().putString("snapshot_${city.locationKey}", json.encodeToString(WidgetSnapshot.serializer(), WidgetSnapshot(city, weather))).apply()
+        weatherPrefs(c).edit().putString("snapshot_${city.locationKey}", json.encodeToString(WidgetSnapshot.serializer(), WidgetSnapshot(city, weather))).apply()
     }
     fun notification(c: Context): NotificationSettings = runCatching {
         prefs(c).getString("notification_v2", null)?.let { json.decodeFromString<NotificationSettings>(it) }

@@ -1,0 +1,17 @@
+Local administrative place search: GeoNames, https://www.geonames.org/
+Source: https://download.geonames.org/export/dump/
+License: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+Changes by ZhishengWeather: filtering ADM1/ADM2/ADM3 records, choosing Chinese
+aliases where available, resolving unambiguous parent codes, normalizing search
+terms and generating a compact offline index. Coordinates remain WGS84
+representative points; these are not device GPS measurements or boundaries.
+
+Snapshot identity, SHA-256, input hashes, scope and quality profile are recorded
+in geo/local_places-manifest.json. Rebuild with scripts/build_local_places.py
+using the exact pinned input files; normal Gradle builds never download them.
+
+GeoNames data is provided as is, without warranty of accuracy, timeliness or
+completeness. This dataset is not a complete official administrative registry.
+Database licensing is separate from the application's source code license.

@@ -94,6 +94,7 @@ private val sponsorRanking = listOf(
     "Mrmuscle",
     "ayida999",
     "关",
+    "AiFuL",
     "∮",
     "ScottZzz",
     "*年",
@@ -107,6 +108,7 @@ private val sponsorRanking = listOf(
     "亦世凡华",
     "llb",
     "屿光",
+    "阿良",
     "中未⬆️",
     "十三”画",
     "润物无声",
@@ -118,6 +120,7 @@ private val sponsorRanking = listOf(
     "烟花易冷",
     "Ali",
     "如此而已",
+    "小豪科1212",
 )
 
 // 固定席位：Sh4d0W 永远第 6 位，名次不随金额与时间变化。

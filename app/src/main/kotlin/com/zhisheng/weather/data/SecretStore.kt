@@ -3,6 +3,7 @@ package com.zhisheng.weather.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -75,6 +76,12 @@ object SecretStore {
     private val KEY_AMAP = stringPreferencesKey("amap_web_service_key")
     private val KEY_BAIDU = stringPreferencesKey("baidu_web_service_ak")
     private val KEY_RAINVIEWER = stringPreferencesKey("rainviewer_api_key")
+    private val KEY_SENIVERSE = stringPreferencesKey("seniverse_api_key")
+    private val KEY_MOJI_APP = stringPreferencesKey("moji_appcode")
+    private val KEY_MOJI_NOW_URL = stringPreferencesKey("moji_current_endpoint")
+    private val KEY_MOJI_NOW_TOKEN = stringPreferencesKey("moji_current_token")
+    private val KEY_MOJI_DAY_URL = stringPreferencesKey("moji_daily_endpoint")
+    private val KEY_MOJI_DAY_TOKEN = stringPreferencesKey("moji_daily_token")
 
     @Volatile var qwRuntime: QwRuntimeCreds = QwRuntimeCreds()
         private set
@@ -86,6 +93,27 @@ object SecretStore {
         private set
     @Volatile var rainviewerRuntime: RainviewerRuntimeCreds = RainviewerRuntimeCreds()
         private set
+    @Volatile var seniverseRuntime: SeniverseRuntimeCreds = SeniverseRuntimeCreds()
+        private set
+    @Volatile var mojiRuntime: MojiRuntimeCreds = MojiRuntimeCreds()
+        private set
+
+    private suspend fun editSecretContext(transform: suspend (MutablePreferences) -> Unit,
+        applyRuntime: () -> Unit) {
+        reminderDeliveryGate.changeContext {
+            store.edit(transform)
+            applyRuntime()
+        }
+    }
+
+    private fun <T> updateRuntime(next: T, current: () -> T, apply: (T) -> Unit) {
+        reminderDeliveryGate.updateSettings {
+            if (current() != next) reminderDeliveryGate.changeContextNow {
+                if (next is AmapRuntimeCreds || next is BaiduRuntimeCreds) PlaceConfigurationRevision.changed()
+                apply(next)
+            }
+        }
+    }
 
     fun init(context: Context) {
         val app = context.applicationContext
@@ -108,18 +136,22 @@ object SecretStore {
                         apiKey = prefs[KEY_QW_API].orEmpty().trim(),
                     ),
                 )
-                caiyunRuntime = CaiyunRuntimeCreds(prefs[KEY_CAIYUN].orEmpty().trim())
-                amapRuntime = AmapRuntimeCreds(prefs[KEY_AMAP].orEmpty().trim())
-                baiduRuntime = BaiduRuntimeCreds(prefs[KEY_BAIDU].orEmpty().trim())
-                rainviewerRuntime = RainviewerRuntimeCreds(prefs[KEY_RAINVIEWER].orEmpty().trim())
+                updateRuntime(CaiyunRuntimeCreds(prefs[KEY_CAIYUN].orEmpty().trim()), { caiyunRuntime }) { caiyunRuntime = it }
+                updateRuntime(AmapRuntimeCreds(prefs[KEY_AMAP].orEmpty().trim()), { amapRuntime }) { amapRuntime = it }
+                updateRuntime(BaiduRuntimeCreds(prefs[KEY_BAIDU].orEmpty().trim()), { baiduRuntime }) { baiduRuntime = it }
+                updateRuntime(RainviewerRuntimeCreds(prefs[KEY_RAINVIEWER].orEmpty().trim()), { rainviewerRuntime }) { rainviewerRuntime = it }
+                updateRuntime(SeniverseRuntimeCreds(prefs[KEY_SENIVERSE].orEmpty().trim()), { seniverseRuntime }) { seniverseRuntime = it }
+                updateRuntime(mojiFrom(prefs), { mojiRuntime }) { mojiRuntime = it }
             }
         }
     }
 
     private fun applyQw(creds: QwRuntimeCreds) {
-        qwRuntime = creds
-        QwAuth.invalidate()
-        QWeatherApi.invalidateClient()
+        reminderDeliveryGate.updateSettings {
+            if (qwRuntime != creds) reminderDeliveryGate.changeContextNow { PlaceConfigurationRevision.changed(); qwRuntime = creds }
+            QwAuth.invalidate()
+            QWeatherApi.invalidateClient()
+        }
     }
 
     val qwRuntimeFlow: Flow<QwRuntimeCreds> by lazy {
@@ -150,6 +182,35 @@ object SecretStore {
         store.data.map { RainviewerRuntimeCreds(it[KEY_RAINVIEWER].orEmpty().trim()) }.distinctUntilChanged()
     }
 
+    val seniverseRuntimeFlow: Flow<SeniverseRuntimeCreds> by lazy {
+        store.data.map { SeniverseRuntimeCreds(it[KEY_SENIVERSE].orEmpty().trim()) }.distinctUntilChanged()
+    }
+    private fun mojiFrom(prefs: Preferences): MojiRuntimeCreds = MojiRuntimeCreds(
+        prefs[KEY_MOJI_APP].orEmpty().trim(), prefs[KEY_MOJI_NOW_URL].orEmpty().trim(),
+        prefs[KEY_MOJI_NOW_TOKEN].orEmpty().trim(), prefs[KEY_MOJI_DAY_URL].orEmpty().trim(), prefs[KEY_MOJI_DAY_TOKEN].orEmpty().trim())
+    val mojiRuntimeFlow: Flow<MojiRuntimeCreds> by lazy { store.data.map(::mojiFrom).distinctUntilChanged() }
+
+    suspend fun saveSeniverse(key: String) {
+        val next = SeniverseRuntimeCreds(key.trim())
+        editSecretContext({ it[KEY_SENIVERSE] = next.apiKey }) { updateRuntime(next, { seniverseRuntime }) { seniverseRuntime = it } }
+    }
+    suspend fun clearSeniverse() = saveSeniverse("")
+    suspend fun currentSeniverse(): SeniverseRuntimeCreds = seniverseRuntimeFlow.first().also { loaded ->
+        updateRuntime(loaded, { seniverseRuntime }) { seniverseRuntime = it }
+    }
+    suspend fun saveMoji(candidate: MojiRuntimeCreds) {
+        val next = MojiRuntimeCreds(candidate.appCode.trim(), candidate.currentEndpoint.trim(), candidate.currentToken.trim(),
+            candidate.dailyEndpoint.trim(), candidate.dailyToken.trim())
+        editSecretContext({
+            it[KEY_MOJI_APP] = next.appCode; it[KEY_MOJI_NOW_URL] = next.currentEndpoint; it[KEY_MOJI_NOW_TOKEN] = next.currentToken
+            it[KEY_MOJI_DAY_URL] = next.dailyEndpoint; it[KEY_MOJI_DAY_TOKEN] = next.dailyToken
+        }) { updateRuntime(next, { mojiRuntime }) { mojiRuntime = it } }
+    }
+    suspend fun clearMoji() = saveMoji(MojiRuntimeCreds())
+    suspend fun currentMoji(): MojiRuntimeCreds = mojiRuntimeFlow.first().also { loaded ->
+        updateRuntime(loaded, { mojiRuntime }) { mojiRuntime = it }
+    }
+
     fun resolvedQw(): QwResolved {
         val rt = qwRuntime
         if (rt.ready) {
@@ -177,69 +238,75 @@ object SecretStore {
             privateKey = creds.privateKey.trim(),
             apiKey = creds.apiKey.trim(),
         )
-        store.edit {
+        editSecretContext({
             it[KEY_QW_HOST] = next.host
             it[KEY_QW_PROJECT] = next.projectId
             it[KEY_QW_KID] = next.kid
             it[KEY_QW_PRIV] = next.privateKey
             it[KEY_QW_API] = next.apiKey
-        }
-        applyQw(next)
+        }) { applyQw(next) }
     }
 
     suspend fun saveCaiyun(token: String) {
         val next = CaiyunRuntimeCreds(token.trim())
-        store.edit { it[KEY_CAIYUN] = next.token }
-        caiyunRuntime = next
+        editSecretContext({ it[KEY_CAIYUN] = next.token }) {
+            updateRuntime(next, { caiyunRuntime }) { caiyunRuntime = it }
+        }
     }
 
     suspend fun saveAmap(webServiceKey: String) {
         val next = AmapRuntimeCreds(webServiceKey.trim())
-        store.edit { it[KEY_AMAP] = next.webServiceKey }
-        amapRuntime = next
+        editSecretContext({ it[KEY_AMAP] = next.webServiceKey }) {
+            updateRuntime(next, { amapRuntime }) { amapRuntime = it }
+        }
     }
 
     suspend fun saveBaidu(webServiceAk: String) {
         val next = BaiduRuntimeCreds(webServiceAk.trim())
-        store.edit { it[KEY_BAIDU] = next.webServiceAk }
-        baiduRuntime = next
+        editSecretContext({ it[KEY_BAIDU] = next.webServiceAk }) {
+            updateRuntime(next, { baiduRuntime }) { baiduRuntime = it }
+        }
     }
 
     suspend fun saveRainviewer(apiKey: String) {
         val next = RainviewerRuntimeCreds(apiKey.trim())
-        store.edit { it[KEY_RAINVIEWER] = next.apiKey }
-        rainviewerRuntime = next
+        editSecretContext({ it[KEY_RAINVIEWER] = next.apiKey }) {
+            updateRuntime(next, { rainviewerRuntime }) { rainviewerRuntime = it }
+        }
     }
 
     suspend fun clearQw() {
-        store.edit {
+        editSecretContext({
             it.remove(KEY_QW_HOST)
             it.remove(KEY_QW_PROJECT)
             it.remove(KEY_QW_KID)
             it.remove(KEY_QW_PRIV)
             it.remove(KEY_QW_API)
-        }
-        applyQw(QwRuntimeCreds())
+        }) { applyQw(QwRuntimeCreds()) }
     }
 
     suspend fun clearCaiyun() {
-        store.edit { it.remove(KEY_CAIYUN) }
-        caiyunRuntime = CaiyunRuntimeCreds()
+        editSecretContext({ it.remove(KEY_CAIYUN) }) {
+            updateRuntime(CaiyunRuntimeCreds(), { caiyunRuntime }) { caiyunRuntime = it }
+        }
     }
 
     suspend fun clearAmap() {
-        store.edit { it.remove(KEY_AMAP) }
-        amapRuntime = AmapRuntimeCreds()
+        editSecretContext({ it.remove(KEY_AMAP) }) {
+            updateRuntime(AmapRuntimeCreds(), { amapRuntime }) { amapRuntime = it }
+        }
     }
 
     suspend fun clearBaidu() {
-        store.edit { it.remove(KEY_BAIDU) }
-        baiduRuntime = BaiduRuntimeCreds()
+        editSecretContext({ it.remove(KEY_BAIDU) }) {
+            updateRuntime(BaiduRuntimeCreds(), { baiduRuntime }) { baiduRuntime = it }
+        }
     }
 
     suspend fun clearRainviewer() {
-        store.edit { it.remove(KEY_RAINVIEWER) }
-        rainviewerRuntime = RainviewerRuntimeCreds()
+        editSecretContext({ it.remove(KEY_RAINVIEWER) }) {
+            updateRuntime(RainviewerRuntimeCreds(), { rainviewerRuntime }) { rainviewerRuntime = it }
+        }
     }
 
     suspend fun currentQw(): QwRuntimeCreds = qwRuntimeFlow.first().also { loaded ->
@@ -249,18 +316,18 @@ object SecretStore {
     }
 
     suspend fun currentCaiyun(): CaiyunRuntimeCreds = caiyunRuntimeFlow.first().also { loaded ->
-        if (loaded != caiyunRuntime) caiyunRuntime = loaded
+        updateRuntime(loaded, { caiyunRuntime }) { caiyunRuntime = it }
     }
 
     suspend fun currentAmap(): AmapRuntimeCreds = amapRuntimeFlow.first().also { loaded ->
-        if (loaded != amapRuntime) amapRuntime = loaded
+        updateRuntime(loaded, { amapRuntime }) { amapRuntime = it }
     }
 
     suspend fun currentBaidu(): BaiduRuntimeCreds = baiduRuntimeFlow.first().also { loaded ->
-        if (loaded != baiduRuntime) baiduRuntime = loaded
+        updateRuntime(loaded, { baiduRuntime }) { baiduRuntime = it }
     }
 
     suspend fun currentRainviewer(): RainviewerRuntimeCreds = rainviewerRuntimeFlow.first().also { loaded ->
-        if (loaded != rainviewerRuntime) rainviewerRuntime = loaded
+        updateRuntime(loaded, { rainviewerRuntime }) { rainviewerRuntime = it }
     }
 }

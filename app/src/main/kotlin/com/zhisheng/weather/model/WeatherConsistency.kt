@@ -198,6 +198,10 @@ object WeatherConsistency {
     }
 
     internal fun ensureCurrentHour(data: WeatherData, nowMillis: Long): WeatherData {
+        // A current observation is not an hourly forecast. Limited sources and expired
+        // hourly series must remain empty; only align a provider's existing series.
+        if (data.hourly.isEmpty()) return data
+        if (clearlyDifferentModuleSources(data, "current", "forecast")) return data
         val cur = data.current ?: return data
         if (currentHourIndex(data.hourly, nowMillis) >= 0) return data
         val nowHour = HourlyWeather(
@@ -211,6 +215,7 @@ object WeatherConsistency {
     }
 
     internal fun syncCurrentWithNowcast(data: WeatherData, nowMillis: Long): WeatherData {
+        if (clearlyDifferentModuleSources(data, "current", "minutely")) return data
         val cur = data.current ?: return data
         val intervalMinutes = data.rainMeta?.intervalMinutes ?: 1
         val seriesWet = Nowcast.seriesWetAt(data.rainMinutes, nowMillis, intervalMinutes = intervalMinutes)
@@ -247,6 +252,7 @@ object WeatherConsistency {
     }
 
     internal fun overlayCurrentOntoNowHour(data: WeatherData, nowMillis: Long): WeatherData {
+        if (clearlyDifferentModuleSources(data, "current", "forecast")) return data
         val cur = data.current ?: return data
         val idx = currentHourIndex(data.hourly, nowMillis)
         if (idx < 0) return data
@@ -264,6 +270,7 @@ object WeatherConsistency {
     }
 
     internal fun reconcileNowcastText(data: WeatherData, nowMillis: Long): WeatherData {
+        if (clearlyDifferentModuleSources(data, "current", "minutely")) return data
         val api = data.rainNowcast?.trim().orEmpty()
         if (api.isEmpty()) return data
         val precipNow = data.current.let { cur ->
@@ -275,6 +282,21 @@ object WeatherConsistency {
             return data.copy(rainNowcast = null)
         }
         return data
+    }
+
+    /** A module selection must keep its returned measurements and provenance together.
+     * Legacy snapshots and same-source fusion keep the existing alignment behavior. */
+    private fun clearlyDifferentModuleSources(data: WeatherData, first: String, second: String): Boolean {
+        fun sources(module: String): Set<String>? {
+            val raw = data.moduleEvidence[module]?.source ?: return null
+            val parts = raw.split('+').map { it.trim().uppercase(java.util.Locale.ROOT) }.toSet()
+            return parts.takeIf { it.isNotEmpty() && it.none { source ->
+                source.isBlank() || source in setOf("未知", "UNKNOWN", "NONE", "NULL")
+            } }
+        }
+        val left = sources(first) ?: return false
+        val right = sources(second) ?: return false
+        return left != right
     }
 
     private fun Double?.inRange(min: Double, max: Double): Double? =

@@ -77,7 +77,8 @@ object NmcSource {
                 val full = fullDeferred.await()
                 val pageHtml = pageDeferred.await()
                 val real = full?.real
-                val alerts = parseNmcAlarms(alarmDeferred.await(), ref)
+                val alarmsResponse = alarmDeferred.await()
+                val alerts = parseNmcAlarms(alarmsResponse, ref)
                 // 过去实况先解析：小站 real 气压常为 9999，需用同站最近整点的测站气压兜底。
                 val hourlyPast = parseNmcPassed(full?.passedchart.orEmpty())
                 val current = real?.let {
@@ -107,7 +108,9 @@ object NmcSource {
                         "current" to SOURCE_ID,
                         "hourly" to SOURCE_ID,
                         "daily" to SOURCE_ID,
-                    ),
+                    // The API returns only the first national page and collapses transport/
+                    // parse failures to an empty list. Only matched positive alerts are evidence.
+                    ) + if (alerts.isNotEmpty()) mapOf("alerts" to SOURCE_ID) else emptyMap(),
                     locationMatch = WeatherLocationMatch(
                         requestedLatitude = city.latitude,
                         requestedLongitude = city.longitude,
@@ -175,7 +178,16 @@ object NmcSource {
 
     private suspend fun resolveCity(city: City): NmcCityRef? {
         val provinces = NmcApi.provinces() ?: return null
-        return resolveCitySync(city, provinces) { NmcApi.cities(it) }
+        val lookupCity = if (city.coordinateKind == com.zhisheng.weather.model.CoordinateKind.DEVICE && city.addressSource == null) {
+            val hit = try {
+                kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                    coordinateXiaomiHit(XiaomiApi.instance.geoCity(city.latitude, city.longitude), city.latitude, city.longitude)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            hit?.let { namedWeatherCity(city, it) } ?: city
+        } else city
+        return resolveCitySync(lookupCity, provinces) { NmcApi.cities(it) }
     }
 
     internal fun matchProvince(

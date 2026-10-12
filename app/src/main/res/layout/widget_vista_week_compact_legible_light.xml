@@ -4,7 +4,7 @@
 </ImageView>
 <LinearLayout android:id="@+id/widget_content" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="8dp">
 <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-<LinearLayout android:layout_width="match_parent" android:layout_height="62dp" android:orientation="horizontal" android:gravity="center_vertical">
+<LinearLayout android:id="@+id/widget_main_hero" android:layout_width="match_parent" android:layout_height="62dp" android:orientation="horizontal" android:gravity="center_vertical">
 <LinearLayout android:id="@+id/widget_clock_hit" android:layout_width="0dp" android:layout_height="match_parent" android:orientation="vertical" android:layout_weight="1.25" android:gravity="center_vertical">
 <TextClock android:shadowColor="#B8000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_time" android:layout_width="match_parent" android:layout_height="wrap_content" android:format12Hour="h:mm" android:format24Hour="HH:mm" android:fontFamily="sans-serif" android:textStyle="bold" android:textSize="42sp" android:includeFontPadding="false" android:textColor="#1B3346" android:maxLines="1">
 </TextClock>

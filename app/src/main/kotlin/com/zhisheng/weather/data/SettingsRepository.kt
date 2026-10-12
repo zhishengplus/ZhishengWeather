@@ -3,6 +3,7 @@ package com.zhisheng.weather.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -14,7 +15,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import com.zhisheng.weather.model.RadarSource
 
-private val Context.settingsStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+private val Context.settingsStore: DataStore<Preferences> by preferencesDataStore(
+    name = "settings", produceMigrations = { listOf(WeatherAppearanceDefaultsMigration()) })
 
 // 数据源偏好：AUTO 默认小米→Open-Meteo（0.1.5-beta6 起百度/高德天气下线，两把 AK 只服务定位地理）。
 // 需凭据的数据源只在开发者模式下可锁定；手动锁定时保持纯源，便于判断真实表现。
@@ -26,6 +28,12 @@ enum class SourcePref(val key: String, val cn: String, val en: String, val desc:
     NMC("nmc", "中央气象台", "NMC", "免配置·官方"),
     QWEATHER("qweather", "和风天气", "QWEATHER", "开发者·需凭据"),
     CAIYUN("caiyun", "彩云天气", "CAIYUN", "开发者·需 Token"),
+    AMAP("amap", "高德天气", "AMAP", "用户 Key·区县实况与日预报"),
+    BAIDU("baidu", "百度天气", "BAIDU", "用户 AK·区县天气·按授权返回"),
+    TENCENT("tencent", "腾讯天气", "TENCENT", "免配置·城市天气·网站通道"),
+    WEATHERCN("weathercn", "中国天气网", "WEATHERCN", "免配置·城市实况与当日预报"),
+    SENIVERSE("seniverse", "心知天气", "SENIVERSE", "个人 Key·免费版城市天气"),
+    MOJI("moji", "墨迹天气", "MOJI", "个人 AppCode·按订阅返回"),
     XIAOMI("xiaomi", "小米公开接口", "XIAOMI", "免配置·国内"),
     OPEN_METEO("openmeteo", "Open-Meteo", "OPEN-METEO", "免配置·全球");
 
@@ -38,16 +46,22 @@ enum class SourcePref(val key: String, val cn: String, val en: String, val desc:
             add(ZHISHENG)
             add(XIAOMI)
             add(NMC)
+            add(TENCENT)
+            add(WEATHERCN)
             add(OPEN_METEO)
             if (developerMode) {
                 add(CAIYUN)
                 add(QWEATHER)
+                add(AMAP)
+                add(BAIDU)
+                add(SENIVERSE)
+                add(MOJI)
             }
         }
     }
 
     fun effective(developerMode: Boolean): SourcePref =
-        if ((this == QWEATHER || this == CAIYUN) && !developerMode) AUTO else this
+        if ((this in setOf(QWEATHER, CAIYUN, AMAP, BAIDU, SENIVERSE, MOJI)) && !developerMode) AUTO else this
 
     fun matches(dataSource: String?): Boolean = when (this) {
         // AUTO 只读自身降级链（小米/中央气象台/Open-Meteo）的缓存；仍不接受仅手动锁定的和风/彩云缓存，
@@ -57,6 +71,12 @@ enum class SourcePref(val key: String, val cn: String, val en: String, val desc:
         NMC -> dataSource == "NMC"
         QWEATHER -> dataSource == "QWEATHER"
         CAIYUN -> dataSource == "CAIYUN"
+        AMAP -> dataSource == "AMAP"
+        BAIDU -> dataSource == "BAIDU"
+        TENCENT -> dataSource == "TENCENT"
+        WEATHERCN -> dataSource == "WEATHERCN"
+        SENIVERSE -> dataSource == "SENIVERSE"
+        MOJI -> dataSource == "MOJI"
         XIAOMI -> dataSource == "XIAOMI"
         OPEN_METEO -> dataSource == "OPEN-METEO"
     }
@@ -67,13 +87,13 @@ enum class SourcePref(val key: String, val cn: String, val en: String, val desc:
             (this == AUTO || this == ZHISHENG || data.blockSources.values.all { it == data.dataSource })
 }
 
-// 氛围层强度：0.0.9 起默认“明显”，新用户首次打开即可看到完整天气表达。
+// beta10.5 默认强烈自然天光与流光；持久化用户选择仍优先于缺省值。
 enum class SoftGlowLevel(val key: String, val cn: String, val strength: Float, val drift: Float, val cycleSeconds: Double) {
     SUBTLE("subtle", "柔和", 1f, 1f, 72.0),
     FLOWING("flowing", "流光", 1.7f, 2.1f, 42.0);
 
     companion object {
-        fun from(value: String?): SoftGlowLevel = entries.firstOrNull { it.key == value } ?: SUBTLE
+        fun from(value: String?): SoftGlowLevel = entries.firstOrNull { it.key == value } ?: FLOWING
     }
 }
 
@@ -91,7 +111,7 @@ enum class AmbienceLevel(val key: String, val cn: String, val factor: Float) {
     }
 
     companion object {
-        fun from(v: String?): AmbienceLevel = entries.firstOrNull { it.key == v } ?: VIVID
+        fun from(v: String?): AmbienceLevel = entries.firstOrNull { it.key == v } ?: INTENSE
     }
 }
 
@@ -227,7 +247,8 @@ enum class AccentTone(val key: String, val cn: String) {
 enum class AppIconStyle(val key: String, val cn: String) {
     CHARACTER("character", "天气娘"),
     DARK("dark", "深色"),
-    LIGHT("light", "浅色");
+    LIGHT("light", "浅色"),
+    MINIMAL("minimal", "简约");
 
     companion object {
         fun from(v: String?): AppIconStyle = when (v) {
@@ -336,22 +357,32 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
 
 // 设置仓储
 object SettingsRepository {
+    private val KEY_MODULE_SOURCES = stringPreferencesKey("weather_module_sources_v1")
+    val moduleSources: Flow<ModuleSourcePolicy> by lazy {
+        store.data.map { ModuleSourcePolicy.decode(it[KEY_MODULE_SOURCES]) }.distinctUntilChanged()
+    }
+    suspend fun setModuleSource(module: WeatherModule, source: SourcePref?) = editWeatherContext { prefs ->
+        prefs[KEY_MODULE_SOURCES] = ModuleSourcePolicy.decode(prefs[KEY_MODULE_SOURCES]).with(module, source).encode()
+    }
     private val KEY_USAGE_STATISTICS = booleanPreferencesKey("device_version_statistics")
     val usageStatistics: Flow<Boolean> by lazy { store.data.map { it[KEY_USAGE_STATISTICS] ?: true }.distinctUntilChanged() }
     suspend fun setUsageStatistics(enabled: Boolean) = store.edit { it[KEY_USAGE_STATISTICS] = enabled }
 
     private lateinit var store: DataStore<Preferences>
 
+    private suspend fun editWeatherContext(transform: suspend (MutablePreferences) -> Unit): Preferences =
+        reminderDeliveryGate.changeContext { store.edit(transform) }
+
     private val KEY_TEMP_UNIT = stringPreferencesKey("temp_unit")
     private val KEY_SHOW_TYPHOON = booleanPreferencesKey("show_typhoon")
     private val KEY_SOURCE = stringPreferencesKey("source_pref")
-    private val KEY_AMBIENCE = stringPreferencesKey("ambience")
-    private val KEY_LIVING_SKY = booleanPreferencesKey("living_sky")
+    private val KEY_AMBIENCE = WeatherAppearanceDefaultsMigration.AMBIENCE
+    private val KEY_LIVING_SKY = WeatherAppearanceDefaultsMigration.LIVING_SKY
     private val KEY_SCANLINES = booleanPreferencesKey("scanlines")
     private val KEY_RELEASE_APPEARANCE = booleanPreferencesKey("release_appearance_20260907")
     private val KEY_RELEASE_BRIEFING = booleanPreferencesKey("release_briefing_20260907")
-    private val KEY_SOFT_GLOW = booleanPreferencesKey("vista_soft_glow")
-    private val KEY_SOFT_GLOW_LEVEL = stringPreferencesKey("vista_soft_glow_level")
+    private val KEY_SOFT_GLOW = WeatherAppearanceDefaultsMigration.SOFT_GLOW
+    private val KEY_SOFT_GLOW_LEVEL = WeatherAppearanceDefaultsMigration.GLOW_LEVEL
     private val KEY_STYLE_RESTORED = booleanPreferencesKey("style_choice_beta6_6")
     private val KEY_LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
     private val KEY_PRECISE_LOCATION = booleanPreferencesKey("precise_location")
@@ -405,7 +436,7 @@ object SettingsRepository {
     }
     val ambience: Flow<AmbienceLevel> by lazy { store.data.map { if (ReleaseFeatures.weatherAtmosphere) AmbienceLevel.from(it[KEY_AMBIENCE]) else AmbienceLevel.OFF } }
     val livingSky: Flow<Boolean> by lazy {
-        store.data.map { ReleaseFeatures.weatherAtmosphere && (it[KEY_LIVING_SKY] ?: false) }.distinctUntilChanged()
+        store.data.map { ReleaseFeatures.weatherAtmosphere && (it[KEY_LIVING_SKY] ?: true) }.distinctUntilChanged()
     }
     val scanlines: Flow<Boolean> by lazy { store.data.map { ReleaseFeatures.weatherAtmosphere && (it[KEY_SCANLINES] ?: true) } }
     val softGlow: Flow<Boolean> by lazy { store.data.map { it[KEY_SOFT_GLOW] ?: true }.distinctUntilChanged() }
@@ -499,8 +530,8 @@ object SettingsRepository {
 
     suspend fun setTempUnit(unit: String) = store.edit { it[KEY_TEMP_UNIT] = unit }
     suspend fun setShowTyphoon(show: Boolean) = store.edit { it[KEY_SHOW_TYPHOON] = show }
-    suspend fun setSourcePref(p: SourcePref) = store.edit { it[KEY_SOURCE] = p.key }
-    suspend fun setDeveloperMode(v: Boolean) = store.edit { it[KEY_DEVELOPER] = v }
+    suspend fun setSourcePref(p: SourcePref) = editWeatherContext { it[KEY_SOURCE] = p.key }
+    suspend fun setDeveloperMode(v: Boolean) = editWeatherContext { PlaceConfigurationRevision.changed(); it[KEY_DEVELOPER] = v }
     suspend fun qweatherUnlocked(): Boolean {
         SecretStore.currentQw()
         return QWeatherApi.enabled && developerMode.first()
@@ -528,8 +559,9 @@ object SettingsRepository {
     suspend fun setScanlines(v: Boolean) = store.edit { it[KEY_SCANLINES] = v }
     suspend fun setSoftGlow(v: Boolean) = store.edit { it[KEY_SOFT_GLOW] = v }
     suspend fun setSoftGlowLevel(v: SoftGlowLevel) = store.edit { it[KEY_SOFT_GLOW_LEVEL] = v.key }
-    suspend fun setLocationEnabled(v: Boolean) = store.edit { it[KEY_LOCATION_ENABLED] = v }
-    suspend fun setPreciseLocationEnabled(v: Boolean) = store.edit {
+    suspend fun setLocationEnabled(v: Boolean) = editWeatherContext { PlaceConfigurationRevision.changed(); it[KEY_LOCATION_ENABLED] = v }
+    suspend fun setPreciseLocationEnabled(v: Boolean) = editWeatherContext {
+        PlaceConfigurationRevision.changed()
         it[KEY_PRECISE_LOCATION] = v
         it[KEY_PRECISE_LOCATION_ASKED] = false
     }

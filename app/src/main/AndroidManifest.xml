@@ -23,11 +23,18 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Only discover calendar entry points; no calendar data permission needed. -->
+    <!-- Discover system calendar/clock entry points without reading their data. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.APP_CALENDAR" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CLOCK" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
         </intent>
     </queries>
 
@@ -81,6 +88,15 @@
                 android:resource="@xml/shortcuts" />
         </activity-alias>
 
+        <activity-alias android:name=".IconMinimal" android:enabled="false" android:exported="true"
+            android:icon="@mipmap/ic_launcher_minimal" android:roundIcon="@mipmap/ic_launcher_minimal"
+            android:label="@string/app_name" android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+        </activity-alias>
         <activity android:name=".widget.WidgetConfigActivity" android:exported="true" android:label="桌面天气">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />

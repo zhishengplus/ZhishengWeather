@@ -92,8 +92,8 @@ internal object BaiduApi {
                 "page_size" to "10",
                 "output" to "json",
             ),
-        ) ?: return emptyList()
-        return (root["results"] as? JsonArray).orEmpty().mapNotNull { item ->
+        ) ?: throw PlaceServiceException(PlaceFailure.UNAVAILABLE)
+        return (root["results"] as? JsonArray ?: throw PlaceServiceException(PlaceFailure.UNAVAILABLE)).mapNotNull { item ->
             val poi = item.asObject() ?: return@mapNotNull null
             val location = poi.objectValue("location") ?: return@mapNotNull null
             val bdLat = location.double("lat") ?: return@mapNotNull null
@@ -114,26 +114,44 @@ internal object BaiduApi {
     // 验证 AK：只验逆地理链路（0.1.5-beta6 起百度天气接口已下线，AK 仅服务定位/街道/搜索）
     suspend fun verifyKey(ak: String): BaiduLookupResult {
         if (ak.isBlank()) return BaiduLookupResult(false, info = "请填写百度地图服务端 AK")
-        return reverseStreetFromWgs84(ak, 39.9042, 116.4074)
+        PlaceServiceGate.clear(ak.trim(), "baidu:reverse")
+        PlaceServiceGate.clear(ak.trim(), "baidu:search")
+        return try { reverseStreetFromWgs84(ak, 39.9042, 116.4074) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: PlaceServiceException) { BaiduLookupResult(false, info = when (error.failure) {
+            PlaceFailure.AUTH -> "百度 AK 未通过授权校验"
+            PlaceFailure.QUOTA -> "百度服务配额暂不可用"
+            else -> "百度服务暂不可用"
+        }) }
     }
 
     private suspend fun request(path: List<String>, query: Map<String, String>): JsonObject? =
         withContext(Dispatchers.IO) {
-            if (query.values.firstOrNull().isNullOrBlank()) return@withContext null
+            val credential = query["ak"].orEmpty()
+            if (credential.isBlank()) return@withContext null
+            val capability = if (path.firstOrNull() == "place") "baidu:search" else "baidu:reverse"
+            PlaceServiceGate.check(credential, capability)
             try {
                 val builder = "https://api.map.baidu.com/".toHttpUrl().newBuilder()
                 path.forEach { if (it.isNotEmpty()) builder.addPathSegment(it) }
                 query.forEach(builder::addQueryParameter)
-                client.newCall(Request.Builder().url(builder.build()).get().build()).execute().use { response ->
-                    if (!response.isSuccessful) return@withContext null
-                    val root = json.parseToJsonElement(response.body?.string().orEmpty()).asObject()
-                        ?: return@withContext null
-                    val status = root.string("status")?.toIntOrNull() ?: root.int("status")
-                    if (status != null && status !in setOf(0, 200)) null else root
-                }
+                val response = radarRequestBytes(client, Request.Builder().url(builder.build()).get().build(), 1_000_000)
+                if (!response.successful) throw PlaceServiceException(
+                    if (response.code == 429) PlaceFailure.QUOTA else PlaceFailure.UNAVAILABLE,
+                    placeRetryAfterMillis(response.retryAfter))
+                val root = json.parseToJsonElement(response.bytes.toString(Charsets.UTF_8)).asObject()
+                    ?: return@withContext null
+                val status = root.string("status")?.toIntOrNull() ?: root.int("status")
+                if (status != 0) throw PlaceServiceException(baiduFailure(status))
+                PlaceServiceGate.clear(credential, capability)
+                root
             } catch (ce: CancellationException) {
                 throw ce
-            } catch (_: Throwable) {
+            } catch (error: PlaceServiceException) {
+                PlaceServiceGate.record(credential, capability, error.failure, error.retryAfterMillis)
+                throw error
+            } catch (_: Exception) {
+                PlaceServiceGate.record(credential, capability, PlaceFailure.UNAVAILABLE)
                 null
             }
         }

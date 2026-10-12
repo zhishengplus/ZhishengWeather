@@ -15,9 +15,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.zhisheng.weather.data.RadarRepository
+import com.zhisheng.weather.data.radarRequestBytes
 import com.zhisheng.weather.data.SettingsRepository
 import com.zhisheng.weather.model.*
 import com.zhisheng.weather.ui.theme.*
+import com.zhisheng.weather.ui.rememberRainviewerDisclosureAccepted
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,7 +40,7 @@ private object AtlasRadarTiles {
         val key = "${city.latitude},${city.longitude}"
         val now = System.currentTimeMillis()
         cache[key]?.takeIf { now - it.first in 0..5 * 60_000L }?.let { return@withLock it.second }
-        val result = withContext(Dispatchers.IO) {
+    val result = withContext(Dispatchers.IO) {
             try {
                 val timeline = RadarRepository.loadTimeline(city)
                 currentCoroutineContext().ensureActive()
@@ -49,13 +51,11 @@ private object AtlasRadarTiles {
                 val url = timeline.tileTemplate(frame).replace("{z}", "6")
                     .replace("{x}", sample.tileX.toString()).replace("{y}", sample.tileY.toString())
                 check(isAtlasRadarTileUrl(url))
-                val bitmap = client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                    check(response.isSuccessful)
-                    val body = checkNotNull(response.body)
+                val bitmap = run {
+                    val response = radarRequestBytes(client, Request.Builder().url(url).build(), 1_048_576)
+                    check(response.successful)
                     // Bound both decoding and transfer; thumbnails must never hold a giant response.
-                    val stream = body.source()
-                    stream.request(1_048_577)
-                    val bytes = stream.buffer.readByteArray()
+                    val bytes = response.bytes
                     check(bytes.size <= 1_048_576)
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -68,7 +68,9 @@ private object AtlasRadarTiles {
             catch (_: Exception) { AtlasRadarTile(null, null, null, "预览暂不可用") }
         }
         val previous = cache[key]?.second
-        val retained = if (result.bitmap == null && previous?.bitmap != null) previous.copy(message = "上次更新") else result
+        val retained = if (result.bitmap == null && previous?.bitmap != null &&
+            previous.time?.let { System.currentTimeMillis() - it in 0..45 * 60_000L } == true)
+            previous.copy(message = "上次更新") else result
         cache[key] = System.currentTimeMillis() to retained
         while (cache.size > 4) cache.remove(cache.keys.first())
         retained
@@ -87,11 +89,12 @@ internal data class AtlasRadarPreviewState(val source: RadarSource?, val tile: A
 
 @Composable
 internal fun rememberAtlasRadarPreview(city: City?, refreshKey: Long?): AtlasRadarPreviewState {
+    val accepted by rememberRainviewerDisclosureAccepted()
     var source by remember { mutableStateOf<RadarSource?>(null) }
     LaunchedEffect(Unit) { SettingsRepository.radarSource.collect { source = it } }
     var tile by remember(city?.latitude, city?.longitude, source) { mutableStateOf<AtlasRadarTile?>(null) }
-    LaunchedEffect(city?.latitude, city?.longitude, source, refreshKey) {
-        if (source == RadarSource.RAINVIEWER && city != null) tile = AtlasRadarTiles.load(city)
+    LaunchedEffect(city?.latitude, city?.longitude, source, refreshKey, accepted) {
+        if (accepted && source == RadarSource.RAINVIEWER && city != null) tile = AtlasRadarTiles.load(city)
     }
     return AtlasRadarPreviewState(source, tile)
 }
@@ -101,7 +104,6 @@ internal fun AtlasRadarPreview(city: City?, refreshKey: Long? = null, zoneId: St
     val state = preview ?: rememberAtlasRadarPreview(city, refreshKey)
     val source = state.source
     val tile = state.tile
-    if (isPhosphorVista && !state.available) return
     if (isPhosphorVista && source == RadarSource.CAIYUN) {
         AtlasCaption("查看降雨变化")
         return

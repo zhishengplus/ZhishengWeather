@@ -9,6 +9,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GeocoderCallTest {
+    @Test fun genuineEmptyAddressAndServiceErrorStayDifferentOnOldAndroid() = runBlocking {
+        assertNull(geocoderCall<String>(strict = true) { null })
+        try {
+            geocoderCall<String>(strict = true) { throw java.io.IOException("service failure") }
+            fail("A failing service is not an empty successful lookup")
+        } catch (error: PlaceServiceException) { assertEquals(PlaceFailure.UNAVAILABLE, error.failure) }
+    }
+
     @Test fun geocoderTimeoutDoesNotWaitForStuckSystemService() {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)

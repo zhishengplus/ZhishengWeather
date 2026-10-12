@@ -9,7 +9,8 @@ import org.junit.Test
 class WhatsNewDialogTest {
     @Test
     fun `release notes show current changes without forced empty page height`() {
-        assertEquals("0.1.5-beta10.3-public", WhatsNewVersion)
+        assertEquals("0.1.5-beta10.5", WhatsNewVersion)
+        assertEquals("10.3 → 10.5", WhatsNewVersionRange)
         val projectDir = File(requireNotNull(System.getProperty("user.dir")))
         val dialog = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/WhatsNewDialog.kt").readText()
         val activity = File(projectDir, "src/main/kotlin/com/zhisheng/weather/MainActivity.kt").readText()
@@ -18,7 +19,7 @@ class WhatsNewDialogTest {
         assertTrue(dialog.contains(".verticalScroll(scroll)"))
         assertFalse(dialog.contains("Modifier.weight(1f),\n                ) { currentPage"))
         val copy = WhatsNewSections.flatMap { it.notes }.joinToString { it.title + it.detail }
-        listOf("收藏", "紫外线", "更新于", "两行", "系统日历", "开屏动画", "烧屏风险").forEach {
+        listOf("来源比较", "小时温度", "短时降水", "字体", "诊断", "刷新").forEach {
             assertTrue("missing current change $it", copy.contains(it))
         }
         listOf("全机型已适配", "彻底防止烧屏", "三星自动更新已修复", "霞光时刻", "历史天气").forEach {

@@ -17,7 +17,8 @@ fun lp(key: String, def: String = ""): String = localProps.getProperty(key, def)
 // 兼容旧命令的公开版开关；新发行流程优先使用独立的 assemblePublicRelease。
 val publicBuild = providers.gradleProperty("publicBuild").isPresent
 // 用户交流入口是公开信息，所有构建版本都必须包含。
-val communityQqGroup = "1106284779"
+val communityQqGroup = "562847192"
+val communityQqGroup1 = "1106284779"
 
 android {
     namespace = "com.zhisheng.weather"
@@ -28,8 +29,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Beta 10 widget and update hotfix; keep the public package/signature.
-        versionCode = 20261028
-        versionName = "0.1.5-beta10.3-public"
+        versionCode = 20261068
+        versionName = "0.1.5-beta10.5-public"
         resValue("string", "shortcut_target_package", "com.zhisheng.weather")
 
         // 发行渠道面向实体手机；去掉仅供 Intel 模拟器使用的 x86/x86_64 MapLibre 库。
@@ -46,6 +47,7 @@ android {
         // 和风 JWT 在公开包必须清空；天地图 tk 按包名绑定，公开包同样需要底图。
         buildConfigField("String", "TDT_TOKEN", "\"${lp("tianditu.token")}\"")
         buildConfigField("String", "COMMUNITY_QQ_GROUP", "\"$communityQqGroup\"")
+        buildConfigField("String", "COMMUNITY_QQ_GROUP_1", "\"$communityQqGroup1\"")
         // 只有与 GitHub 公共版同包名、同签名的构建可以直接覆盖更新。
         buildConfigField("boolean", "CAN_SELF_UPDATE", "false")
     }

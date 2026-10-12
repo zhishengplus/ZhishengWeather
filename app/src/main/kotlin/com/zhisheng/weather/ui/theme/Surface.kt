@@ -119,7 +119,11 @@ private fun Modifier.homeGlass(shape: Shape, light: Boolean, compact: Boolean, s
                 capture.record(size = captureSize) {
                     translate(padding - offset.x, padding - offset.y) {
                         if (backdrop != null) drawLayer(backdrop.layer)
-                        else drawGlassPageField(light, screenSize)
+                        // Configuration excludes system bars on older target SDKs. A full-screen
+                        // dialog can therefore extend beyond it; keep its reading field opaque.
+                        else drawGlassPageField(light, androidx.compose.ui.geometry.Size(
+                            maxOf(screenSize.width, view.rootView.width.toFloat()),
+                            maxOf(screenSize.height, view.rootView.height.toFloat())))
                     }
                 }
                 capture.renderEffect = effect ?: compatibleBlur
@@ -269,11 +273,12 @@ fun Modifier.zhishengCompactPanel(
 fun Modifier.zhishengDialogPanel(
     containerColor: Color? = null,
     borderColor: Color = LocalZhishengPalette.current.cardBorder,
+    glass: Boolean = false,
 ): Modifier {
     val palette = LocalZhishengPalette.current
     val chrome = LocalZhishengChrome.current
     val fill = containerColor ?: palette.surface
-    if (isPhosphorVista && LocalHomeSurfaceStyle.current == HomeSurfaceStyle.FRAGRANCE_GLASS) {
+    if (isPhosphorVista && (glass || LocalHomeSurfaceStyle.current == HomeSurfaceStyle.FRAGRANCE_GLASS)) {
         return homeGlass(chrome.dialogShape, palette.isLight, compact = false, selected = false)
     }
     return if (isPhosphorVista) {

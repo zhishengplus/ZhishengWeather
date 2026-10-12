@@ -72,6 +72,7 @@ import com.zhisheng.weather.data.AppUpdateCheck
 import com.zhisheng.weather.data.AppUpdateInfo
 import com.zhisheng.weather.data.LandscapeStandbyStyle
 import com.zhisheng.weather.data.SettingsRepository
+import com.zhisheng.weather.data.CityRepository
 import com.zhisheng.weather.data.ReleaseFeatures
 import com.zhisheng.weather.ui.isStartupIconEntry
 import com.zhisheng.weather.data.ThemeMode
@@ -94,11 +95,19 @@ import com.zhisheng.weather.ui.DailyForecastScreen
 import com.zhisheng.weather.ui.RadarScreen
 import com.zhisheng.weather.ui.TyphoonScreen
 import com.zhisheng.weather.ui.PortraitSessionNotice
+import com.zhisheng.weather.ui.UpdateOpeningHandledKey
+import com.zhisheng.weather.ui.UpdateOpeningOverlay
+import com.zhisheng.weather.ui.UpdateOpeningPreferenceFile
+import com.zhisheng.weather.ui.UpdateOpeningSpec
 import com.zhisheng.weather.ui.WhatsNewDialog
+import com.zhisheng.weather.ui.shouldAutoPlayUpdateOpening
+import com.zhisheng.weather.ui.systemAnimationsEnabled
+import com.zhisheng.weather.ui.updateOpeningSpec
 import com.zhisheng.weather.ui.WhatsNewPreferenceFile
 import com.zhisheng.weather.ui.WhatsNewSeenKey
 import com.zhisheng.weather.ui.WhatsNewVersion
 import com.zhisheng.weather.ui.InterfaceStyleChoiceDialog
+import com.zhisheng.weather.ui.InitialLocationSetupHost
 import com.zhisheng.weather.ui.InterfaceStyleChoicePreferenceFile
 import com.zhisheng.weather.ui.InterfaceStyleChoiceSeenKey
 import com.zhisheng.weather.ui.InterfaceStyleChoiceVersion
@@ -107,6 +116,7 @@ import com.zhisheng.weather.data.InterfaceStyle
 import com.zhisheng.weather.i18n.ProvideAppLanguage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 private data class ShortcutCommand(val action: String? = null, val sequence: Long = 0L)
@@ -185,8 +195,52 @@ class MainActivity : ComponentActivity() {
                 // 冷启动统一回主页（横放时由 standbyActive 展示气象时钟）；快捷方式仍由 command 明确跳转。
                 var screen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
                 var cityPickedRequest by rememberSaveable { mutableIntStateOf(0) }
+                val initialLocationSetupRequired: Boolean? by remember {
+                    CityRepository.initialLocationSetupRequired.catch { error ->
+                        // A storage error is not proof of a new installation.
+                        android.util.Log.w("ZhishengWeather", "暂时无法读取首次地点选择状态", error)
+                        emit(false)
+                    }
+                }.collectAsState(initial = null)
+                var showLocationSetupAgain by rememberSaveable { mutableStateOf(false) }
+                var locationSetupDismissedForSession by rememberSaveable { mutableStateOf(false) }
+                var choosingInitialCity by rememberSaveable { mutableStateOf(false) }
+                fun markInitialLocationHandled() {
+                    scope.launch {
+                        try {
+                            CityRepository.completeInitialLocationSetup()
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            android.util.Log.w("ZhishengWeather", "首次地点选择状态暂时未能保存", error)
+                        }
+                    }
+                }
+                val locationSetupHoldsStartup =
+                    (initialLocationSetupRequired != false && screen == AppScreen.HOME) ||
+                        showLocationSetupAgain || choosingInitialCity
+                LaunchedEffect(initialLocationSetupRequired, startupPromptsSuppressed, screen,
+                    locationSetupDismissedForSession) {
+                    if (initialLocationSetupRequired == true && !startupPromptsSuppressed &&
+                        screen == AppScreen.HOME && !locationSetupDismissedForSession) {
+                        // Keep the panel alive until its location operation has finished,
+                        // even when saving the city emits "handled" before the callback.
+                        showLocationSetupAgain = true
+                    }
+                }
                 val initialWhatsNew = remember { shouldShowWhatsNew() }
                 var showWhatsNew by rememberSaveable { mutableStateOf(initialWhatsNew) }
+                val previousNotesVersion = remember {
+                    getSharedPreferences(WhatsNewPreferenceFile, MODE_PRIVATE).getString(WhatsNewSeenKey, null)
+                }
+                // The opening precedes the release notes: once automatically per version, and on every manual request.
+                var autoOpeningPending by rememberSaveable {
+                    mutableStateOf(shouldAutoPlayUpdateOpening(BuildConfig.VERSION_CODE,
+                        getSharedPreferences(UpdateOpeningPreferenceFile, MODE_PRIVATE).getInt(UpdateOpeningHandledKey, 0),
+                        initialWhatsNew, systemAnimationsEnabled()))
+                }
+                var openingSpec by remember { mutableStateOf<UpdateOpeningSpec?>(null) }
+                var openingHandedOff by remember { mutableStateOf(false) }
                 var showStyleChoiceAfterWhatsNew by rememberSaveable {
                     mutableStateOf(initialWhatsNew && shouldShowInterfaceStyleChoice())
                 }
@@ -208,6 +262,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val uiState by vm.uiState.collectAsState()
+                LaunchedEffect(initialLocationSetupRequired, uiState.selectedCity?.locationKey) {
+                    if (initialLocationSetupRequired == false && uiState.selectedCity != null) {
+                        // An explicit city from search or a widget also completes
+                        // the guide, including when it superseded a GPS request.
+                        showLocationSetupAgain = false
+                        locationSetupDismissedForSession = true
+                    }
+                }
                 val command by shortcutCommand.collectAsState()
                 val landscapeStandby by SettingsRepository.landscapeStandby.collectAsState(initial = false)
                 val landscapeStandbyStyle by SettingsRepository.landscapeStandbyStyle.collectAsState(
@@ -222,9 +284,9 @@ class MainActivity : ComponentActivity() {
                 // 横屏只在主页展示待机时钟；从时钟进入设置后仍保持横向，
                 // 但恢复系统栏并展示完整设置，返回主页再回到待机界面。
                 val standbyVisible = standbyActive && screen == AppScreen.HOME
-                LaunchedEffect(availableUpdate, screen, standbyVisible, showWhatsNew, startupPromptsSuppressed, showInterfaceStyleChoice) {
+                LaunchedEffect(availableUpdate, screen, standbyVisible, showWhatsNew, startupPromptsSuppressed, showInterfaceStyleChoice, locationSetupHoldsStartup) {
                     val info = availableUpdate
-                    if (info != null && screen == AppScreen.HOME && !standbyVisible && !showWhatsNew && !startupPromptsSuppressed && !showInterfaceStyleChoice) {
+                    if (info != null && screen == AppScreen.HOME && !standbyVisible && !showWhatsNew && !startupPromptsSuppressed && !showInterfaceStyleChoice && !locationSetupHoldsStartup) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                             delay(3_000)
                             while (SystemClock.elapsedRealtime() - lastInteraction < 3_000) delay(500)
@@ -306,7 +368,7 @@ class MainActivity : ComponentActivity() {
                     // 天气娘是用户明确选择的独立图标，不参与主题联动。
                     // 深/浅图标则在 App 主题变化（含跟随系统）时同步切换。
                     val selectedIcon = SettingsRepository.appIconStyle.first()
-                    if (selectedIcon != AppIconStyle.CHARACTER) {
+                    if (selectedIcon != AppIconStyle.CHARACTER && selectedIcon != AppIconStyle.MINIMAL) {
                         val themedIcon = if (isLight) AppIconStyle.LIGHT else AppIconStyle.DARK
                         if (AppIconManager.apply(this@MainActivity, themedIcon) && selectedIcon != themedIcon) {
                             SettingsRepository.setAppIconStyle(themedIcon)
@@ -407,10 +469,30 @@ class MainActivity : ComponentActivity() {
 
                 // 系统返回键：搜索/设置页退回主屏，而不是直接退出 App（v0.0.2）
                 BackHandler(enabled = screen != AppScreen.HOME) {
+                    if (screen == AppScreen.SEARCH) choosingInitialCity = false
                     screen = if (screen == AppScreen.ATMOSPHERE_LAB) AppScreen.SETTINGS else AppScreen.HOME
                 }
 
-                // 每次打开 / 回到前台都拉最新天气（10 分钟内同城不重复拉）
+                val automation by com.zhisheng.weather.data.AutomationSettingsRepository.settings.collectAsState()
+                LaunchedEffect(automation.remindersEnabled, automation.morningMinute, automation.eveningMinute) {
+                    if (automation.remindersEnabled) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                        while (true) {
+                            com.zhisheng.weather.data.WeatherReminderNotification.refresh(applicationContext)
+                            delay(60_000L)
+                        }
+                    }
+                }
+                // The resumed scope is cancelled on background; no hidden foreground polling.
+                LaunchedEffect(automation.foregroundMinutes, command.action) {
+                    lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                        while (true) {
+                            delay(automation.foregroundMinutes * 60_000L)
+                            vm.refresh(force = false, intervalElapsed = true)
+                            if (command.action != ACTION_WIDGET_WEATHER) vm.autoLocateIfEnabled()
+                        }
+                    }
+                }
+                // 每次打开 / 回到前台按所选间隔刷新；失败仅短暂退避。
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                     vm.refresh(force = false)
                     // A fixed-city widget tap is an explicit city choice. Ordinary
@@ -467,7 +549,18 @@ class MainActivity : ComponentActivity() {
                             viewModel = vm,
                             ambienceActive = screen == AppScreen.HOME,
                             dismissCitiesRequest = cityPickedRequest,
-                            onSearchClick = { screen = AppScreen.SEARCH },
+                            onSearchClick = {
+                                if (initialLocationSetupRequired == true) {
+                                    choosingInitialCity = true
+                                    locationSetupDismissedForSession = true
+                                    markInitialLocationHandled()
+                                }
+                                screen = AppScreen.SEARCH
+                            },
+                            onLocationSetupClick = {
+                                showLocationSetupAgain = true
+                                startupPromptsSuppressed = false
+                            },
                             onSettingsClick = { screen = AppScreen.SETTINGS },
                             onHistoryClick = { screen = AppScreen.HISTORY },
                             onRadarClick = { if (ReleaseFeatures.radar) screen = AppScreen.RADAR },
@@ -523,6 +616,7 @@ class MainActivity : ComponentActivity() {
                                         locateMessage = uiState.locateMessage,
                                         onClearLocateMessage = { vm.clearLocateMessage() },
                                         activeSource = uiState.weather?.dataSource,
+                                        activeWeather = uiState.weather,
                                         activeSupplementSources = uiState.weather?.let { weather ->
                                             weather.blockSources.values
                                                 .filter { it.isNotBlank() && it != weather.dataSource }
@@ -536,6 +630,11 @@ class MainActivity : ComponentActivity() {
                                             // 设置页手动重看更新说明时不重复打断用户选择界面风格。
                                             showStyleChoiceAfterWhatsNew = false
                                             startupPromptsSuppressed = false
+                                            if (openingSpec == null && systemAnimationsEnabled()) {
+                                                openingHandedOff = false
+                                                openingSpec = updateOpeningSpec(BuildConfig.VERSION_NAME,
+                                                    previousNotesVersion, upgrade = false)
+                                            }
                                             showWhatsNew = true
                                         },
                                         availableUpdate = availableUpdate,
@@ -560,6 +659,7 @@ class MainActivity : ComponentActivity() {
                                         windUnit = uiState.prefs.windUnit,
                                         utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
                                         onBack = { screen = AppScreen.HOME },
+                                        hourly = uiState.weather?.hourly.orEmpty(),
                                     )
                                     AppScreen.PRECIPITATION -> com.zhisheng.weather.ui.PrecipitationDetailScreen(
                                         data = uiState.weather ?: com.zhisheng.weather.model.WeatherData(),
@@ -582,6 +682,7 @@ class MainActivity : ComponentActivity() {
                                         onBack = { screen = AppScreen.HOME },
                                     )
                                     AppScreen.RADAR -> if (ReleaseFeatures.radar) RadarScreen(
+                                        weather = uiState.weather,
                                         city = uiState.selectedCity,
                                         utcOffsetSeconds = uiState.weather?.utcOffsetSeconds,
                                         onBack = { screen = AppScreen.HOME },
@@ -593,9 +694,13 @@ class MainActivity : ComponentActivity() {
                                         onCityPicked = { city: City ->
                                             vm.addCityAndSelect(city)
                                             cityPickedRequest++
+                                            choosingInitialCity = false
                                             screen = AppScreen.HOME
                                         },
-                                        onBack = { screen = AppScreen.HOME },
+                                        onBack = {
+                                            choosingInitialCity = false
+                                            screen = AppScreen.HOME
+                                        },
                                     )
                                 }
                                 }
@@ -607,7 +712,52 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                automaticUpdate?.takeIf { hostResumed && !startupPromptsSuppressed }?.let { info ->
+                InitialLocationSetupHost(
+                    viewModel = vm,
+                    activity = this@MainActivity,
+                    visible = ((initialLocationSetupRequired == true && !locationSetupDismissedForSession) ||
+                        showLocationSetupAgain) && screen == AppScreen.HOME && hostResumed &&
+                        (!startupPromptsSuppressed || showLocationSetupAgain) && !standbyVisible && openingSpec == null,
+                    onLocated = {
+                        showLocationSetupAgain = false
+                        locationSetupDismissedForSession = true
+                    },
+                    onChooseCity = {
+                        showLocationSetupAgain = false
+                        locationSetupDismissedForSession = true
+                        choosingInitialCity = true
+                        screen = AppScreen.SEARCH
+                        markInitialLocationHandled()
+                    },
+                    onDismiss = {
+                        showLocationSetupAgain = false
+                        locationSetupDismissedForSession = true
+                        markInitialLocationHandled()
+                    },
+                )
+                LaunchedEffect(autoOpeningPending, showWhatsNew, hostResumed, startupPromptsSuppressed, locationSetupHoldsStartup) {
+                    if (autoOpeningPending && showWhatsNew && hostResumed && !startupPromptsSuppressed && !locationSetupHoldsStartup) {
+                        withContext(Dispatchers.IO) {
+                            getSharedPreferences(UpdateOpeningPreferenceFile, MODE_PRIVATE).edit()
+                                .putInt(UpdateOpeningHandledKey, BuildConfig.VERSION_CODE).commit()
+                        }
+                        openingHandedOff = false
+                        openingSpec = updateOpeningSpec(BuildConfig.VERSION_NAME, previousNotesVersion,
+                            upgrade = previousNotesVersion != null)
+                        autoOpeningPending = false
+                    }
+                }
+                val openingHoldsNotes = autoOpeningPending || (openingSpec != null && !openingHandedOff)
+                openingSpec?.let { spec ->
+                    androidx.compose.runtime.key(spec) {
+                        UpdateOpeningOverlay(
+                            spec = spec,
+                            onHandoff = { openingHandedOff = true },
+                            onFinished = { openingSpec = null },
+                        )
+                    }
+                }
+                automaticUpdate?.takeIf { hostResumed && !startupPromptsSuppressed && openingSpec == null && !locationSetupHoldsStartup }?.let { info ->
                     AppUpdateDialog(initialInfo = info,
                         onDeclineVersion = {
                             automaticUpdate = null
@@ -615,7 +765,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onClose = { automaticUpdate = null })
                 }
-                if (showWhatsNew && hostResumed && !startupPromptsSuppressed) {
+                if (showWhatsNew && hostResumed && !startupPromptsSuppressed && !openingHoldsNotes && !locationSetupHoldsStartup) {
                     WhatsNewDialog(
                         onClose = {
                             markWhatsNewSeen()
@@ -627,7 +777,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
-                if (ReleaseFeatures.classicTheme && showInterfaceStyleChoice && !showWhatsNew && !standbyVisible && hostResumed && !startupPromptsSuppressed) {
+                if (ReleaseFeatures.classicTheme && showInterfaceStyleChoice && !showWhatsNew && !standbyVisible && hostResumed && !startupPromptsSuppressed && openingSpec == null && !locationSetupHoldsStartup) {
                     InterfaceStyleChoiceDialog(
                         currentStyle = interfaceStyle,
                         onConfirm = { style ->

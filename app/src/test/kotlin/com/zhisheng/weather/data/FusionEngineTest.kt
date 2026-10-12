@@ -287,6 +287,48 @@ class FusionEngineTest {
         assertEquals(0.8f, minutes[0].precip, 0.0001f) // mm/15min → mm/h
     }
 
+    @Test
+    fun fusedOpenMeteoFallbackCanPlanRainInTheCurrentFifteenMinuteBucket() {
+        val weather = fusedWithOmRain(now)
+        val checkedAt = now + 7 * 60_000L
+
+        val reminders = planWeatherReminders(city.locationKey, weather,
+            AutomationSettings(rainEnabled = true), emptyMap(), checkedAt)
+
+        assertEquals("Fresh fused OM rain must reach the reminder planner", 1, reminders.size)
+        assertEquals("${city.locationKey}:rain", reminders.single().key)
+        assertTrue(reminders.single().text.startsWith("当前时段"))
+        assertTrue(reminders.single().text.contains("OPEN-METEO 15分钟粒度"))
+    }
+
+    @Test
+    fun refreshingCurrentWeatherDoesNotRenewFusedOpenMeteoRain() {
+        val checkedAt = now + 31 * 60_000L
+        val weather = fusedWithOmRain(now).copy(fetchedAt = checkedAt, updateTime = checkedAt)
+
+        assertTrue(planWeatherReminders(city.locationKey, weather,
+            AutomationSettings(rainEnabled = true), emptyMap(), checkedAt).isEmpty())
+        assertEquals("Rain freshness must retain the OM request time", now, weather.rainMeta?.updateTime)
+    }
+
+    private fun fusedWithOmRain(requestedAt: Long): WeatherData {
+        val om = omSupplements(
+            minutelyTimes = listOf(requestedAt + 15 * 60_000L, requestedAt + 30 * 60_000L,
+                requestedAt + 45 * 60_000L),
+            minutelyPrecip = listOf(0.2, 0.0, 0.3),
+        )
+        val sources = listOf(
+            src("XIAOMI", 1.0, data(current = CurrentWeather(temperature = 20.0))
+                .copy(updateTime = requestedAt, fetchedAt = requestedAt)),
+            src("NMC", .9, data(current = CurrentWeather(temperature = 21.0))
+                .copy(updateTime = requestedAt, fetchedAt = requestedAt)),
+        )
+        // The repository stamps a successful fetch after fusion. This must not be
+        // confused with the starts of the future forecast buckets or a later UI read.
+        return FusionEngine.fuse(FusionEngine.Input(city, sources, requestedAt, omSupplements = om))
+            .copy(fetchedAt = requestedAt)
+    }
+
     // —— 测试夹具 ——
 
     private fun omAir(pm25: Double? = null, o3: Double? = null) = OmAirQuality(

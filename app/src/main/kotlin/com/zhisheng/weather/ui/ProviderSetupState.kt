@@ -12,11 +12,13 @@ import com.zhisheng.weather.data.QwGeneratedKeys
 import com.zhisheng.weather.data.QwKeygen
 import com.zhisheng.weather.data.QwRuntimeCreds
 import com.zhisheng.weather.data.SecretStore
+import com.zhisheng.weather.data.MojiRuntimeCreds
+import com.zhisheng.weather.data.validMojiEndpoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-enum class ProviderWizardKind { QWEATHER, CAIYUN, AMAP, BAIDU }
+enum class ProviderWizardKind { QWEATHER, CAIYUN, AMAP, BAIDU, SENIVERSE, MOJI }
 
 enum class QweatherAuthMode { JWT, API_KEY }
 
@@ -32,6 +34,10 @@ internal object ProviderField {
     const val CAIYUN_TOKEN = "caiyun_token"
     const val AMAP_KEY = "amap_key"
     const val BAIDU_AK = "baidu_ak"
+    const val MOJI_NOW_URL = "moji_now_url"
+    const val MOJI_NOW_TOKEN = "moji_now_token"
+    const val MOJI_DAY_URL = "moji_day_url"
+    const val MOJI_DAY_TOKEN = "moji_day_token"
 }
 
 data class ProviderSetupUiState(
@@ -44,6 +50,10 @@ data class ProviderSetupUiState(
     val caiyunToken: String = "",
     val amapKey: String = "",
     val baiduAk: String = "",
+    val mojiCurrentEndpoint: String = "",
+    val mojiCurrentToken: String = "",
+    val mojiDailyEndpoint: String = "",
+    val mojiDailyToken: String = "",
     val authMode: QweatherAuthMode = QweatherAuthMode.API_KEY,
     val keys: QwGeneratedKeys? = null,
     val status: ProviderSetupStatus = ProviderSetupStatus.IDLE,
@@ -57,6 +67,7 @@ data class ProviderSetupUiState(
         ProviderWizardKind.CAIYUN -> 4
         ProviderWizardKind.AMAP -> 3
         ProviderWizardKind.BAIDU -> 3
+        ProviderWizardKind.SENIVERSE, ProviderWizardKind.MOJI -> 3
     }
     val testing: Boolean get() = status == ProviderSetupStatus.TESTING
 }
@@ -68,6 +79,12 @@ internal fun providerBackAction(state: ProviderSetupUiState): ProviderBackAction
 }
 
 internal interface ProviderSetupGateway {
+    suspend fun testSeniverse(key: String, onStage: (ProviderTestStage) -> Unit): ProviderConnectionResult =
+        throw UnsupportedOperationException()
+    suspend fun testMoji(candidate: MojiRuntimeCreds, onStage: (ProviderTestStage) -> Unit): ProviderConnectionResult =
+        throw UnsupportedOperationException()
+    suspend fun saveSeniverse(key: String) { throw UnsupportedOperationException() }
+    suspend fun saveMoji(candidate: MojiRuntimeCreds) { throw UnsupportedOperationException() }
     suspend fun testQweather(
         candidate: QwRuntimeCreds,
         onStage: (ProviderTestStage) -> Unit,
@@ -95,6 +112,10 @@ internal interface ProviderSetupGateway {
 }
 
 private object RealProviderSetupGateway : ProviderSetupGateway {
+    override suspend fun testSeniverse(key: String, onStage: (ProviderTestStage) -> Unit) = ProviderConnectionTester.testSeniverse(key, onStage)
+    override suspend fun testMoji(candidate: MojiRuntimeCreds, onStage: (ProviderTestStage) -> Unit) = ProviderConnectionTester.testMoji(candidate, onStage)
+    override suspend fun saveSeniverse(key: String) = SecretStore.saveSeniverse(key)
+    override suspend fun saveMoji(candidate: MojiRuntimeCreds) = SecretStore.saveMoji(candidate)
     override suspend fun testQweather(
         candidate: QwRuntimeCreds,
         onStage: (ProviderTestStage) -> Unit,
@@ -173,6 +194,18 @@ internal fun validateProviderCandidate(state: ProviderSetupUiState): Map<String,
         ProviderWizardKind.BAIDU -> {
             if (state.baiduAk.isBlank()) {
                 errors[ProviderField.BAIDU_AK] = "请粘贴服务端应用的 AK"
+            }
+        }
+        ProviderWizardKind.SENIVERSE -> {
+            if (state.apiKey.isBlank()) errors[ProviderField.API_KEY] = "请粘贴心知控制台生成的 API 私钥"
+        }
+        ProviderWizardKind.MOJI -> {
+            if (state.apiKey.isBlank()) errors[ProviderField.API_KEY] = "请粘贴所订阅墨迹服务的 AppCode"
+            if (!validMojiEndpoint(state.mojiCurrentEndpoint, false)) errors[ProviderField.MOJI_NOW_URL] = "请复制墨迹坐标实况接口的 HTTPS 地址，不是 CityID 接口"
+            if (state.mojiCurrentToken.isBlank()) errors[ProviderField.MOJI_NOW_TOKEN] = "请复制实况接口示例中的 Token"
+            if (state.mojiDailyEndpoint.isNotBlank() || state.mojiDailyToken.isNotBlank()) {
+                if (!validMojiEndpoint(state.mojiDailyEndpoint, true)) errors[ProviderField.MOJI_DAY_URL] = "请复制日预报接口的 HTTPS 地址，或将日预报两项同时留空"
+                if (state.mojiDailyToken.isBlank()) errors[ProviderField.MOJI_DAY_TOKEN] = "日预报 Token 与实况 Token 不同，请复制对应示例"
             }
         }
     }
@@ -276,6 +309,10 @@ class ProviderSetupViewModel internal constructor(
     fun setCaiyunToken(value: String) = edit(ProviderField.CAIYUN_TOKEN) { copy(caiyunToken = value) }
     fun setAmapKey(value: String) = edit(ProviderField.AMAP_KEY) { copy(amapKey = value) }
     fun setBaiduAk(value: String) = edit(ProviderField.BAIDU_AK) { copy(baiduAk = value) }
+    fun setMojiCurrentEndpoint(value: String) = edit(ProviderField.MOJI_NOW_URL) { copy(mojiCurrentEndpoint = value) }
+    fun setMojiCurrentToken(value: String) = edit(ProviderField.MOJI_NOW_TOKEN) { copy(mojiCurrentToken = value) }
+    fun setMojiDailyEndpoint(value: String) = edit(ProviderField.MOJI_DAY_URL) { copy(mojiDailyEndpoint = value) }
+    fun setMojiDailyToken(value: String) = edit(ProviderField.MOJI_DAY_TOKEN) { copy(mojiDailyToken = value) }
 
     fun setAuthMode(mode: QweatherAuthMode) {
         if (state.testing) return
@@ -360,6 +397,11 @@ class ProviderSetupViewModel internal constructor(
                     verify = { gateway.testBaidu(it, ::enterStage) },
                     persist = { ak, _ -> gateway.saveBaidu(ak) },
                 )
+                ProviderWizardKind.SENIVERSE -> verifyThenPersist(state.apiKey.trim(),
+                    verify = { gateway.testSeniverse(it, ::enterStage) }, persist = { key, _ -> gateway.saveSeniverse(key) })
+                ProviderWizardKind.MOJI -> verifyThenPersist(
+                    MojiRuntimeCreds(state.apiKey, state.mojiCurrentEndpoint, state.mojiCurrentToken, state.mojiDailyEndpoint, state.mojiDailyToken),
+                    verify = { gateway.testMoji(it, ::enterStage) }, persist = { candidate, _ -> gateway.saveMoji(candidate) })
             }
             val allCompleted = if (result.ok && state.activeStage != null) {
                 state.completedStages + state.activeStage!!

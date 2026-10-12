@@ -8,6 +8,20 @@ import org.junit.Test
 
 /** 中国天气网（d1.weather.com.cn + city.js 码表）解析测试。fixture 为 2026-09-14 实测结构。 */
 class WeatherComCnApiTest {
+    @Test fun datedForecastDoesNotBecomeTodayWhenAWebsiteReturnsAnOldResponse() {
+        val old = WeatherComCnApi.parseIndexText("""var cityDZ={"weatherinfo":{"temp":"25","tempn":"10","fctime":"202610100800"}};""").first
+        val current = WeatherComCnApi.parseSk("""var dataSK={"temp":"20","date":"10月11日(星期日)","time":"09:45"};""")
+        val data = wcnToWeatherData(WeatherComCnApi.WcnBundle("101010100", current, old, emptyList(), emptyList()),
+            java.time.Instant.parse("2026-10-11T02:00:00Z").toEpochMilli())!!
+        assertTrue(data.daily.isEmpty())
+        assertEquals(java.time.Instant.parse("2026-10-11T01:45:00Z").toEpochMilli(), data.updateTime)
+    }
+    @Test fun monthAndDayCanCrossNewYearButMissingTimeIsNotRefreshTime() {
+        val now = java.time.Instant.parse("2027-01-01T00:10:00Z").toEpochMilli()
+        assertEquals(java.time.Instant.parse("2026-12-31T15:55:00Z").toEpochMilli(), wcnCurrentTime("12月31日(星期四)", "23:55", now))
+        assertNull(wcnCurrentTime(null, "08:00", now))
+        assertNull(wcnPublishedTime("invalid", now))
+    }
 
     private val cityJs = """var city_data =
     {

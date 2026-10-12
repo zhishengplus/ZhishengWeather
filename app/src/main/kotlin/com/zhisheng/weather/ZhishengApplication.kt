@@ -22,6 +22,7 @@ class ZhishengApplication : Application() {
         MapLibre.getInstance(this)
         SecretStore.init(this)
         SettingsRepository.init(this)
+        com.zhisheng.weather.data.AutomationSettingsRepository.init(this)
         com.zhisheng.weather.data.SceneWeatherRepository.init(this)
         CityRepository.init(this)
         HistoricalWeatherRepository.init(this)

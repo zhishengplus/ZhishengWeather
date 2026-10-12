@@ -42,6 +42,29 @@ data class QweatherHostResult(
 /** 对尚未保存的候选凭据做一次真实请求；本类不读写 SecretStore，也不记录凭据。 */
 object ProviderConnectionTester {
 
+    suspend fun testSeniverse(key: String, onStage: (ProviderTestStage) -> Unit): ProviderConnectionResult {
+        onStage(ProviderTestStage.VALIDATE)
+        if (key.isBlank()) return ProviderConnectionResult(false, "Key 未填写", "请从个人控制台复制 API 私钥")
+        onStage(ProviderTestStage.CONNECT)
+        val data = DomesticWeatherSource.seniverse(City("北京", "北京市", 39.9042, 116.4074, "test"), key.trim(), verifyOnly = true)
+        onStage(ProviderTestStage.VERIFY)
+        return ProviderConnectionResult(data.error == null && data.current != null,
+            if (data.error == null) "心知实况验证通过" else "心知验证未通过",
+            data.error ?: "已请求北京测试坐标的城市实况，消耗一次个人额度；3天预报与基础指数在选用来源后查询")
+    }
+
+    suspend fun testMoji(candidate: MojiRuntimeCreds, onStage: (ProviderTestStage) -> Unit): ProviderConnectionResult {
+        onStage(ProviderTestStage.VALIDATE)
+        if (!candidate.ready) return ProviderConnectionResult(false, "配置未完整", "请填写所订阅坐标产品的 HTTPS 地址、AppCode 和对应 Token")
+        onStage(ProviderTestStage.CONNECT)
+        val data = DomesticWeatherSource.moji(City("北京", "北京市", 39.9042, 116.4074, "test"), candidate)
+        onStage(ProviderTestStage.VERIFY)
+        if (data.error != null || data.current == null) return ProviderConnectionResult(false, "墨迹实况验证未通过", data.error ?: "服务没有返回实况")
+        if (candidate.dailyEndpoint.isNotBlank() && data.daily.isEmpty()) return ProviderConnectionResult(false, "日预报未通过验证",
+            "实况可用，请核对日预报接口、对应 Token 和权限；也可将日预报两项留空仅保存实况，原配置未改变")
+        return ProviderConnectionResult(true, "墨迹验证通过", "北京测试坐标已返回${if (data.daily.isEmpty()) "实况" else "实况与日预报"}，消耗${if (candidate.dailyEndpoint.isBlank()) "1" else "2"}次个人额度")
+    }
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
     fun normalizeQweatherHost(raw: String): QweatherHostResult {

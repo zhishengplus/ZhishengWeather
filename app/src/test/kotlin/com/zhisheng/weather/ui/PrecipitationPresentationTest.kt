@@ -6,6 +6,43 @@ import org.junit.Test
 
 class PrecipitationPresentationTest {
     private val now = 1_800_000_000_000L
+    private fun dryWindow(count: Int = 120, interval: Int = 1) = precipitationPresentation(
+        WeatherData(rainMinutes = (0 until count).map { MinutePrecip(now + it * interval * 60_000L, 0f) },
+            rainMeta = RainMeta("XIAOMI", interval)), now)
+    @Test fun gameNeedsAnUnbrokenCurrentTwoHourDryWindow() {
+        assertTrue(dryWindow().hasDrySkyWindow())
+        assertTrue(dryWindow(8, 15).hasDrySkyWindow())
+        assertFalse(dryWindow(119).hasDrySkyWindow())
+        assertFalse(dryWindow(2).hasDrySkyWindow())
+        val full = dryWindow()
+        assertFalse(full.copy(points = full.points.filterIndexed { i, _ -> i != 30 }).hasDrySkyWindow())
+        assertFalse(full.copy(hourlyFallback = true).hasDrySkyWindow())
+        assertFalse(full.copy(intervalMinutes = null).hasDrySkyWindow())
+        assertFalse(full.copy(dry = false).hasDrySkyWindow())
+        assertTrue(full.copy(nowMillis = now + 10 * 60_000).hasDrySkyWindow())
+        assertFalse(full.copy(nowMillis = now + 16 * 60_000).hasDrySkyWindow())
+    }
+    @Test fun completeResponseSurvivesDeliveryDelayButNotStaleDataOrHoles() {
+        val zero = (0 until 120).map { MinutePrecip(now + it * 60_000, 0f) }
+        val data = WeatherData(rainMinutes = zero, rainMeta = RainMeta("XIAOMI", 1))
+        for (age in listOf(1L, 34_000L, 180_000L, 900_000L))
+            assertTrue(precipitationPresentation(data, now + age).hasDrySkyWindow())
+        assertFalse(precipitationPresentation(data, now + 900_001L).hasDrySkyWindow())
+        assertFalse(precipitationPresentation(data.copy(rainMinutes = zero.drop(1)), now + 34_000).hasDrySkyWindow())
+        assertFalse(precipitationPresentation(data.copy(rainMinutes = zero.filterIndexed { i, _ -> i != 1 }),
+            now + 180_000).hasDrySkyWindow())
+        assertFalse(precipitationPresentation(data.copy(rainMinutes = zero.dropLast(1)), now + 34_000).hasDrySkyWindow())
+    }
+    @Test fun rainMissingExpiredAndFutureOnlyNeverOpenGame() {
+        val zero = (0..120).map { MinutePrecip(now + it * 60_000, 0f) }
+        for (data in listOf(
+            WeatherData(), WeatherData(rainNowcast = "暂无降水"),
+            WeatherData(rainMinutes = zero.map { it.copy(timeMillis = it.timeMillis - 8_000_000) }),
+            WeatherData(rainMinutes = zero.map { it.copy(timeMillis = it.timeMillis + 900_000) }),
+            WeatherData(rainMinutes = zero, current = CurrentWeather(condition = WeatherCondition.RAIN)),
+            WeatherData(rainMinutes = zero.mapIndexed { i, it -> if (i == 50) it.copy(precip = .5f) else it }),
+        )) assertFalse(precipitationPresentation(data, now).hasDrySkyWindow())
+    }
     @Test fun caiyunWithoutMinutePermissionShowsNativeHourlySamples() {
         val data = WeatherData(dataSource = "CAIYUN", current = CurrentWeather(condition = WeatherCondition.RAIN),
             hourly = listOf(HourlyWeather(now + 3_600_000, precipMm = .7),

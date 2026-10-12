@@ -32,7 +32,7 @@ class FullScreenLayoutTest {
         assertTrue(home.contains("Fmt.coordinates(it.latitude, it.longitude, precise = it.isPreciseLocation)"))
         assertTrue(home.contains("textAlign = TextAlign.End"))
         assertTrue(home.contains("SRC \${dataSourceShortLabel(data.dataSource)}"))
-        assertTrue(home.contains("data.locationMatch?.preciseGps == true"))
+        assertTrue(home.contains("city?.coordinateLabel"))
         assertTrue(home.contains("widthIn(max = chrome.contentMaxWidth)"))
         assertFalse(home.contains("\"\$updText // SRC"))
     }

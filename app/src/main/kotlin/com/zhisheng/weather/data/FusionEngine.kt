@@ -581,7 +581,8 @@ object FusionEngine {
             sources.firstOrNull { it.id == id }?.data?.rainMeta?.let { return it }
         }
         return if (omMinutelyToMinutes(om, nowMillis).isNotEmpty()) {
-            RainMeta(source = "OPEN-METEO", intervalMinutes = 15, horizonMinutes = 120)
+            // Fusion input time is this OM request's start, not a later UI or reminder check.
+            RainMeta(source = "OPEN-METEO", intervalMinutes = 15, updateTime = nowMillis, horizonMinutes = 120)
         } else null
     }
 

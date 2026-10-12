@@ -20,19 +20,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhisheng.weather.ui.theme.*
 import com.zhisheng.weather.data.HomeSurfaceStyle
+import com.zhisheng.weather.R
+import com.zhisheng.weather.ui.components.PhosphorIcon
 
 internal fun settingsActionLabel(label: String): String = label.trimStart('>', '⌖', ' ')
 
 @Composable
-internal fun VistaSettingsChoices(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, singleRow: Boolean = false) {
+internal fun VistaSettingsChoices(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit,
+    singleRow: Boolean = false, maxColumns: Int = Int.MAX_VALUE, showSelectionMark: Boolean = false) {
     if (options.isEmpty()) return
     val palette = LocalZhishengPalette.current
     val glass = LocalHomeSurfaceStyle.current == HomeSurfaceStyle.FRAGRANCE_GLASS
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
         val longest = options.maxOf { it.first.length }.coerceAtMost(10)
-        val minimum = maxOf(72f, 24f + longest * 13f * fontScale)
-        val columns = if (singleRow) options.size else ((maxWidth.value - 8f) / minimum).toInt().coerceIn(1, options.size)
+        val markWidth = if (showSelectionMark) 22f else 0f
+        val minimum = maxOf(72f, 24f + markWidth + longest * 13f * fontScale)
+        val columns = if (singleRow) options.size else ((maxWidth.value - 8f) / minimum).toInt()
+            .coerceIn(1, minOf(options.size, maxColumns.coerceAtLeast(1)))
         Column(Modifier.fillMaxWidth().selectableGroup().clip(RoundedCornerShape(16.dp))
             .background(if (glass) {
                 if (palette.isLight) Color(0xFF345269).copy(alpha = .055f) else Color.White.copy(alpha = .045f)
@@ -50,10 +55,18 @@ internal fun VistaSettingsChoices(options: List<Pair<String, String>>, current: 
                             } else Color.Transparent)
                             .selectable(selected, role = Role.RadioButton) { onPick(value) }
                             .padding(horizontal = if (singleRow) 3.dp else 8.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
-                            Text(label, textAlign = TextAlign.Center,
+                            Row(modifier = if (showSelectionMark) Modifier.fillMaxWidth() else Modifier,
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (showSelectionMark) Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+                                if (selected) PhosphorIcon(R.drawable.ph_check, null, Modifier.size(16.dp), palette.mint)
+                            }
+                            Text(label, modifier = if (showSelectionMark) Modifier.weight(1f) else Modifier,
+                                textAlign = TextAlign.Center,
                                 style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp, lineHeight = 19.sp),
                                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                                 color = if (selected) palette.mint else palette.textSecondary)
+                            }
                         }
                     }
                     repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }

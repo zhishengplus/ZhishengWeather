@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent">
+    <ImageView android:id="@+id/widget_surface" android:layout_width="match_parent" android:layout_height="match_parent" android:src="@drawable/widget_classic_surface" android:scaleType="fitXY" android:contentDescription="" />
+    <LinearLayout android:id="@+id/widget_content" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="14dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="20dp" android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:shadowColor="#33000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_city" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="12sp" android:fontFamily="sans-serif" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:shadowColor="#33000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_footer" android:layout_width="76dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:gravity="end" android:textSize="9sp" android:fontFamily="sans-serif" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/widget_main_hero" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:shadowColor="#33000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_temp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textSize="28sp" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+            <ImageView android:id="@+id/widget_icon" android:layout_width="52dp" android:layout_height="52dp" android:layout_marginStart="6dp" android:scaleType="fitCenter" android:contentDescription="" />
+        </LinearLayout>
+        <TextView android:shadowColor="#33000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_condition" android:layout_width="match_parent" android:layout_height="16dp" android:textSize="12sp" android:fontFamily="sans-serif" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:shadowColor="#33000000" android:shadowRadius="1.5" android:shadowDy="0.5" android:id="@+id/widget_range" android:layout_width="match_parent" android:layout_height="16dp" android:textSize="12sp" android:fontFamily="sans-serif" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+        <LinearLayout android:id="@+id/widget_forecast" android:layout_width="match_parent" android:layout_height="0dp" android:orientation="horizontal" android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

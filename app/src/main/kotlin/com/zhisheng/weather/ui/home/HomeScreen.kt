@@ -5,6 +5,9 @@ package com.zhisheng.weather.ui.home
 import com.zhisheng.weather.ui.Text
 import com.zhisheng.weather.ui.weatherPresentationTime
 import com.zhisheng.weather.ui.LocalWeatherPreviewTime
+import com.zhisheng.weather.ui.hasDrySkyWindow
+import com.zhisheng.weather.ui.game.SkyBirdBadge
+import com.zhisheng.weather.ui.game.SkyBirdGameDialog
 import com.zhisheng.weather.data.HomeSurfaceStyle
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.repeatOnLifecycle
@@ -140,6 +143,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
@@ -294,6 +299,7 @@ fun HomeScreen(
     viewModel: WeatherViewModel,
     ambienceActive: Boolean = true,
     onSearchClick: () -> Unit,
+    onLocationSetupClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onRadarClick: () -> Unit,
@@ -331,6 +337,10 @@ fun HomeScreen(
 
     LaunchedEffect(uiState.selectedCity?.locationKey) {
         weatherContentScrolling = false
+        cityDeckVisible = false
+        cityDeckPinned = false
+        cityDeckExpansion = 0f
+        if (drawerState.isOpen) drawerState.snapTo(DrawerValue.Closed)
     }
 
     BackHandler(enabled = cityDeckVisible) {
@@ -343,7 +353,7 @@ fun HomeScreen(
     // 只看 condition 的话夜里的晴天也会走白天那套。每分钟对一次表，
     // 日落之后主屏立刻换成星点，不必等下一次天气刷新（v0.0.9）。
     // Keep the last sky while the next city's weather is being fetched.
-    var lastAtmosphereWeather by remember { mutableStateOf(uiState.weather) }
+    var lastAtmosphereWeather by remember(uiState.selectedCity?.locationKey) { mutableStateOf(uiState.weather) }
     androidx.compose.runtime.SideEffect {
         if (uiState.weather != null) lastAtmosphereWeather = uiState.weather
     }
@@ -366,6 +376,7 @@ fun HomeScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             CityDrawer(
                 uiState = uiState,
@@ -420,7 +431,46 @@ fun HomeScreen(
                                 drawLayer(scrollBackdrop)
                             } else Modifier),
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.fillMaxSize().pointerInput(
+                        uiState.cities.map { it.locationKey }, uiState.selectedCity?.locationKey,
+                        ambienceActive, cityDeckVisible, drawerState.isOpen,
+                    ) {
+                        if (!ambienceActive || cityDeckVisible || drawerState.isOpen || uiState.cities.size < 2)
+                            return@pointerInput
+                        val threshold = 64.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+                            var dx = 0f
+                            var dy = 0f
+                            var horizontal = false
+                            var cancelled = false
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Final)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                // Child hourly/date charts and vertical list retain their gestures.
+                                if (event.changes.count { it.pressed } > 1 || change.isConsumed) {
+                                    cancelled = true
+                                    break
+                                }
+                                val delta = change.positionChange()
+                                dx += delta.x
+                                dy += delta.y
+                                if (!horizontal) {
+                                    horizontal = isHorizontalCitySwipe(dx, dy, viewConfiguration.touchSlop)
+                                    if (!horizontal && abs(dy) >= viewConfiguration.touchSlop) {
+                                        cancelled = true
+                                        break
+                                    }
+                                }
+                                if (horizontal) change.consume()
+                                if (!change.pressed) break
+                            }
+                            if (!cancelled && isHorizontalCitySwipe(dx, dy, threshold)) {
+                                citySwipeTarget(uiState.cities.map { it.locationKey },
+                                    uiState.selectedCity?.locationKey, dx)?.let(viewModel::selectCity)
+                            }
+                        }
+                    }) {
                         // 0.0.9-debug：cities 占位期（citiesLoaded=false）不判空态，
                         // 渲染 loading——否则已存城市的用户每次冷启动闪一屏"未接入城市"。
                         val weatherSnapshot = uiState.weather
@@ -448,7 +498,7 @@ fun HomeScreen(
                         }
                         // Crossfade 的退出帧必须持有上一城市的完整快照。若在 lambda 内继续读取
                         // uiState.weather，selectCity() 清空天气后旧 "data" 帧仍会组合并触发 NPE。
-                        var displayedContentKey by remember { mutableStateOf(contentKey) }
+                        var displayedContentKey by remember(uiState.selectedCity?.locationKey) { mutableStateOf(contentKey) }
                         val contentOpacity = remember { Animatable(1f) }
                         LaunchedEffect(contentKey) {
                             if (displayedContentKey != contentKey) {
@@ -461,7 +511,7 @@ fun HomeScreen(
                         Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentOpacity.value }) {
                             val page = displayedContentKey
                             when (page) {
-                                HomeContentKey.Empty -> EmptyState(onSearchClick)
+                                HomeContentKey.Empty -> EmptyState(onSearchClick, onLocationSetupClick)
                                 is HomeContentKey.Error -> ErrorState(page.message, onSearchClick)
                                 // 0.0.9-debug 修复：按城市 key 包一层。换城市时若只使用统一的
                                 // "data" key，WeatherContent 不重建，原城市停在半截的滚动深度、
@@ -610,7 +660,7 @@ fun HomeScreen(
                                 cityDeckExpansion = 0f
                                 pinnedThisGesture = false
                                 // detectDragGesturesAfterLongPress 已经确认长按成立；此时才亮出
-                                // 卡组，所以普通的主页横向滑动仍不会触发城市切换。
+                                // 卡组；主页普通横滑由天气内容层按方向判定处理。
                                 cityDeckVisible = true
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             },
@@ -1380,7 +1430,7 @@ private fun StatusLine(city: com.zhisheng.weather.model.City?, data: WeatherData
     } else {
         "${updateStamp?.code ?: "UPD"} ${updateStamp?.let { Fmt.stamp(it.timeMillis, data.utcOffsetSeconds) } ?: "--"}"
     }
-    val gpsText = if (data.locationMatch?.preciseGps == true) " · GPS" else ""
+    val gpsText = city?.let { " · ${it.coordinateLabel}" }.orEmpty()
     val sourceTimeText = if (data.fetchedAt != null) data.updateTime?.let {
         " · DATA ${Fmt.stamp(it, data.utcOffsetSeconds)}"
     }.orEmpty() else ""
@@ -1395,7 +1445,7 @@ private fun StatusLine(city: com.zhisheng.weather.model.City?, data: WeatherData
                 append("${staleAgeMillis / 60_000L} 分钟前保存")
             }
         }
-        val locationLabel = if (data.locationMatch?.preciseGps == true) "GPS" else "城市位置"
+        val locationLabel = city?.coordinateLabel ?: "位置未知"
         var details by rememberSaveable(city?.locationKey) { mutableStateOf(false) }
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -1418,7 +1468,7 @@ private fun StatusLine(city: com.zhisheng.weather.model.City?, data: WeatherData
                             style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
                     }
                     Text("$coord · $locationLabel", modifier = Modifier.semantics {
-                        contentDescription = "经纬度 $coord，" + if (data.locationMatch?.preciseGps == true) "GPS 精确定位" else "城市位置"
+                        contentDescription = "经纬度 $coord，$locationLabel"
                     },
                         style = MaterialTheme.typography.bodySmall, color = ZhishengTextTertiary)
                 }
@@ -2268,6 +2318,14 @@ internal fun hourlyDisplayItems(
     hourly: List<HourlyWeather>,
     nowMillis: Long,
     currentAqi: Int? = null,
+): List<HourlyDisplayItem> = hourlyDisplaySequence(current, hourly, nowMillis, currentAqi).take(HOME_HOURLY_ITEM_LIMIT)
+
+/** The detail screen keeps the complete provider horizon; only home is capped. */
+internal fun hourlyDisplaySequence(
+    current: CurrentWeather?,
+    hourly: List<HourlyWeather>,
+    nowMillis: Long,
+    currentAqi: Int? = null,
 ): List<HourlyDisplayItem> {
     if (hourly.isEmpty()) {
         return current?.let {
@@ -2284,7 +2342,7 @@ internal fun hourlyDisplayItems(
         (if (current != null) previous else anchor)?.let { add(HourlyDisplayItem(it, isNow = false)) }
         current?.let { add(HourlyDisplayItem(currentAsHourly(it, anchor, nowMillis, currentAqi), isNow = true)) }
         future.forEach { add(HourlyDisplayItem(it, isNow = false)) }
-    }.take(HOME_HOURLY_ITEM_LIMIT)
+    }
 }
 
 private fun currentAsHourly(
@@ -2511,6 +2569,29 @@ private fun HourlyItem(
 @Composable
 internal fun PrecipCard(data: WeatherData, modifier: Modifier, onClick: () -> Unit = {}) {
     val presentation = com.zhisheng.weather.ui.rememberPrecipitationPresentation(data)
+    val drySky = presentation.hasDrySkyWindow()
+    var showBird by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(drySky) { if (!drySky) showBird = false }
+    if (showBird && drySky) SkyBirdGameDialog(onWeatherDetails = { showBird = false; onClick() }) { showBird = false }
+    if (drySky) {
+        HudCard(modifier = modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).heightIn(min = 48.dp)
+                    .clickable(role = Role.Button, onClickLabel = "打开云间小鸟游戏", onClick = { showBird = true }),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SkyBirdBadge(Modifier.size(38.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("预报时段内暂无降水", color = ZhishengText, style = MaterialTheme.typography.bodyMedium)
+                        Text("云间小鸟 · 点一下放松", color = ZhishengTextSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                IconButton(onClick = { showBird = true }, modifier = Modifier.size(48.dp)) {
+                    PhosphorIcon(R.drawable.ph_arrow_right, "打开云间小鸟", Modifier.size(18.dp), ZhishengTextTertiary)
+                }
+            }
+        }
+        return
+    }
     HudCard(modifier = modifier.fillMaxWidth()) {
         Column(
             Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看降水详情", onClick = onClick)
@@ -4233,6 +4314,10 @@ private fun dataSourceLabel(source: String?): String = when (source) {
     "OPEN-METEO" -> "数据来自 Open-Meteo"
     "NMC" -> "数据来自中央气象台"
     "ZHISHENG" -> "数据来自枳生天气源"
+    "TENCENT" -> "数据来自腾讯天气"
+    "WEATHERCN" -> "数据来自中国天气网"
+    "SENIVERSE" -> "数据来自心知天气"
+    "MOJI" -> "数据来自墨迹天气"
     else -> "DATA ${source ?: "--"}"
 }
 
@@ -4272,6 +4357,10 @@ internal fun dataSourceShortLabel(source: String?): String = when {
         "OPEN-METEO" -> "OPEN-METEO"
         "NMC" -> "中央气象台"
         "ZHISHENG" -> "枳生"
+        "TENCENT" -> "腾讯"
+        "WEATHERCN" -> "中国天气网"
+        "SENIVERSE" -> "心知"
+        "MOJI" -> "墨迹"
         "SIMULATION" -> "效果预览"
         else -> source
     }
@@ -4290,17 +4379,21 @@ private fun BootState() {
 }
 
 @Composable
-private fun EmptyState(onSearchClick: () -> Unit) {
+private fun EmptyState(onSearchClick: () -> Unit, onLocateClick: () -> Unit) {
     if (isPhosphorVista) {
         Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             WeatherIcon(WeatherCondition.CLEAR, Modifier.size(80.dp))
             Spacer(Modifier.height(24.dp))
             Text("从一座城市开始", style = MaterialTheme.typography.headlineSmall, color = ZhishengText)
             Spacer(Modifier.height(8.dp))
-            Text("添加城市，查看此刻天气与未来变化", style = MaterialTheme.typography.bodyMedium, color = ZhishengTextSecondary)
+            Text("定位当前位置，或手动选择城市", style = MaterialTheme.typography.bodyMedium, color = ZhishengTextSecondary)
             Spacer(Modifier.height(24.dp))
+            Box(Modifier.fillMaxWidth().zhishengPanel().clickable(role = Role.Button, onClick = onLocateClick).heightIn(min = 52.dp), contentAlignment = Alignment.Center) {
+                Text("定位当前位置", style = MaterialTheme.typography.labelLarge, color = ZhishengMint)
+            }
+            Spacer(Modifier.height(12.dp))
             Box(Modifier.fillMaxWidth().zhishengPanel().clickable(role = Role.Button, onClick = onSearchClick).heightIn(min = 52.dp), contentAlignment = Alignment.Center) {
-                Text("添加城市", style = MaterialTheme.typography.labelLarge, color = ZhishengMint)
+                Text("手动选择城市", style = MaterialTheme.typography.labelLarge, color = ZhishengText)
             }
         }
         return
@@ -4308,7 +4401,7 @@ private fun EmptyState(onSearchClick: () -> Unit) {
     // 无城市时的终端提示，文案不点名任何具体城市。
     val lines = listOf(
         "NO CITY // 未接入城市",
-        "SEARCH ANY CITY // 输入任意城市名",
+        "LOCATE OR SEARCH // 定位或选择城市",
         "AWAITING INPUT ...",
     )
     var doneCount by remember { mutableIntStateOf(0) }
@@ -4357,10 +4450,20 @@ private fun EmptyState(onSearchClick: () -> Unit) {
         }
         Spacer(Modifier.height(24.dp))
         Box(
+            Modifier.zhishengCompactPanel(borderColor = ZhishengMint.copy(alpha = 0.6f))
+                .drawCornerBrackets(ZhishengMint)
+                .clickable(role = Role.Button, onClickLabel = "定位当前位置", onClick = onLocateClick)
+                .heightIn(min = 48.dp).padding(horizontal = 20.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("[ 定位当前位置 ]", style = MaterialTheme.typography.titleSmall, color = ZhishengMint)
+        }
+        Spacer(Modifier.height(12.dp))
+        Box(
             Modifier
                 .zhishengCompactPanel(borderColor = ZhishengMint.copy(alpha = 0.6f))
                 .then(if (isPhosphorVista) Modifier else Modifier.drawCornerBrackets(ZhishengMint))
-                .clickable(role = Role.Button, onClickLabel = "添加城市") { onSearchClick() }
+                .clickable(role = Role.Button, onClickLabel = "手动选择城市") { onSearchClick() }
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Text(if (isPhosphorVista) "添加城市" else "[ + ADD CITY ]", style = MaterialTheme.typography.titleSmall, color = ZhishengMint, letterSpacing = 1.sp)

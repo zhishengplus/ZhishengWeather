@@ -82,6 +82,7 @@ object WeatherComCnApi {
         /** "8km/h" → 8.0（内部 km/h）。 */
         val windSpeedKmh: Double?,
         val time: String?,
+        val date: String? = null,
     )
 
     internal data class WcnToday(
@@ -93,6 +94,7 @@ object WeatherComCnApi {
         val nightCode: String?,
         val windText: String?,
         val windPower: String?,
+        val forecastTime: String? = null,
     )
 
     internal data class WcnIndex(val name: String, val en: String, val level: String?)
@@ -111,6 +113,7 @@ object WeatherComCnApi {
         val today: WcnToday?,
         val indices: List<WcnIndex>,
         val alarms: List<WcnAlarm>,
+        val indexTime: String? = null,
     )
 
     internal suspend fun fetch(city: City): WcnBundle? = try {
@@ -128,6 +131,7 @@ object WeatherComCnApi {
                 today = parsed?.first,
                 alarms = parsed?.second.orEmpty(),
                 indices = parsed?.third.orEmpty(),
+                indexTime = idxText?.let { extractVar(it, "dataZS")?.obj("zs")?.primString("date") },
             )
         }
     } catch (ce: CancellationException) {
@@ -237,6 +241,7 @@ object WeatherComCnApi {
             windDirection = obj.primString("WD")?.takeIf { it.isNotBlank() },
             windSpeedKmh = obj.primString("wse")?.filter { it.isDigit() || it == '.' }?.toDoubleOrNull(),
             time = obj.primString("time"),
+            date = obj.primString("date"),
         )
     }
 
@@ -253,6 +258,7 @@ object WeatherComCnApi {
                 nightCode = normalizeCode(w.primString("weatherncode") ?: w.primString("weathercoden")),
                 windText = w.primString("wd")?.takeIf { it.isNotBlank() },
                 windPower = w.primString("ws")?.takeIf { it.isNotBlank() },
+                forecastTime = w.primString("fctime"),
             )
         }
         val alarms = extractVar(text, "alarmDZ")?.get("w")
@@ -332,18 +338,8 @@ object WeatherComCnApi {
         return null
     }
 
-    private fun getText(url: String): String? = try {
-        okHttp.newCall(
-            Request.Builder().url(url)
-                .header("User-Agent", UA)
-                .header("Referer", REFERER)
-                .build()
-        ).execute().use { resp ->
-            if (!resp.isSuccessful) null else resp.body?.string()
-        }
-    } catch (_: Exception) {
-        null
-    }
+    private suspend fun getText(url: String): String? = weatherAwaitText(okHttp,
+        Request.Builder().url(url).header("User-Agent", UA).header("Referer", REFERER).build())
 
     private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
     private fun JsonObject.primString(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
@@ -354,7 +350,10 @@ object WeatherComCnApi {
 internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long): WeatherData? {
     val offset = java.time.ZoneOffset.ofHours(8)
     val today = cityDate(nowMillis, 28800)
-    val current = bundle.current?.let { c ->
+    val currentTime = bundle.current?.let { c -> wcnCurrentTime(c.date, c.time, nowMillis) }
+    val forecastTime = wcnPublishedTime(bundle.today?.forecastTime, nowMillis)
+    val forecastDate = forecastTime?.let { cityDate(it, 28800) }
+    val current = bundle.current?.takeIf { it.temperature != null || !it.weatherText.isNullOrBlank() }?.let { c ->
         CurrentWeather(
             temperature = c.temperature,
             condition = WeatherCondition.fromCode(c.weatherCode),
@@ -367,10 +366,10 @@ internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long
             windDirectionDeg = NmcSource.windDirToDegree(c.windDirection),
         )
     }
-    val daily = bundle.today?.let { t ->
+    val daily = bundle.today?.takeIf { forecastDate != null && forecastDate >= today }?.let { t ->
         listOf(
             DailyWeather(
-                dateMillis = today.atStartOfDay(offset).toInstant().toEpochMilli(),
+                dateMillis = requireNotNull(forecastDate).atStartOfDay(offset).toInstant().toEpochMilli(),
                 high = t.high,
                 low = t.low,
                 condition = WeatherCondition.moreSignificant(
@@ -407,5 +406,32 @@ internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long
         carWashOk = hintToOk(bundle.indices.firstOrNull { it.en == "xc" }?.level),
         sportsOk = hintToOk(bundle.indices.firstOrNull { it.en == "yd" }?.level),
         utcOffsetSeconds = 28800,
+        updateTime = currentTime,
+        fetchedAt = nowMillis,
+        moduleEvidence = buildMap {
+            fun add(key: String, time: Long?) { put(key, com.zhisheng.weather.model.WeatherModuleEvidence(
+                "WEATHERCN", time, nowMillis, locationScope = "网站城市编号 ${bundle.areaId}（城市或区县天气）")) }
+            if (current != null) add("current", currentTime)
+            if (daily.isNotEmpty()) add("forecast", forecastTime)
+            if (bundle.indices.isNotEmpty()) add("indices", wcnPublishedTime(bundle.indexTime, nowMillis))
+            if (aqi != null) add("air", currentTime)
+        },
     )
+}
+
+internal fun wcnPublishedTime(raw: String?, nowMillis: Long): Long? = raw?.let { value ->
+    listOf("yyyyMMddHHmm", "yyyyMMddHH", "yyyy-MM-dd HH:mm").firstNotNullOfOrNull { pattern ->
+        runCatching { java.time.LocalDateTime.parse(value, java.time.format.DateTimeFormatter.ofPattern(pattern))
+            .toInstant(java.time.ZoneOffset.ofHours(8)).toEpochMilli() }.getOrNull()
+    }
+}?.takeIf { it > 0L && it <= nowMillis + 300_000L }
+
+/** SK has month/day and time but no year; choose the latest non-future occurrence, including New Year. */
+internal fun wcnCurrentTime(date: String?, time: String?, nowMillis: Long): Long? {
+    val parts = Regex("(\\d{1,2})月(\\d{1,2})日").find(date.orEmpty()) ?: return null
+    val year = cityDate(nowMillis, 28800).year
+    return listOf(year, year - 1).mapNotNull { y -> runCatching {
+        val day = java.time.LocalDate.of(y, parts.groupValues[1].toInt(), parts.groupValues[2].toInt())
+        day.atTime(java.time.LocalTime.parse(time)).toInstant(java.time.ZoneOffset.ofHours(8)).toEpochMilli()
+    }.getOrNull() }.filter { it <= nowMillis + 300_000L }.maxOrNull()
 }

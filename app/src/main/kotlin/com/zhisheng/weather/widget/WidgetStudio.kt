@@ -45,14 +45,16 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.zhisheng.weather.R
 import com.zhisheng.weather.data.CityRepository
 import com.zhisheng.weather.i18n.uiText
@@ -60,9 +62,11 @@ import com.zhisheng.weather.model.*
 import com.zhisheng.weather.ui.components.PhosphorIcon
 import com.zhisheng.weather.ui.components.HomeBackdrop
 import com.zhisheng.weather.ui.components.LocalHomeBackdrop
+import com.zhisheng.weather.ui.components.WeatherOverlayDialog
 import com.zhisheng.weather.ui.ProvideWeatherPresentationClock
 import com.zhisheng.weather.ui.theme.ZhishengWeatherTheme
 import com.zhisheng.weather.ui.theme.zhishengGlassActionBar
+import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 import com.zhisheng.weather.data.HomeSurfaceStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,7 +79,9 @@ import kotlin.math.roundToInt
 private data class StudioColors(val bg: Color, val panel: Color, val ink: Color, val muted: Color, val accent: Color, val edge: Color, val classic: Boolean) {
     val shape get() = RoundedCornerShape(if (classic) 14.dp else 24.dp)
 }
-private val LocalStudio = staticCompositionLocalOf { StudioColors(Color(0xFFEDF4F5), Color.White, Color(0xFF203A43), Color(0xFF647D85), Color(0xFF315F6D), Color(0xFFDCE7E9), false) }
+private val LightStudioColors = StudioColors(Color(0xFFEDF4F5), Color.White, Color(0xFF203A43), Color(0xFF647D85), Color(0xFF315F6D), Color(0xFFDCE7E9), false)
+private val ClassicStudioColors = StudioColors(Color(0xFF141B1B), Color(0xFF1D2827), Color(0xFFE5EDE7), Color(0xFF9EAFA7), Color(0xFFABD1BD), Color(0xFF344340), true)
+private val LocalStudio = staticCompositionLocalOf { LightStudioColors }
 private val configSaver = Saver<WidgetConfig, String>(save = { Json.encodeToString(WidgetConfig.serializer(), it) }, restore = { Json.decodeFromString<WidgetConfig>(it) })
 
 // The carousel must keep the controls below it in the same place on every page.
@@ -90,7 +96,7 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                           onApply: (WidgetKind, WidgetConfig) -> Unit, previewData: WidgetSnapshot? = null,
                           pinState: WidgetPinState = WidgetPinState.IDLE, onAddHelp: (WidgetKind) -> Unit = {}) {
     val classic = style == WidgetStyle.CLASSIC
-    val colors = if (classic) StudioColors(Color(0xFF141B1B), Color(0xFF1D2827), Color(0xFFE5EDE7), Color(0xFF9EAFA7), Color(0xFFABD1BD), Color(0xFF344340), true) else LocalStudio.current
+    val colors = if (classic) ClassicStudioColors else LightStudioColors
     ProvideWeatherPresentationClock {
     CompositionLocalProvider(LocalStudio provides colors) {
         MaterialTheme(colorScheme = if (classic) darkColorScheme(primary = colors.accent, surface = colors.panel, background = colors.bg, onSurface = colors.ink, onPrimary = colors.bg)
@@ -99,6 +105,7 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
             var tab by rememberSaveable { mutableIntStateOf(0) }
             var backdrop by rememberSaveable { mutableIntStateOf(0) }
             var largePreview by rememberSaveable { mutableStateOf(false) }
+            var previewWall by rememberSaveable { mutableStateOf(false) }
             val pager = rememberPagerState(initialPage = initialKind.ordinal, pageCount = { WidgetKind.entries.size })
             val scope = rememberCoroutineScope()
             val context = LocalContext.current
@@ -125,6 +132,8 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
             val footerClearance = with(density) { footerPixels.toDp() } + 16.dp
             BoxWithConstraints(Modifier.fillMaxSize().background(colors.bg)) {
             val short = maxHeight < 500.dp
+            val compact = short || (density.fontScale > 1.2f && maxHeight < 800.dp)
+            val splitKindHeading = maxWidth < 360.dp || density.fontScale > 1.2f
             val previewHeight = minOf(previewStageHeight(largePreview).toFloat(),
                 (maxHeight.value - if (short) 280f else 380f).coerceAtLeast(64f)).dp
             Column(Modifier.fillMaxSize().onGloballyPositioned { sourceOrigin = it.positionInRoot() }
@@ -144,11 +153,14 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                         ((edge + 12.dp.toPx()) / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f) to Color.Transparent,
                         1f to Color.Transparent), blendMode = BlendMode.DstIn)
                 }) {
-                Row(Modifier.fillMaxWidth().height(if (short) 52.dp else 62.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().height(if (compact) 52.dp else 62.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onClose) { PhosphorIcon(R.drawable.ph_arrow_left, "返回", Modifier.size(22.dp), colors.ink) }
-                    Text("${style.title}小组件", color = colors.ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    Text(if (compact) style.title else "${style.title}小组件", color = colors.ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                         modifier = Modifier.weight(1f))
-                    TextButton(onClick = { backdrop = (backdrop + 1) % 3 }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    TextButton(onClick = {
+                        backdrop = (backdrop + 1) % 3
+                        if (compact) largePreview = true
+                    }, modifier = Modifier.heightIn(min = 48.dp)) {
                         PhosphorIcon(R.drawable.ph_sun, null, Modifier.size(17.dp), colors.accent)
                         Spacer(Modifier.width(4.dp))
                         Text("试壁纸", color = colors.accent, fontSize = 12.sp)
@@ -156,12 +168,8 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                     Text(if (editingId == null) "${pager.currentPage + 1}/5" else "编辑", color = colors.muted, fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace, modifier = Modifier.padding(start = 4.dp, end = 10.dp))
                 }
-                if (!short) Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(previewHeight).clip(colors.shape)
-                    .background(Brush.linearGradient(when (backdrop) {
-                        1 -> listOf(Color(0xFF3B5263), Color(0xFF202B38), Color(0xFF617782))
-                        2 -> listOf(Color(0xFFCCC2AB), Color(0xFF758777), Color(0xFFB3C9C6))
-                        else -> if (classic) listOf(Color(0xFF394845), Color(0xFF62716A), Color(0xFF364744)) else listOf(Color(0xFFA7C9D9), Color(0xFFD9E8E8), Color(0xFF89B6C5))
-                    }))) {
+                if (!compact) Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(previewHeight).clip(colors.shape)
+                    .background(Brush.linearGradient(studioBackdropColors(style, backdrop)))) {
                     HorizontalPager(state = pager, userScrollEnabled = editingId == null, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { page ->
                         NativeWidgetPreview(
                             style,
@@ -170,11 +178,7 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                             preview,
                             Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp,
                                 top = if (WidgetKind.entries[page] == WidgetKind.SCENE) 12.dp else 24.dp, bottom = 28.dp),
-                            previewBackground = when (backdrop) {
-                                1 -> Color(0xFF202B38)
-                                2 -> Color(0xFFB3C9C6)
-                                else -> if (classic) Color(0xFF394845) else Color(0xFFD9E8E8)
-                            }.toArgb(),
+                            previewBackground = studioPreviewBackground(style, backdrop).toArgb(),
                             hostSize = desktopSize.takeIf { WidgetKind.entries[page] == initialKind },
                         )
                     }
@@ -182,11 +186,12 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                         color = if (backdrop == 1 || classic) Color(0xFFF8FCFF) else Color(0xFF203A43), fontSize = 10.sp,
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp))
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                val kindHeading: @Composable (Modifier) -> Unit = { headingModifier ->
+                    Column(headingModifier) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(kind.name(style), color = colors.ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = if (splitKindHeading) Modifier.weight(1f) else Modifier)
                             if (editingId == null) Row(Modifier.padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 WidgetKind.entries.forEachIndexed { index, _ ->
                                     Box(Modifier.size(width = if (pager.currentPage == index) 16.dp else 5.dp, height = 5.dp)
@@ -194,12 +199,32 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                                 }
                             }
                         }
-                        if (!short) Text(if (data?.weather?.current == null) "示例天气 · ${kind.columns} × ${kind.rows} · 左右滑动换款式"
-                             else "${data?.city?.name} · ${kind.columns} × ${kind.rows} · 左右滑动换款式", color = colors.muted, fontSize = 12.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                        if (!short) {
+                            val place = if (data?.weather?.current == null) "示例天气" else data?.city?.name.orEmpty()
+                            Text("$place · ${kind.columns} × ${kind.rows}" + if (compact) "" else " · 左右滑动换款式",
+                                color = colors.muted, fontSize = 12.sp, maxLines = if (splitKindHeading) 2 else 1,
+                                overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                        }
+                    }
+                }
+                val previewActions: @Composable () -> Unit = {
+                    if (editingId == null) TextButton(onClick = { previewWall = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("款式一览", fontSize = 12.sp, color = colors.accent)
                     }
                     TextButton(onClick = { largePreview = !largePreview }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(if (short) "查看预览" else if (largePreview) "缩小预览" else "放大预览", fontSize = 12.sp, color = colors.accent)
+                        Text(if (compact) "查看预览" else if (largePreview) "缩小预览" else "放大预览", fontSize = 12.sp, color = colors.accent)
+                    }
+                }
+                if (splitKindHeading) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+                        kindHeading(Modifier.fillMaxWidth())
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically) { previewActions() }
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        kindHeading(Modifier.weight(1f))
+                        previewActions()
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).clip(RoundedCornerShape(18.dp))
@@ -221,12 +246,20 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                     when (tab) {
                         0 -> {
                             Panel {
+                                LabelValue("可读预设", "")
+                                Text(if (editingId == null) "先在预览中试用，添加时用于新组件。" else "先在预览中试用，保存修改后用于当前组件。",
+                                    color = colors.muted, fontSize = 11.sp)
+                                Row {
+                                    TextButton(onClick = { config = widgetReadablePreset(config) }) { Text("清晰阅读") }
+                                    TextButton(onClick = { config = widgetTransparentPreset(config) }) { Text("透明护字") }
+                                }
                                 LabelValue("背景不透明度", "${config.opacity}%")
                                 StudioSlider(config.opacity.toFloat(), { config = config.copy(opacity = it.roundToInt()) }, 0f..100f)
                                 Choice(listOf("透明" to "0", "轻透" to "45", "柔光" to "80", "实色" to "100"), config.opacity.toString()) { config = config.copy(opacity = it.toInt()) }
                                 Spacer(Modifier.height(16.dp))
                                 LabelValue("底色", "")
                                 Choice(listOf("浅色" to "light", "深色" to "dark", "系统" to "system"), config.theme) { config = config.copy(theme = it) }
+                                Text("0% 完全无底色；100% 遮住壁纸。桌面组件只能绘制自己的底色，无法实时模糊桌面壁纸。", fontSize = 11.sp, color = colors.muted)
                             }
                             Panel {
                                 LabelValue("天气图标", "无界为默认")
@@ -235,12 +268,17 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                             Panel {
                                 LabelValue("文字颜色", "")
                                 Choice(listOf("自动" to "auto", "浅色字" to "light", "深色字" to "dark"), config.text) { config = config.copy(text = it) }
-                                Text("自动参考桌面壁纸明暗；复杂壁纸可手动选择字色。", fontSize = 11.sp, color = colors.muted, modifier = Modifier.padding(top = 10.dp))
+                                Text("自动只参考壁纸整体明暗；复杂壁纸可选浅色字配深色壁纸，或深色字配浅色壁纸。图标彩色表示天气种类；降水图显示毫米/小时，百分比是降水概率。", fontSize = 11.sp, color = colors.muted, modifier = Modifier.padding(top = 10.dp))
                                 Toggle("透明时增强文字轮廓", config.protectText) { config = config.copy(protectText = it) }
                                 Spacer(Modifier.height(14.dp))
                                 LabelValue("数字大小", "${(config.textScale * 100).roundToInt()}%")
                                 StudioSlider(config.textScale, { config = config.copy(textScale = it) }, WidgetMinimumNumberScale..WidgetMaximumNumberScale)
                                 Text("调节温度、时间和天气读数；小读数会保留清晰易读的大小。", fontSize = 11.sp, color = colors.muted)
+                                Text("最多 200%，实际大小受组件空间限制；隐藏时钟或预报可腾出空间。", fontSize = 11.sp, color = colors.muted)
+                                Spacer(Modifier.height(14.dp))
+                                LabelValue("说明文字大小", "${(config.detailScale * 100).roundToInt()}%")
+                                StudioSlider(config.detailScale, { config = config.copy(detailScale = it) }, .85f..1.5f)
+                                Toggle("说明文字加粗", config.boldText) { config = config.copy(boldText = it) }
 
                             }
                         }
@@ -262,10 +300,16 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                             Text("固定地点的小组件会独立显示该地天气，切换应用城市不会改变它。", fontSize = 12.sp, color = colors.muted)
                         }
                         2 -> {
+                            widgetEditorSizeNotice(kind, desktopSize, config)?.let { notice ->
+                                Panel { Text(notice, color = colors.muted, fontSize = 12.sp) }
+                            }
                             Panel {
                                 if (kind == WidgetKind.PULSE || kind == WidgetKind.SCENE || (kind == WidgetKind.WEEK && !classic)) {
+                                    Toggle("显示时钟和日期", config.showClock) { config = config.copy(showClock = it) }
                                     Toggle("24 小时制", config.clock24) { config = config.copy(clock24 = it) }
                                 }
+                                if (kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.BAND)) Toggle("显示天气预报", config.showForecast) { config = config.copy(showForecast = it) }
+                                if (kind == WidgetKind.SCENE) Toggle("短时降水柱图", config.showPrecipitation) { config = config.copy(showPrecipitation = it) }
                                 if (kind == WidgetKind.SCENE || (kind == WidgetKind.WEEK && !classic)) Toggle("农历", config.showLunar) { config = config.copy(showLunar = it) }
                                 if (kind == WidgetKind.SCENE) Toggle("天气娘提示", config.showWeatherGirl) { config = config.copy(showWeatherGirl = it) }
                                 if (kind == WidgetKind.NOW) Toggle("空气质量", config.showAir) { config = config.copy(showAir = it) }
@@ -352,21 +396,103 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                 }
             }
             }
-            if (short && largePreview) Dialog(onDismissRequest = { largePreview = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp).clip(colors.shape).background(colors.bg)) {
-                    Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(kind.name(style), color = colors.ink, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { largePreview = false }) { Text("完成", color = colors.accent) }
+            if (previewWall || (compact && largePreview)) {
+                val allKinds = previewWall
+                val dismiss = { if (allKinds) previewWall = false else largePreview = false }
+                ZhishengWeatherTheme(isLight = !classic, homeSurfaceStyle = HomeSurfaceStyle.FRAGRANCE_GLASS, softGlow = false) {
+                    CompositionLocalProvider(LocalHomeBackdrop provides HomeBackdrop(sourceLayer, sourceOrigin, ownerView)) {
+                        WeatherOverlayDialog(onDismiss = dismiss) { panelModifier ->
+                            WidgetPreviewDialogContent(style, kind, config, preview, backdrop, allKinds,
+                                desktopSize, onTryWallpaper = { backdrop = (backdrop + 1) % 3 },
+                                onSelect = { candidate ->
+                                    previewWall = false
+                                    scope.launch { pager.animateScrollToPage(candidate.ordinal) }
+                                }, onDone = dismiss,
+                                previewLabel = if (data?.weather?.current == null) "示例天气" else preview.city.name,
+                                modifier = panelModifier)
+                        }
                     }
-                    NativeWidgetPreview(style, kind, config, preview,
-                        Modifier.fillMaxWidth().height((configuration.screenHeightDp - 120).coerceAtLeast(80).dp).padding(12.dp),
-                        previewBackground = colors.bg.toArgb(), hostSize = desktopSize)
                 }
             }
             }
         }
     }
+    }
+}
+
+private fun studioBackdropColors(style: WidgetStyle, backdrop: Int): List<Color> = when (backdrop) {
+    1 -> listOf(Color(0xFF3B5263), Color(0xFF202B38), Color(0xFF617782))
+    2 -> listOf(Color(0xFFCCC2AB), Color(0xFF758777), Color(0xFFB3C9C6))
+    else -> if (style == WidgetStyle.CLASSIC) listOf(Color(0xFF394845), Color(0xFF62716A), Color(0xFF364744))
+        else listOf(Color(0xFFA7C9D9), Color(0xFFD9E8E8), Color(0xFF89B6C5))
+}
+
+private fun studioPreviewBackground(style: WidgetStyle, backdrop: Int): Color = when (backdrop) {
+    1 -> Color(0xFF202B38)
+    2 -> Color(0xFFB3C9C6)
+    else -> if (style == WidgetStyle.CLASSIC) Color(0xFF394845) else Color(0xFFD9E8E8)
+}
+
+/** Explain the same host-size reductions used by the formal RemoteViews binder. */
+internal fun widgetEditorSizeNotice(kind: WidgetKind, hostSize: SizeF?, config: WidgetConfig): String? {
+    val size = hostSize?.takeIf { it.width.isFinite() && it.height.isFinite() && it.width > 0f && it.height > 0f }
+        ?: return null
+    if (kind != WidgetKind.SCENE) return null
+    val heightHidden = buildList {
+        if (size.height < 280f) add(if (config.showPrecipitation) "短时降水柱图" else "天气提示")
+        if (size.height < 250f && config.metrics.isNotEmpty()) add("天气读数")
+        if (size.height < 180f && config.showForecast) add("天气预报")
+        if (size.height < 440f && config.showForecast) add("逐时预报")
+    }
+    val narrow = size.width < 240f
+    val hidden = heightHidden + if (narrow) listOf("今日温差") else emptyList()
+    if (hidden.isEmpty()) return null
+    val actions = buildList {
+        if (narrow) add("拉宽组件查看今日温差")
+        if (heightHidden.isNotEmpty()) add("拉高组件查看其余内容")
+    }
+    return "桌面当前可用尺寸 ${size.width.toInt()} × ${size.height.toInt()}dp，${hidden.joinToString("、")}暂时收起，以保留主要天气。可在桌面${actions.joinToString("，或")}，设置会保留。"
+}
+
+/** Actual preview-window content, shared by the short-screen preview and style overview. */
+@Composable
+internal fun WidgetPreviewDialogContent(style: WidgetStyle, kind: WidgetKind, config: WidgetConfig,
+    preview: WidgetSnapshot, backdrop: Int, allKinds: Boolean, hostSize: SizeF?,
+    onTryWallpaper: () -> Unit, onSelect: (WidgetKind) -> Unit, onDone: () -> Unit,
+    previewLabel: String = preview.city.name, modifier: Modifier = Modifier) {
+    val colors = if (style == WidgetStyle.CLASSIC) ClassicStudioColors else LightStudioColors
+    Column(modifier.zhishengDialogPanel(glass = true)) {
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (allKinds) "${style.title} · 五款桌面组件" else kind.name(style),
+                color = colors.ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDone, modifier = Modifier.heightIn(min = 48.dp)) { Text("完成", color = colors.accent, fontSize = 13.sp) }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 6.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (allKinds) "$previewLabel · 点击选择，实际尺寸以桌面为准"
+                else if (hostSize != null) "$previewLabel · 按桌面提供的尺寸预览" else "$previewLabel · 参考尺寸，以桌面为准",
+                color = colors.muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = onTryWallpaper, modifier = Modifier.heightIn(min = 48.dp)) { Text("试壁纸", color = colors.accent, fontSize = 12.sp) }
+        }
+        HorizontalDivider(color = colors.edge.copy(alpha = .55f))
+        Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            widgetEditorSizeNotice(kind, hostSize, config)?.let { Text(it, color = colors.muted, fontSize = 12.sp) }
+            (if (allKinds) WidgetKind.entries else listOf(kind)).forEach { candidate ->
+                Column(Modifier.fillMaxWidth()
+                    .then(if (allKinds) Modifier.clickable { onSelect(candidate) } else Modifier)) {
+                    if (allKinds) Text("${candidate.name(style)} · ${candidate.columns} × ${candidate.rows}", color = colors.ink,
+                        fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+                    Box(Modifier.fillMaxWidth().height(when (candidate) {
+                        WidgetKind.PULSE -> 100.dp; WidgetKind.NOW -> 190.dp; WidgetKind.SCENE -> 300.dp; else -> 200.dp
+                    }).clip(colors.shape).background(Brush.linearGradient(studioBackdropColors(style, backdrop)))
+                        .semantics { contentDescription = "${candidate.name(style)}预览，试览壁纸${backdrop + 1}" }) {
+                        NativeWidgetPreview(style, candidate, config, preview, Modifier.fillMaxSize().padding(12.dp),
+                            previewBackground = studioPreviewBackground(style, backdrop).toArgb(),
+                            hostSize = hostSize.takeIf { !allKinds && candidate == kind })
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -594,17 +720,33 @@ internal fun NativeWidgetPreview(style: WidgetStyle, kind: WidgetKind, config: W
         Text(value, fontSize = 12.sp, color = c.muted)
     }
 }
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun Choice(options: List<Pair<String, String>>, selected: String, onChange: (String) -> Unit) {
     val c = LocalStudio.current
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val choiceStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.SansSerif, fontSize = 13.sp, lineHeight = 18.sp,
+        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+    val measured = options.map { (label, _) -> textMeasurer.measure(AnnotatedString(label), choiceStyle).size }
+    val widestText = measured.maxOfOrNull { it.width } ?: 0
+    val tallestText = measured.maxOfOrNull { it.height } ?: 0
+    val minimumWidth = with(density) { widestText.toDp() } + 20.dp
+    val minimumHeight = maxOf(48.dp, with(density) { tallestText.toDp() } + 16.dp)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val columns = ((maxWidth + 6.dp) / (minimumWidth + 6.dp)).toInt().coerceIn(1, options.size.coerceAtLeast(1))
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp), maxItemsInEachRow = columns) {
         options.forEach { (label, value) ->
             val active = selected == value
             Box(Modifier.weight(1f).clip(RoundedCornerShape(if (c.classic) 7.dp else 13.dp)).background(if (active) c.accent.copy(alpha = .16f) else c.bg)
                 .border(1.dp, if (active) c.accent.copy(alpha = .4f) else Color.Transparent, RoundedCornerShape(if (c.classic) 7.dp else 13.dp))
-                .clickable { onChange(value) }.heightIn(min = 48.dp).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
-                Text(label, color = if (active) c.accent else c.muted, fontSize = 13.sp, maxLines = 1, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium)
+                .semantics { this.selected = active }
+                .clickable { onChange(value) }.heightIn(min = minimumHeight).padding(horizontal = 10.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(label, modifier = Modifier.fillMaxWidth(), color = if (active) c.accent else c.muted,
+                    style = choiceStyle.copy(fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium))
             }
         }
+    }
     }
 }
 @Composable private fun Toggle(label: String, enabled: Boolean, change: (Boolean) -> Unit) {
@@ -655,7 +797,8 @@ internal fun NativeWidgetPreview(style: WidgetStyle, kind: WidgetKind, config: W
 }
 
 internal fun widgetPreviewSample(now: Long = System.currentTimeMillis()): WidgetSnapshot {
-    val day = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val day = java.time.Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     return WidgetSnapshot(City("杭州", "示例天气", 30.27, 120.15, "widget-preview"), WeatherData(
         current = CurrentWeather(26.0, 27.0, WeatherCondition.PARTLY_CLOUDY, "多云", 62.0, 8.0, pressure = 1012.0, uvIndex = 3),
         hourly = (0..5).map { HourlyWeather(now + it * 3_600_000L, listOf(26.0,27.0,27.0,26.0,25.0,24.0)[it], if (it == 3) WeatherCondition.RAIN else WeatherCondition.PARTLY_CLOUDY, precipProb = listOf(10,10,20,60,20,10)[it]) },

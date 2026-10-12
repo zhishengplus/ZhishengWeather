@@ -74,6 +74,6 @@ class LocationStreetLabelTest {
 
         assertTrue(source.contains("FUSED_PROVIDER"))
         assertTrue(source.contains("lm.allProviders"))
-        assertTrue(source.contains("systemReverseCity(context, lat, lon)"))
+        assertTrue(source.contains("geocodeAddress(context, lat, lon)"))
     }
 }

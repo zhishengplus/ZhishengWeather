@@ -1,7 +1,7 @@
 > 无密钥源码导出版 / Key-free source export. Read SOURCE_EXPORT.md before building or publishing.
 
-> Latest public release: **0.1.5 Beta10.3**. Improved widget layouts and editing, saved locations and weather readings; optional daylight colours integrated with the home and Vista widgets.
-> [Gitee primary download](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public) · [GitHub alternate download](https://github.com/zhishengplus/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public)
+> 当前公开发布：**0.1.5-beta10.5-public / 20261068**。累计更新见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。[Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk)
+
 
 ![Zhisheng Weather · ZHISHENG WEATHER TERMINAL](assets/banner.png)
 
@@ -130,7 +130,7 @@ If you feel like supporting the project, scan the QR code below. Leave the name 
 
 1. Download the latest public APK from [Releases](https://github.com/zhishengplus/ZhishengWeather/releases).
 2. Install it on Android 8.0 or later.
-3. The first launch shows Beijing. Use search to save your own cities.
+3. On first launch, locate your current position or choose a city manually. Existing cities and settings are preserved.
 
 The APK is distributed through GitHub. Android may ask you to allow the current app to install unknown-source files. That prompt refers to the download channel; Zhisheng Weather is not requesting another system permission.
 
@@ -145,7 +145,6 @@ The APK is distributed through GitHub. Android may ask you to allow the current 
 - Restores the compact five-day home forecast and caps the hourly carousel at 24 readable slots, with fixed positions for conditions, rain chance, and high/low temperatures
 - Adds a dedicated 15-day view with a dimmed yesterday column and a more natural character-led outlook summary
 - Adds the previous seven days, same-date comparisons, and five- or ten-year history views; each record names its year and unusable records are omitted instead of shown as placeholders
-- Adds map-style radar controls, frame scrubbing, and smooth playback, with separate messages for clear nearby echoes and unavailable coverage
 - Adds typhoon tracks with observed positions, intensity, wind radii, forecasts from multiple agencies, cache time, and clear stale-data notices
 - Separates character briefings from alerts and tailors guidance to temperature, wind, precipitation, air quality, humidity, UV, visibility, and time of day; a text-only Tips mode is also available
 - Rechecks temperature, wind, precipitation, pressure, visibility, and air-quality handling across QWeather, Caiyun, Xiaomi, and Open-Meteo without substituting unrelated values for missing fields
@@ -161,7 +160,6 @@ The APK is distributed through GitHub. Android may ask you to allow the current 
 - Restores the compact five-day home forecast and caps the hourly carousel at 24 readable slots, with fixed positions for conditions, rain chance, and high/low temperatures
 - Adds a dedicated 15-day view with a dimmed yesterday column and a more natural character-led outlook summary
 - Adds the previous seven days, same-date comparisons, and five- or ten-year history views; each record names its year and unusable records are omitted instead of shown as placeholders
-- Adds map-style radar controls, frame scrubbing, and smooth playback, with separate messages for clear nearby echoes and unavailable coverage
 - Adds typhoon tracks with observed positions, intensity, wind radii, forecasts from multiple agencies, cache time, and clear stale-data notices
 - Separates character briefings from alerts and tailors guidance to temperature, wind, precipitation, air quality, humidity, UV, visibility, and time of day; a text-only Tips mode is also available
 - Rechecks temperature, wind, precipitation, pressure, visibility, and air-quality handling across QWeather, Caiyun, Xiaomi, and Open-Meteo without substituting unrelated values for missing fields

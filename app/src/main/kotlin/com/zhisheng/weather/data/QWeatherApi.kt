@@ -68,6 +68,7 @@ interface QWeatherService {
     @GET("geo/v2/city/lookup")
     suspend fun cityLookup(
         @Query("location") query: String,
+        @Query("range") range: String? = null,
         @Query("number") number: Int = 10,
     ): QwCityLookup
 }

@@ -53,7 +53,7 @@ class ClearSkyLayoutRegressionTest {
 
     @Test fun sourceTimeAndCoordinatesRemainAvailable() {
         val home = File(root, "home/HomeScreen.kt").readText()
-        assertTrue(home.contains("GPS 精确定位"))
+        assertTrue(home.contains("city?.coordinateLabel"))
         assertTrue(home.contains("经纬度"))
         assertTrue(home.contains("数据发布于"))
         assertEquals("更新于", homeWeatherUpdateStamp(WeatherData(fetchedAt = 1L))?.label)

@@ -55,6 +55,16 @@ fetch_caiyun_docs.ps1
 scripts/update_contributors_from_xlsx.py
 scripts/node_modules/
 
+# ===== beta10.4 Git baseline: local reference material and generated output =====
+.ui-reference/
+.vendor-reference/
+app/src/test/snapshots/
+app/datastore/
+*.apk
+
+# Local dataset builder cache
+scripts/__pycache__/
+
 # Private local signing/configuration
 keystore/
 .env

@@ -29,10 +29,7 @@ class WidgetLaunchActivity : ComponentActivity() {
                 "none" -> Unit
                 "notification_settings" -> open(Intent(this@WidgetLaunchActivity, WidgetConfigActivity::class.java).putExtra("notification_settings", true))
                 "calendar" -> openSystemCalendar()
-                "clock" -> if (!open(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS), showFailure = false)) {
-                    open(Intent(this@WidgetLaunchActivity, com.zhisheng.weather.MainActivity::class.java)
-                        .setAction("com.zhisheng.weather.action.WIDGET_WEATHER").addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
-                }
+                "clock" -> openSystemClock()
                 "settings" -> open(Intent(this@WidgetLaunchActivity, WidgetConfigActivity::class.java)
                     .putExtra("widget_style", intent.getStringExtra("widget_style")).apply { if (id >= 0) putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id) })
                 else -> {
@@ -56,6 +53,30 @@ class WidgetLaunchActivity : ComponentActivity() {
             }
             finish()
         }
+    }
+    private fun openSystemClock() {
+        // Some vendor clocks expose only APP_CLOCK, not SHOW_ALARMS.
+        // A failed clock launch must stay a clock failure, never a weather tap.
+        val opened = launchWidgetClock { target -> when (target) {
+            WidgetClockDestination.CLOCK_ENTRY -> openSystemCategory("android.intent.category.APP_CLOCK")
+            WidgetClockDestination.ALARMS -> open(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS), showFailure = false)
+        } }
+        if (!opened) Toast.makeText(this, "未找到系统时钟，请在组件点击设置中选择其他动作", Toast.LENGTH_SHORT).show()
+    }
+    private fun openSystemCategory(category: String): Boolean {
+        val entry = Intent(Intent.ACTION_MAIN).addCategory(category)
+        val candidates = runCatching { packageManager.queryIntentActivities(entry, 0) }.getOrDefault(emptyList())
+            .sortedBy { result ->
+                val flags = result.activityInfo.applicationInfo.flags
+                if (flags and (android.content.pm.ApplicationInfo.FLAG_SYSTEM or android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) 0 else 1
+            }
+        for (result in candidates) {
+            val target = Intent(entry).setComponent(ComponentName(result.activityInfo.packageName, result.activityInfo.name))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            if (open(target, showFailure = false)) return true
+        }
+        return open(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, category)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), showFailure = false)
     }
     private fun openSystemCalendar() {
         // A generic content://calendar/time VIEW can resolve to document viewers

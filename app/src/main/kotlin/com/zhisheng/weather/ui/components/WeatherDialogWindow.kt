@@ -14,19 +14,19 @@ import com.zhisheng.weather.ui.theme.LocalHomeSurfaceStyle
 import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import com.zhisheng.weather.ui.theme.isPhosphorVista
 
-/** Full-page details own their system bars rather than exposing the dimmed page behind. */
+/** Full-page details own their bars; overlays draw their own scrim behind transparent bars. */
 @Composable
-internal fun WeatherDialogWindow() {
+internal fun WeatherDialogWindow(overlay: Boolean = false) {
     val view = LocalView.current
     val palette = LocalZhishengPalette.current
     val light = palette.isLight
-    val background = palette.bg.toArgb()
-    val navigationBackground = if (isPhosphorVista &&
+    val background = if (overlay) Color.Transparent.toArgb() else palette.bg.toArgb()
+    val navigationBackground = if (overlay) background else if (isPhosphorVista &&
         LocalHomeSurfaceStyle.current == HomeSurfaceStyle.FRAGRANCE_GLASS
     ) {
         (if (light) Color(0xFFD3E6F1) else Color(0xFF0F1B29)).toArgb()
     } else background
-    DisposableEffect(view, light, background, navigationBackground) {
+    DisposableEffect(view, light, background, navigationBackground, overlay) {
         val provider = generateSequence(view.parent) { it.parent }
             .filterIsInstance<DialogWindowProvider>().firstOrNull()
         val window = provider?.window
@@ -51,6 +51,7 @@ internal fun WeatherDialogWindow() {
             window.statusBarColor = background
             window.navigationBarColor = navigationBackground
             if (android.os.Build.VERSION.SDK_INT >= 29) {
+                if (overlay) window.isStatusBarContrastEnforced = false
                 window.isNavigationBarContrastEnforced = false
             }
             WindowCompat.getInsetsController(window, view).apply {

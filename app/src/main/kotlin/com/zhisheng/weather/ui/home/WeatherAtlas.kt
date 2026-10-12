@@ -34,6 +34,7 @@ import com.zhisheng.weather.R
 import com.zhisheng.weather.ui.DisplayPrefs
 import com.zhisheng.weather.data.ReleaseFeatures
 import com.zhisheng.weather.ui.Text
+import com.zhisheng.weather.ui.rememberRainviewerDisclosureAccepted
 import com.zhisheng.weather.ui.components.PhosphorIcon
 import com.zhisheng.weather.ui.theme.*
 import java.util.Locale
@@ -92,13 +93,14 @@ internal fun WeatherAtlas(
 ) {
     var page by rememberSaveable(city?.locationKey) { mutableStateOf<AtlasPage?>(null) }
     val vista = isPhosphorVista
-    val radarPreview = if (ReleaseFeatures.radar && prefs.showSpacetime && radarContent == null) rememberAtlasRadarPreview(city, weather.fetchedAt) else null
+    val radarAccepted by rememberRainviewerDisclosureAccepted()
+    val radarPreview = if (ReleaseFeatures.radar && prefs.showSpacetime && radarAccepted && radarContent == null) rememberAtlasRadarPreview(city, weather.fetchedAt) else null
     // 可用性判定两主题统一：没有真实数据的专题不出示入口，
     // 经典侧不再用“等待数据”的占位瓦片兜底。
     val availablePages = vistaScenePages(scene, prefs)
     val showGlow = prefs.showSkyPhotography && AtlasPage.GLOW in availablePages
     val showStars = ReleaseFeatures.starPhotography && prefs.showSkyPhotography && AtlasPage.STARS in availablePages
-    val showRadar = ReleaseFeatures.radar && prefs.showSpacetime && (radarContent != null || radarPreview?.available == true)
+    val showRadar = ReleaseFeatures.radar && prefs.showSpacetime
     val showCoast = ReleaseFeatures.coastalWeather && prefs.showCoastWeather && AtlasPage.COAST in availablePages
     Column(modifier.fillMaxWidth().padding(horizontal = if (vista) LocalZhishengChrome.current.pagePadding else 20.dp)
         .then(if (vista) Modifier.zhishengPanel() else Modifier),
@@ -136,8 +138,14 @@ internal fun WeatherAtlas(
                 }
             }
             val radar: @Composable (Modifier) -> Unit = { m ->
-                AtlasTile("雷达回波", "RADAR", m, onRadarClick) {
-                    if (radarContent != null) radarContent() else AtlasRadarPreview(city, weather.fetchedAt, cityZone(weather.utcOffsetSeconds).id, radarPreview)
+                if (vista) HomeRadarCard(city, cityZone(weather.utcOffsetSeconds).id, radarPreview,
+                    radarAccepted, m, onRadarClick, radarContent)
+                else AtlasTile("雷达回波", "RADAR", m, onRadarClick) {
+                    if (radarContent != null) radarContent()
+                    else if (!radarAccepted) {
+                        AtlasCaption("查看降雨变化与数据来源说明")
+                        AtlasCaption("覆盖因地区而异；无回波不代表无雨")
+                    } else AtlasRadarPreview(city, weather.fetchedAt, cityZone(weather.utcOffsetSeconds).id, radarPreview)
                 }
             }
             if (pair && !stack) {

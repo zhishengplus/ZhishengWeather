@@ -14,7 +14,26 @@ internal data class PrecipitationPresentation(
     val hourlyFallback: Boolean = false,
     val history: List<MinutePrecip> = emptyList(),
     val nowMillis: Long? = null,
+    val nativePoints: List<MinutePrecip> = points,
 )
+
+/** The game must never replace rain, a partial window, or an hourly fallback. */
+internal fun PrecipitationPresentation.hasDrySkyWindow(): Boolean {
+    val now = nowMillis ?: return false
+    val interval = intervalMinutes?.takeIf { it in 1..15 } ?: return false
+    if (!dry || hourlyFallback || points.size < 2) return false
+    val step = interval * Nowcast.MINUTE_MS
+    val first = nativePoints.firstOrNull()?.timeMillis ?: return false
+    val last = nativePoints.lastOrNull()?.timeMillis ?: return false
+    // Judge completeness at the provider's timestamp. Requiring a new 120-minute
+    // horizon at every frame would expire a complete response as soon as it arrives.
+    // A native 15-minute bucket can begin before now; never extend its actual end.
+    if (now - first !in -Nowcast.MINUTE_MS..(15 * Nowcast.MINUTE_MS) ||
+        last + step - first < 120 * Nowcast.MINUTE_MS ||
+        points.first().timeMillis > now + Nowcast.MINUTE_MS) return false
+    return nativePoints.zipWithNext().all { (a, b) -> b.timeMillis - a.timeMillis in 1..step } &&
+        points.zipWithNext().all { (a, b) -> b.timeMillis - a.timeMillis in 1..step }
+}
 
 // Presentation only: preserve actual timestamps and never turn a missing series into dry weather.
 internal fun precipitationPresentation(data: WeatherData, nowMillis: Long): PrecipitationPresentation {
@@ -67,5 +86,7 @@ internal fun precipitationPresentation(data: WeatherData, nowMillis: Long): Prec
     val history = data.rainHistory.filter { it.timeMillis in (nowMillis - 7_200_000L)..nowMillis &&
         it.precip.isFinite() && it.precip >= 0f }.distinctBy { it.timeMillis }.sortedBy { it.timeMillis }
     return PrecipitationPresentation(points, summary, dry, points.firstOrNull()?.timeMillis,
-        points.lastOrNull()?.timeMillis, interval, hourlyFallback, history, nowMillis)
+        points.lastOrNull()?.timeMillis, interval, hourlyFallback, history, nowMillis,
+        valid.groupBy { it.timeMillis }.values.map { samples -> samples.maxBy { it.precip } }
+            .sortedBy { it.timeMillis })
 }

@@ -7,8 +7,10 @@ import org.junit.Test
 class AmbienceLevelTest {
 
     @Test
-    fun vividLevelIsClearlyStrongerAndIsTheDefault() {
-        assertEquals(AmbienceLevel.VIVID, AmbienceLevel.from(null))
+    fun intenseLevelIsTheDefaultAndExplicitLevelsRemainDistinct() {
+        assertEquals(AmbienceLevel.INTENSE, AmbienceLevel.from(null))
+        assertEquals(AmbienceLevel.OFF, AmbienceLevel.from("off"))
+        assertEquals(AmbienceLevel.SUBTLE, AmbienceLevel.from("subtle"))
         assertEquals(AmbienceLevel.VIVID, AmbienceLevel.from("vivid"))
         assertTrue(AmbienceLevel.VIVID.factor >= AmbienceLevel.SUBTLE.factor * 3f)
         assertTrue(AmbienceLevel.INTENSE.factor > AmbienceLevel.VIVID.factor)

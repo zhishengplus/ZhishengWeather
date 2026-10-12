@@ -42,6 +42,23 @@ The MIT license and copyright notice above also apply to these derivatives.
 and exports `vista_day_*.png` / `vista_night_*.png`. Existing classic and widget
 artwork is not replaced. The packaged app never downloads these files at runtime.
 
+## GeoNames offline place data (2026-10-11)
+
+The packaged administrative place index is derived from the pinned CN/HK/MO/TW
+exports of [GeoNames](https://www.geonames.org/), under
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+The app selects ADM1/ADM2/ADM3 records, normalizes names and search aliases,
+and builds parent labels from the supplied administrative codes. These are
+representative points, not boundaries, street data or a complete official list.
+GeoNames is the data source; this adaptation is not endorsed by GeoNames.
+
+Source URLs, snapshot hashes, scope and profile are in
+`app/src/main/assets/geo/local_places-manifest.json`; the packaged attribution
+is in `app/src/main/assets/licenses/geonames.txt`. To reproduce the index,
+download those exact snapshots into an input directory, verify the pinned hashes,
+then run `python scripts/build_local_places.py --inputs INPUTS --output OUTPUT`.
+The data license applies separately from the application's source-code license.
+
 ## Phosphor interface artwork
 
 Interface icons are derived from the regular-weight assets of **Phosphor Icons**.

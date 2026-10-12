@@ -14,6 +14,12 @@ internal fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double):
 
 internal data class GeoPoint(val latitude: Double, val longitude: Double)
 
+/** Forward transform for providers whose published coordinate protocol requires GCJ-02. */
+internal fun wgs84ToGcj02(latitude: Double, longitude: Double): GeoPoint {
+    val inverse = gcj02ToWgs84(latitude, longitude)
+    return GeoPoint(latitude * 2 - inverse.latitude, longitude * 2 - inverse.longitude)
+}
+
 /** 地图 POI 返回的是国内加密坐标；保存为精确地址前统一近似还原为 WGS84。 */
 internal fun gcj02ToWgs84(latitude: Double, longitude: Double): GeoPoint {
     if (outsideChina(latitude, longitude)) return GeoPoint(latitude, longitude)

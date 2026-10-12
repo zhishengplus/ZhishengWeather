@@ -10,6 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -19,6 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
@@ -57,6 +60,11 @@ object CaiyunRadarRepository {
             val future = async { fetch(FORECAST_URL, lon, lat, trimmed) }
             realtime.await() to future.await()
         }
+        currentCoroutineContext().ensureActive()
+        val latestPast = past.maxOfOrNull(RadarFrame::timeMillis)
+        if (latestPast == null || System.currentTimeMillis() - latestPast !in -5 * 60_000L..45 * 60_000L) {
+            throw CaiyunRadarException(CaiyunRadarReason.EMPTY_FRAMES, "彩云未返回当前可用的实况帧")
+        }
         // 预报接口首帧是「最新实况」：只保留晚于过去末帧的外推帧
         val pastMax = past.maxOfOrNull(RadarFrame::timeMillis)
         val futureOnly = forecast
@@ -69,21 +77,22 @@ object CaiyunRadarRepository {
         RadarFeed(past, futureOnly)
     }
 
-    private fun fetch(base: String, lon: Double, lat: Double, token: String): List<RadarFrame> {
-        val url = String.format(
-            Locale.US,
-            "%s?lon=%.4f&lat=%.4f&level=2&world_map=true&token=%s",
-            base, lon, lat, token,
-        )
+    private suspend fun fetch(base: String, lon: Double, lat: Double, token: String): List<RadarFrame> {
+        val url = base.toHttpUrl().newBuilder()
+            .addQueryParameter("lon", String.format(Locale.US, "%.4f", lon))
+            .addQueryParameter("lat", String.format(Locale.US, "%.4f", lat))
+            .addQueryParameter("level", "2").addQueryParameter("world_map", "true")
+            .addQueryParameter("token", token).build()
         return try {
-            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                val raw = response.body?.string().orEmpty()
+            run {
+                val response = radarRequestBytes(client, Request.Builder().url(url).build(), 512_000)
+                val raw = response.bytes.toString(Charsets.UTF_8)
                 when {
                     response.code == 401 || response.code == 403 -> throw CaiyunRadarException(
                         CaiyunRadarReason.NO_PERMISSION,
                         "彩云 Token 未开通雷达图权限（企业套餐，联系 api@caiyunapp.com 开通）",
                     )
-                    !response.isSuccessful -> throw CaiyunRadarException(
+                    !response.successful -> throw CaiyunRadarException(
                         CaiyunRadarReason.SERVICE_UNAVAILABLE,
                         "彩云雷达服务返回 HTTP ${response.code}",
                     )
@@ -149,19 +158,26 @@ object CaiyunRadarRepository {
         val url = frame.imageUrl ?: return@withContext null
         val file = imageFile(context, url)
         if (file.isFile && System.currentTimeMillis() - file.lastModified() < IMAGE_CACHE_TTL_MS) {
-            return@withContext BitmapFactory.decodeFile(file.absolutePath)
+            BitmapFactory.decodeFile(file.absolutePath)?.let { return@withContext it }
         }
-        runCatching {
-            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                val bytes = response.body?.bytes()
-                if (response.isSuccessful && bytes != null && bytes.isNotEmpty()) {
+        try {
+            val requestUrl = url.replaceFirst("http://", "https://").toHttpUrl()
+            if (requestUrl.host != "cdn.caiyunapp.com" && !requestUrl.host.endsWith(".caiyunapp.com")) return@withContext null
+            val response = radarRequestBytes(client, Request.Builder().url(requestUrl).build(), 8_000_000)
+            val bytes = response.bytes
+            if (response.successful && bytes.isNotEmpty()) {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0 ||
+                        bounds.outWidth.toLong() * bounds.outHeight > 16_000_000L) return@withContext null
+                    currentCoroutineContext().ensureActive()
                     file.writeBytes(bytes)
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                } else {
+            } else {
                     null
-                }
             }
-        }.getOrNull()
+        } catch (ce: CancellationException) { throw ce }
+        catch (_: Exception) { null }
     }
 
     private fun imageFile(context: Context, url: String): File {

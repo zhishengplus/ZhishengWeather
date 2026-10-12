@@ -273,11 +273,13 @@ object OpenMeteoSource {
     // WMO 映射已收敛到 model.WmoMaps.wmoToCondition（v0.0.4，原私有 wmo 与 WeatherRepository.fromWmoCode 双份重复）
 
     // —— 城市检索（Open-Meteo Geocoding，免 key，支持中文） ——
-    suspend fun searchCity(query: String): List<City> {
+    suspend fun searchCity(query: String, countryCode: String? = null): List<City> {
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val r = get<OmGeoResult>(
-            "https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=10&language=zh&format=json"
-        ) ?: return emptyList()
+        val response = radarRequestBytes(okHttp, Request.Builder().url(
+            "https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=30&language=zh&format=json" +
+                (countryCode?.let { "&countryCode=$it" } ?: "")).build(), 1_000_000)
+        if (!response.successful || response.bytes.isEmpty()) throw java.io.IOException("Geocoding unavailable")
+        val r = json.decodeFromString<OmGeoResult>(response.bytes.toString(Charsets.UTF_8))
         return r.results.orEmpty().map { g ->
             City(
                 name = g.name.orEmpty(),
@@ -286,6 +288,7 @@ object OpenMeteoSource {
                 latitude = g.latitude,
                 longitude = g.longitude,
                 locationKey = "om:${g.latitude},${g.longitude}",
+                countryCode = g.country_code, countryName = g.country,
             )
         }.filter { it.name.isNotBlank() }
     }
@@ -372,4 +375,5 @@ data class OmGeoItem(
     val admin1: String? = null,
     val admin2: String? = null,
     val country: String? = null,
+    val country_code: String? = null,
 )

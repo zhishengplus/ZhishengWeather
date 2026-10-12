@@ -27,11 +27,11 @@ class FeatureTypographyTest {
         val root = File(requireNotNull(System.getProperty("user.dir")))
         val chrome = File(root, "src/main/kotlin/com/zhisheng/weather/ui/FeatureScreenChrome.kt").readText()
         val history = File(root, "src/main/kotlin/com/zhisheng/weather/ui/HistoryScreen.kt").readText()
-        val radar = File(root, "src/main/kotlin/com/zhisheng/weather/ui/RadarScreen.kt").readText()
+        val radar = File(root, "src/main/kotlin/com/zhisheng/weather/ui/RadarExperience.kt").readText()
 
         assertTrue(chrome.contains("fontSize = 18.sp"))
         assertTrue(history.contains("fontSize = 24.sp"))
         assertFalse(history.contains("MaterialTheme.typography.displaySmall"))
-        assertTrue(radar.contains("Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding())"))
+        assertTrue(radar.contains("Column(Modifier.fillMaxSize().zhishengScreen().statusBarsPadding().navigationBarsPadding())"))
     }
 }

@@ -1,7 +1,7 @@
 > 无密钥源码导出版 / Key-free source export. Read SOURCE_EXPORT.md before building or publishing.
 
-> 最新公开版本：**0.1.5 Beta10.3**。小组件排版与编辑、定位收藏和天气读数已优化；新增可开关的日照天光，融入主页与五款澄空组件。
-> [Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public)
+> 当前公开发布：**0.1.5-beta10.5-public / 20261068**。累计更新见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。[Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk)
+
 
 ![枳生天气 · ZHISHENG WEATHER TERMINAL](assets/banner.png)
 
@@ -133,9 +133,9 @@ GitHub Releases 只发布正式公共版 APK，这也是普通用户唯一需要
 
 1. 从 [Releases](https://github.com/zhishengplus/ZhishengWeather/releases) 下载最新公共版 APK。
 2. 安装到 Android 8.0 或更高版本的设备。
-3. 首次打开默认显示北京，可通过搜索保存自己的城市。
+3. 首次打开可定位当前位置或手动选城，已有城市与设置保留。
 
-APK 只在 GitHub 发布。Android 可能提示允许当前应用安装未知来源文件，这是安装渠道提示，不是枳生天气申请了额外系统权限。
+APK 在 Gitee 与 GitHub 发布，优先使用 Gitee。Android 可能提示允许当前应用安装未知来源文件，这是安装渠道提示，不是枳生天气申请了额外系统权限。
 
 ## 0.1.5-beta5 更新
 
@@ -148,7 +148,6 @@ APK 只在 GitHub 发布。Android 可能提示允许当前应用安装未知来
 - 主页恢复紧凑的五日预报，逐时列表收在 24 个时间格内；日期、天气文字、降水概率和高低温更容易扫读
 - 新增独立的近 15 日天气页，补上压暗显示的昨天，并由天气娘用更自然的话总结后续变化
 - 新增过去 7 日、往年同日和近 5／10 年回看；每条记录标出具体年份，缺少有效温度的年份不再堆叠“未知”占位
-- 雷达支持地图拖动、双指缩放、时间轴逐帧查看和平滑播放，也会分清“没有明显回波”与“当地暂缺覆盖”
 - 新增台风路径，查看实况位置、中心强度、风圈和多机构预报；缓存时间与资料是否过期会直接标明
 - 天气娘简报与预警分开判断，按冷热、风雨、空气质量、湿度、紫外线、能见度和时段选择更合适的提醒；也可换成纯文字 Tips
 - 重新核对和风、彩云、小米与 Open-Meteo 的温度、风速、降水、气压、能见度和空气质量，缺少的字段不会用其他数值代替
@@ -164,7 +163,6 @@ APK 只在 GitHub 发布。Android 可能提示允许当前应用安装未知来
 - 主页恢复紧凑的五日预报，逐时列表收在 24 个时间格内；日期、天气文字、降水概率和高低温更容易扫读
 - 新增独立的近 15 日天气页，补上压暗显示的昨天，并由天气娘用更自然的话总结后续变化
 - 新增过去 7 日、往年同日和近 5／10 年回看；每条记录标出具体年份，缺少有效温度的年份不再堆叠“未知”占位
-- 雷达支持地图拖动、双指缩放、时间轴逐帧查看和平滑播放，也会分清“没有明显回波”与“当地暂缺覆盖”
 - 新增台风路径，查看实况位置、中心强度、风圈和多机构预报；缓存时间与资料是否过期会直接标明
 - 天气娘简报与预警分开判断，按冷热、风雨、空气质量、湿度、紫外线、能见度和时段选择更合适的提醒；也可换成纯文字 Tips
 - 重新核对和风、彩云、小米与 Open-Meteo 的温度、风速、降水、气压、能见度和空气质量，缺少的字段不会用其他数值代替

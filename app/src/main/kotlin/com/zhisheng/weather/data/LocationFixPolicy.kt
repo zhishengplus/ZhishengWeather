@@ -7,6 +7,7 @@ internal data class LocationFix(
     val wallTimeMillis: Long,
     val elapsedRealtimeNanos: Long,
     val accuracyMeters: Float?,
+    val provider: String? = null,
 )
 
 internal object LocationFixPolicy {
@@ -35,8 +36,27 @@ internal object LocationFixPolicy {
                 .thenBy { it.accuracyMeters ?: Float.POSITIVE_INFINITY })
 
     fun canResolveStreet(fix: LocationFix): Boolean =
-        fix.accuracyMeters?.let { it.isFinite() && it in 0f..500f } == true
+        fix.accuracyMeters?.let { it.isFinite() && it > 0f && it <= 100f } == true
 }
+
+internal fun measuredLocationCity(fix: LocationFix, preciseGranted: Boolean): com.zhisheng.weather.model.City =
+    coordinateLocation(fix.latitude, fix.longitude).copy(
+        coordinateKind = com.zhisheng.weather.model.CoordinateKind.DEVICE,
+        locationAccuracyMeters = fix.accuracyMeters,
+        locationSampleTimeMillis = fix.wallTimeMillis,
+        locationProvider = fix.provider,
+        precisePermissionGranted = preciseGranted,
+    )
+
+/** Label-only enrichment can never replace a measurement or invent a weather ID. */
+internal fun applyResolvedLabel(
+    measured: com.zhisheng.weather.model.City,
+    label: com.zhisheng.weather.model.City,
+    street: String?,
+    source: String,
+): com.zhisheng.weather.model.City = measured.copy(
+    name = label.name, affiliation = label.affiliation, street = street, addressSource = source,
+)
 
 internal fun shouldApplyLocation(startedKey: String?, selectedKey: String?): Boolean =
     startedKey == selectedKey

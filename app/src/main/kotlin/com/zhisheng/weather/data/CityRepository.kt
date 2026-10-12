@@ -11,6 +11,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.zhisheng.weather.model.City
+import com.zhisheng.weather.model.PlaceRegion
+import com.zhisheng.weather.model.filterPlaceRegion
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -22,20 +27,23 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "zhisheng")
 
 // 城市搜索 + 持久化（DataStore）
 object CityRepository {
 
+    fun searchAdvice(query: String): String = citySearchAdvice(query)
+
     const val MAX_FAVORITES = 6
 
     private lateinit var store: DataStore<Preferences>
     private lateinit var appContext: Context
 
-    private val KEY_CITIES = stringPreferencesKey("cities")
-    private val KEY_CITIES_BACKUP = stringPreferencesKey("cities_backup")
-    private val KEY_SELECTED = stringPreferencesKey("selected_key")
+    private val KEY_CITIES = InitialLocationStoragePolicy.citiesKey
+    private val KEY_CITIES_BACKUP = InitialLocationStoragePolicy.backupKey
+    private val KEY_SELECTED = InitialLocationStoragePolicy.selectedKey
     private val KEY_LOCATED = stringPreferencesKey("located_city_key")
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -46,18 +54,22 @@ object CityRepository {
         store = appContext.dataStore
     }
 
-    // 首装种子默认城市（零配置体验：装好即有天气，无需手动加城市）；
-    // 以 KEY_CITIES 是否存在判定“首装”，用户删光城市后不会重种。
-    // v0.0.4：主值 JSON 损坏时先尝试备份值；主备都坏则重种北京（此前会永久空列表且不重种）。
+    // List/identity repairs, location and favorites can alter the selected city's
+    // meaning. Conservatively invalidate preparation around every city edit.
+    private suspend fun editCityContext(transform: suspend (MutablePreferences) -> Unit): Preferences =
+        reminderDeliveryGate.changeContext { store.edit(transform) }
+
+    // 首装显式保存空城市表，等待用户选择位置；旧用户删光城市后也不会重种。
+    // 主值 JSON 损坏时仍先恢复备份；主备都坏才沿用既有北京自愈兜底。
     suspend fun ensureDefaultCity() {
-        // 存储读取本身也可能抛（文件级损坏/IO 异常）——这里挂了会连自愈和播种一起跳过，
-        // 必须兜住并留日志，绝不能让异常悄悄打死播种流程。
+        // 存储读取本身也可能抛（文件级损坏/IO 异常）——这里挂了会连初始化和自愈一起跳过，
+        // 必须兜住并留日志，绝不能让异常悄悄打死初始化流程。
         val prefs = try {
             store.data.first()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            android.util.Log.e("ZhishengWeather", "城市存储读取失败，跳过播种与自愈检查", e)
+            android.util.Log.e("ZhishengWeather", "城市存储读取失败，跳过初始化与自愈检查", e)
             return
         }
         val state = prefs.decodeCities()
@@ -69,15 +81,17 @@ object CityRepository {
             state.repairedFromBackup -> {
                 // 主值损坏、备份可用：把备份回写主值，完成自愈
                 android.util.Log.w("ZhishengWeather", "城市主数据损坏，已从备份恢复")
-                store.edit { prefs ->
+                editCityContext { prefs ->
                     prefs[KEY_CITIES_BACKUP]?.let { prefs[KEY_CITIES] = it }
                 }
             }
-            !prefs.contains(KEY_CITIES) -> addCity(defaultCity())
+            !prefs.contains(KEY_CITIES) -> editCityContext {
+                InitialLocationStoragePolicy.initializeIfAbsent(it)
+            }
         }
         // Older versions allowed the moving location slot itself to be favorited.
         // Preserve that saved address and give location following its own identity.
-        store.edit {
+        editCityContext {
             separateLocatedFavorite(it)
             deduplicateSavedCities(it)
         }
@@ -91,52 +105,69 @@ object CityRepository {
         locationKey = "101010100",
     )
 
-    // 搜索城市：默认小米 → Open-Meteo；和风 Geo 仅开发者模式且前两源都空时才打。
-    suspend fun search(query: String): List<City> {
+    /** No network and no Key required, including when the system geocoder is absent. */
+    suspend fun searchLocal(query: String): List<City> {
         if (query.isBlank()) return emptyList()
-        val xiaomi = try {
-            XiaomiApi.instance.searchCity(query)
-                .filter { it.status == 0 }
-                .mapNotNull {
+        val term = normalizePlaceTerm(query)
+        val persisted = try { cities.first() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { emptyList() }
+        val saved = persisted.filter {
+            normalizePlaceTerm(it.displayName + it.affiliation).contains(term)
+        }
+        return mergePlaceSearchResults(saved, LocalPlaces.search(appContext, query))
+    }
+
+    suspend fun search(query: String): List<City> {
+        val outcome = searchOnline(query, precise = false)
+        outcome.failure?.let { if (outcome.cities.isEmpty()) throw PlaceServiceException(it) }
+        return outcome.cities
+    }
+
+    internal suspend fun searchOnline(query: String, precise: Boolean, region: PlaceRegion = PlaceRegion.DOMESTIC): PlaceSearchOutcome {
+        if (query.isBlank()) return PlaceSearchOutcome(emptyList())
+        val snapshot = currentPlaceCredentials()
+        val providers = if (precise) preciseProviders(query, snapshot, region) else cityProviders(query, snapshot, region)
+        val scoped = providers.map { provider -> suspend { filterPlaceRegion(provider(), region, includeUnclassified = precise) } }
+        return coordinatePlaceSearch(scoped, isCurrent = { currentPlaceCredentials() == snapshot })
+    }
+
+    private fun cityProviders(query: String, snapshot: PlaceCredentials, region: PlaceRegion): List<suspend () -> List<City>> {
+        if (region == PlaceRegion.OVERSEAS) return listOf({ OpenMeteoSource.searchCity(query) })
+        val providers = mutableListOf<suspend () -> List<City>>(
+            { coroutineScope {
+                val results = listOf("CN", "HK", "MO", "TW").map { code -> async {
+                    try { OpenMeteoSource.searchCity(query, code) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { null }
+                } }.awaitAll()
+                if (results.all { it == null }) throw java.io.IOException("Domestic city lookup unavailable")
+                results.filterNotNull().flatten().filter { validSearchCoordinates(it.latitude, it.longitude) }
+            } },
+            {
+                XiaomiApi.instance.searchCity(query).filter { it.status == 0 }.mapNotNull {
                     val lat = it.latitude?.toDoubleOrNull() ?: return@mapNotNull null
                     val lon = it.longitude?.toDoubleOrNull() ?: return@mapNotNull null
+                    if (!validSearchCoordinates(lat, lon)) return@mapNotNull null
                     val key = it.locationKey ?: return@mapNotNull null
-                    City(
-                        name = it.name ?: "",
-                        affiliation = it.affiliation ?: "",
-                        latitude = lat,
-                        longitude = lon,
-                        locationKey = key,
-                    )
+                    if (it.name.isNullOrBlank()) return@mapNotNull null
+                    City(it.name.orEmpty(), it.affiliation.orEmpty(), lat, lon, key,
+                        countryCode = "CN".takeIf { key.matches(Regex("101[0-9]{6}")) })
                 }
-        } catch (ce: kotlinx.coroutines.CancellationException) {
-            throw ce
-        } catch (_: Exception) {
-            emptyList()
+            },
+        )
+        if (snapshot.qweatherEnabled) providers += {
+            val response = QWeatherApi.service.cityLookup(query, range = "cn")
+            if (response.code != "200" && response.code != "404") throw java.io.IOException("City lookup unavailable")
+            response.location.mapNotNull { loc ->
+                val lat = loc.lat?.toDoubleOrNull() ?: return@mapNotNull null
+                val lon = loc.lon?.toDoubleOrNull() ?: return@mapNotNull null
+                if (!validSearchCoordinates(lat, lon) || loc.name.isNullOrBlank()) return@mapNotNull null
+                City(loc.name.orEmpty(), listOf(loc.adm1, loc.adm2).filter { !it.isNullOrBlank() }.distinct().joinToString("·"),
+                    lat, lon, loc.id ?: "$lon,$lat", countryCode = "CN", countryName = loc.country)
+            }
         }
-        if (xiaomi.isNotEmpty()) return xiaomi
-        val om = OpenMeteoSource.searchCity(query)
-        if (om.isNotEmpty()) return om
-        if (!SettingsRepository.qweatherUnlocked()) return emptyList()
-        val qw = try {
-            QWeatherApi.service.cityLookup(query)
-        } catch (ce: kotlinx.coroutines.CancellationException) {
-            throw ce
-        } catch (_: Exception) {
-            null
-        }
-        return qw?.location?.mapNotNull { loc ->
-            val lat = loc.lat?.toDoubleOrNull() ?: return@mapNotNull null
-            val lon = loc.lon?.toDoubleOrNull() ?: return@mapNotNull null
-            City(
-                name = loc.name ?: "",
-                affiliation = listOf(loc.adm1, loc.adm2)
-                    .filter { !it.isNullOrBlank() }.distinct().joinToString("·"),
-                latitude = lat,
-                longitude = lon,
-                locationKey = loc.id ?: "$lon,$lat",
-            )
-        }.orEmpty()
+        return providers
     }
 
     /**
@@ -144,12 +175,24 @@ object CityRepository {
      * 返回的完整坐标直接进入各天气源，locationKey 只负责稳定保存与去重。
      */
     suspend fun searchPreciseAddress(query: String): List<City> {
+        val outcome = searchOnline(query, precise = true)
+        outcome.failure?.let { if (outcome.cities.isEmpty()) throw PlaceServiceException(it) }
+        return outcome.cities
+    }
+
+    private fun preciseProviders(query: String, snapshot: PlaceCredentials, region: PlaceRegion): List<suspend () -> List<City>> {
         val keyword = query.trim()
         if (keyword.length < 2) return emptyList()
-        val system = if (Geocoder.isPresent()) withTimeoutOrNull(8_000L) {
-            forwardGeocode(keyword, maxResults = 8)
-        }.orEmpty() else emptyList()
-        val systemCities = system.mapNotNull { address ->
+        val providers = mutableListOf<suspend () -> List<City>>()
+        if (region == PlaceRegion.DOMESTIC && snapshot.amap.isNotBlank()) providers += {
+            AmapApi.searchPlaces(snapshot.amap, keyword).mapNotNull { place ->
+                preciseAddressCity(place.district, place.city, place.province, place.name, place.address, null,
+                    place.latitude, place.longitude, source = "amap", sourceId = place.sourceId)
+            }
+        }
+        providers += {
+            if (!Geocoder.isPresent()) throw PlaceServiceException(PlaceFailure.UNAVAILABLE)
+            forwardGeocode(keyword, maxResults = 8).mapNotNull { address ->
             preciseAddressCity(
                 district = address.subLocality ?: address.subAdminArea,
                 city = address.locality,
@@ -159,39 +202,17 @@ object CityRepository {
                 premises = address.premises,
                 latitude = address.latitude,
                 longitude = address.longitude,
-            )
+                source = "system",
+            )?.copy(countryCode = address.countryCode, countryName = address.countryName)
+            }
         }
-        val amapCities = if (SettingsRepository.amapUnlocked()) {
-            val key = SecretStore.currentAmap().webServiceKey
-            withTimeoutOrNull(8_000L) { AmapApi.searchPlaces(key, keyword) }.orEmpty().mapNotNull { place ->
-                preciseAddressCity(
-                    district = place.district,
-                    city = place.city,
-                    province = place.province,
-                    featureName = place.name,
-                    thoroughfare = place.address,
-                    premises = null,
-                    latitude = place.latitude,
-                    longitude = place.longitude,
-                )
+        if (region == PlaceRegion.DOMESTIC && snapshot.baidu.isNotBlank()) providers += {
+            BaiduApi.searchPlaces(snapshot.baidu, keyword).mapNotNull { place ->
+                preciseAddressCity(place.district, place.city, place.province, place.name, place.address, null,
+                    place.latitude, place.longitude, source = "baidu")
             }
-        } else emptyList()
-        val baiduCities = if (SettingsRepository.baiduUnlocked()) {
-            val ak = SecretStore.currentBaidu().webServiceAk
-            withTimeoutOrNull(8_000L) { BaiduApi.searchPlaces(ak, keyword) }.orEmpty().mapNotNull { place ->
-                preciseAddressCity(
-                    district = place.district,
-                    city = place.city,
-                    province = place.province,
-                    featureName = place.name,
-                    thoroughfare = place.address,
-                    premises = null,
-                    latitude = place.latitude,
-                    longitude = place.longitude,
-                )
-            }
-        } else emptyList()
-        return (systemCities + amapCities + baiduCities).distinctBy(City::locationKey)
+        }
+        return providers
     }
 
     private suspend fun forwardGeocode(query: String, maxResults: Int): List<Address> {
@@ -204,12 +225,12 @@ object CityRepository {
                     }
 
                     override fun onError(errorMessage: String?) {
-                        if (cont.isActive) cont.resume(emptyList())
+                        if (cont.isActive) cont.resumeWithException(PlaceServiceException(PlaceFailure.UNAVAILABLE))
                     }
                 })
             }
         } else {
-            geocoderCall {
+            geocoderCall(strict = true) {
                 @Suppress("DEPRECATION")
                 geocoder.getFromLocationName(query, maxResults)
             }.orEmpty()
@@ -217,6 +238,14 @@ object CityRepository {
     }
 
     // 已保存城市
+    val initialLocationSetupRequired: Flow<Boolean>
+        get() = store.data.map { InitialLocationStoragePolicy.setupRequired(it) }
+
+    /** Choosing a manual route or skipping the guide only records that choice. */
+    suspend fun completeInitialLocationSetup() {
+        store.edit { it[InitialLocationStoragePolicy.completedKey] = true }
+    }
+
     val locatedCityKey: Flow<String?> by lazy { store.data.map { it[KEY_LOCATED] } }
 
     val cities: Flow<List<City>> by lazy {
@@ -235,7 +264,7 @@ object CityRepository {
 
     suspend fun addCity(city: City): City {
         var saved = city
-        store.edit { prefs ->
+        editCityContext { prefs ->
             val list = prefs.cities().toMutableList()
             // Search providers can give the same place different IDs. Reuse the
             // saved record, including its favorite and fixed coordinates.
@@ -250,15 +279,17 @@ object CityRepository {
             prefs[KEY_CITIES] = encoded
             prefs[KEY_CITIES_BACKUP] = encoded // 双写备份（v0.0.4）
             prefs[KEY_SELECTED] = saved.locationKey
+            prefs[InitialLocationStoragePolicy.completedKey] = true
         }
         return saved
     }
 
-    suspend fun addOrUpdateLocatedCity(city: City, expectedSelectedKey: String?): City? {
+    suspend fun addOrUpdateLocatedCity(city: City, expectedSelectedKey: String?, expectedPlaceRevision: Long? = null, beforePublish: (City) -> Unit = {}): City? {
         var applied: City? = null
-        store.edit { prefs ->
+        editCityContext { prefs ->
             // Check within the transaction: a queued user selection wins over a late fix.
-            if (!shouldApplyLocation(expectedSelectedKey, prefs[KEY_SELECTED])) return@edit
+            if (!shouldApplyLocation(expectedSelectedKey, prefs[KEY_SELECTED]) ||
+                (expectedPlaceRevision != null && PlaceConfigurationRevision.current() != expectedPlaceRevision)) return@editCityContext
             val list = replaceLocatedCity(prefs.cities(), prefs[KEY_LOCATED], city)
             val located = list.first()
             prefs[KEY_LOCATED] = located.locationKey
@@ -266,13 +297,34 @@ object CityRepository {
             prefs[KEY_CITIES] = encoded
             prefs[KEY_CITIES_BACKUP] = encoded
             prefs[KEY_SELECTED] = located.locationKey
+            prefs[InitialLocationStoragePolicy.completedKey] = true
+            beforePublish(located)
             applied = located
         }
         return applied
     }
 
-    suspend fun removeCity(locationKey: String) {
+    /** Enrichment updates the same sample only; weather coordinates and favorites remain unchanged. */
+    internal suspend fun updateLocatedLabel(enriched: City, expectedPlaceRevision: Long? = null): City? {
+        var applied: City? = null
         store.edit { prefs ->
+            if (prefs[KEY_SELECTED] != enriched.locationKey || prefs[KEY_LOCATED] != enriched.locationKey ||
+                (expectedPlaceRevision != null && PlaceConfigurationRevision.current() != expectedPlaceRevision)) return@edit
+            val list = prefs.cities().map { saved ->
+                if (saved.locationKey == enriched.locationKey) updateMeasuredLabel(saved, enriched)?.also { applied = it } ?: saved
+                else saved
+            }
+            if (applied != null) {
+                val encoded = json.encodeToString(cityListSerializer, list)
+                prefs[KEY_CITIES] = encoded
+                prefs[KEY_CITIES_BACKUP] = encoded
+            }
+        }
+        return applied
+    }
+
+    suspend fun removeCity(locationKey: String) {
+        editCityContext { prefs ->
             val list = prefs.cities().toMutableList()
             list.removeAll { it.locationKey == locationKey }
             val encoded = json.encodeToString(cityListSerializer, list)
@@ -286,7 +338,7 @@ object CityRepository {
 
     suspend fun toggleFavorite(locationKey: String): FavoriteToggleResult {
         var result = FavoriteToggleResult.NOT_FOUND
-        store.edit { prefs ->
+        editCityContext { prefs ->
             val toggled = toggleFavoriteIn(prefs.cities(), locationKey)
             result = toggled.result
             val list = toggled.cities
@@ -323,20 +375,20 @@ object CityRepository {
     }
 
     suspend fun selectCity(locationKey: String) {
-        store.edit { prefs ->
+        editCityContext { prefs ->
             prefs[KEY_SELECTED] = locationKey
         }
     }
 
     /** Restore the saved location without requesting GPS or replacing any saved city. */
-    suspend fun restoreLocatedCity(expectedSelectedKey: String?): City? {
+    suspend fun restoreLocatedCity(expectedSelectedKey: String?, expectedPlaceRevision: Long? = null, beforePublish: (City) -> Unit = {}): City? {
         var restored: City? = null
-        store.edit { prefs ->
+        editCityContext { prefs ->
             val cities = prefs.cities()
             val selectedKey = cities.firstOrNull { it.locationKey == prefs[KEY_SELECTED] }?.locationKey
             // A user selection queued during startup takes precedence over restoration.
-            if (!shouldApplyLocation(expectedSelectedKey, selectedKey)) return@edit
-            val located = cities.firstOrNull { it.locationKey == prefs[KEY_LOCATED] } ?: return@edit
+            if (!shouldApplyLocation(expectedSelectedKey, selectedKey)) return@editCityContext
+            val located = cities.firstOrNull { it.locationKey == prefs[KEY_LOCATED] } ?: return@editCityContext
             prefs[KEY_SELECTED] = located.locationKey
             restored = located
         }
@@ -408,6 +460,13 @@ object CityRepository {
     private fun Preferences.cities(): List<City> = decodeCities().list
 
 }
+
+internal fun validSearchCoordinates(latitude: Double, longitude: Double): Boolean =
+    latitude.isFinite() && longitude.isFinite() && latitude in -90.0..90.0 && longitude in -180.0..180.0
+
+internal fun citySearchAdvice(query: String): String =
+    if ('颖' in query || '颍' in query) "未找到「${query.trim()}」。颖与颍是不同的字，请核对地名并补充省、市或区县；也可切换地点搜索。"
+    else "未找到「${query.trim()}」。请补充省、市或区县名，或切换地点搜索。"
 
 /** 最近定位地址置顶，其余收藏和普通城市各自保持原有次序。 */
 internal fun favoriteCitiesFirst(cities: List<City>, locatedKey: String? = null): List<City> =
@@ -515,6 +574,8 @@ internal fun preciseAddressCity(
     premises: String?,
     latitude: Double,
     longitude: Double,
+    source: String? = null,
+    sourceId: String? = null,
 ): City? {
     if (!latitude.isFinite() || !longitude.isFinite() || latitude !in -90.0..90.0 || longitude !in -180.0..180.0) {
         return null
@@ -539,9 +600,20 @@ internal fun preciseAddressCity(
         affiliation = affiliation,
         latitude = latitude,
         longitude = longitude,
-        locationKey = preciseLocationKey(latitude, longitude),
+        locationKey = if (source == null) preciseLocationKey(latitude, longitude)
+            else placeIdentity(source, sourceId, name, street, latitude, longitude),
         street = street,
+        coordinateKind = com.zhisheng.weather.model.CoordinateKind.PLACE,
+        addressSource = source,
     )
+}
+
+internal fun placeIdentity(source: String, sourceId: String?, name: String, street: String?, latitude: Double, longitude: Double): String {
+    val identity = sourceId?.takeIf(String::isNotBlank)
+        ?: java.lang.String.format(java.util.Locale.US, "%s|%s|%.5f|%.5f", name, street.orEmpty(), latitude, longitude)
+    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
+        .take(12).joinToString("") { "%02x".format(it) }
+    return "geo:poi:$source:$digest"
 }
 
 /** One moving location slot; every favorite remains an immutable saved address. */

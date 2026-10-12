@@ -47,4 +47,11 @@ class RadarRepositoryTest {
         )
         assertEquals(false, isRadarMetadataCacheUsable(0L, null, now))
     }
+
+    @Test fun freshCatalogCannotDisguiseOldOrMissingObservations() {
+        val now = 1_700_003_000_000L
+        assertEquals(false, isRadarMetadataCacheUsable(1_700_003_000L, 1_699_989_400L, now))
+        assertEquals(false, isRadarMetadataCacheUsable(1_700_003_000L, null, now))
+        assertEquals(false, isRadarMetadataCacheUsable(1_700_003_000L, Long.MAX_VALUE, now))
+    }
 }

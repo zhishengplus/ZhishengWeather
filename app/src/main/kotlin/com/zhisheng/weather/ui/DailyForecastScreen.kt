@@ -125,11 +125,12 @@ fun DailyForecastScreen(
     windUnit: String,
     utcOffsetSeconds: Int?,
     onBack: () -> Unit,
+    hourly: List<com.zhisheng.weather.model.HourlyWeather> = emptyList(),
 ) {
     val nowMillis = weatherPresentationTime()
     val visibleDays = days.take(15)
     if (isPhosphorVista) {
-        VistaForecastScreen(city, visibleDays, yesterday, tempUnit, windUnit, utcOffsetSeconds, onBack)
+        VistaForecastScreen(city, visibleDays, yesterday, tempUnit, windUnit, utcOffsetSeconds, onBack, hourly = hourly)
         return
     }
     val trackDays = listOfNotNull(yesterdayForecastDay(yesterday, utcOffsetSeconds, nowMillis)) + visibleDays
@@ -182,6 +183,13 @@ fun DailyForecastScreen(
                 }
             }
             selectedDay?.let { day ->
+                item {
+                    TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Column(Modifier.padding(14.dp)) {
+                            ForecastHourlyTemperature(forecastHoursForDate(hourly, day.dateMillis, utcOffsetSeconds), tempUnit, utcOffsetSeconds)
+                        }
+                    }
+                }
                 item { FeatureSectionTitle(2, "当日详情", "DAY DETAIL") }
                 item {
                     TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {

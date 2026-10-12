@@ -258,6 +258,7 @@ data class QwIndices(
 
 @Serializable
 data class QwCityLoc(
+    val country: String? = null,
     val name: String? = null,
     val id: String? = null,
     val lat: String? = null,

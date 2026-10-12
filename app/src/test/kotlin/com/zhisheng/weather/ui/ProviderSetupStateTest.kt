@@ -11,6 +11,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderSetupStateTest {
+    @Test fun personalDomesticProvidersRequireTheirOwnCredentialsAndPairedOptionalForecast() {
+        val seniverse = ProviderSetupUiState(ProviderWizardKind.SENIVERSE)
+        assertTrue(ProviderField.API_KEY in validateProviderCandidate(seniverse))
+        assertTrue(validateProviderCandidate(seniverse.copy(apiKey = "synthetic-key")).isEmpty())
+        val moji = ProviderSetupUiState(ProviderWizardKind.MOJI, apiKey = "synthetic-appcode",
+            mojiCurrentEndpoint = "https://aliv8.data.moji.com/whapi/json/aliweather/condition", mojiCurrentToken = "synthetic-token")
+        assertTrue(validateProviderCandidate(moji).isEmpty())
+        assertTrue(ProviderField.MOJI_DAY_TOKEN in validateProviderCandidate(moji.copy(
+            mojiDailyEndpoint = "https://aliv8.data.moji.com/whapi/json/aliweather/forecast6days")))
+        assertTrue(ProviderField.MOJI_NOW_URL in validateProviderCandidate(moji.copy(
+            mojiCurrentEndpoint = "https://foreign.example/whapi/json/aliweather/condition")))
+    }
 
     @Test
     fun `qweather onboarding defaults to the quick api key route`() {

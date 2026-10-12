@@ -9,6 +9,15 @@ import org.junit.Test
 
 class CityWeatherCachePolicyTest {
     private val now = 1_800_000_000_000L
+    @Test fun sameKeyDifferentMeasuredCoordinatesRejectsMemoryAndLiveWeather() {
+        val city = com.zhisheng.weather.model.City("当前位置", "", 38.5, 102.2, "geo:38.500,102.200",
+            coordinateKind = com.zhisheng.weather.model.CoordinateKind.DEVICE)
+        val previous = cached().let { it.copy(data = it.data.copy(locationMatch =
+            com.zhisheng.weather.model.WeatherLocationMatch(38.5001, 102.2001, 38.5, 102.2))) }
+        assertNull(usableCityWeatherCache(previous, SourcePref.XIAOMI, now, city = city))
+        assertEquals(previous, usableCityWeatherCache(previous, SourcePref.XIAOMI, now,
+            city = city.copy(latitude = 38.5001, longitude = 102.2001)))
+    }
     private fun cached(age: Long = 0L, source: String = "XIAOMI") = CachedWeather(
         WeatherData(current = CurrentWeather(temperature = 22.0), updateTime = now - age, dataSource = source),
         savedAtMillis = now - age,

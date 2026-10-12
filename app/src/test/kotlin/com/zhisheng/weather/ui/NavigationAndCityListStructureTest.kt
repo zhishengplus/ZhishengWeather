@@ -52,9 +52,9 @@ class NavigationAndCityListStructureTest {
     fun citySearchHasAnExplicitLabeledBackControl() {
         val search = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/SearchScreen.kt").readText()
 
-        assertTrue(search.contains("onClickLabel = uiText(\"返回\")"))
-        assertTrue(search.contains("Text(uiText(\"返回\")"))
-        // A labelled native icon button is valid; keep the classic text control as well.
+        assertTrue(search.contains("IconButton(onClick = { dismissKeyboard(); onBack() })"))
+        assertTrue(search.contains("Icons.AutoMirrored.Filled.ArrowBack, \"返回\""))
+        // Both styles retain a labelled back action; real clicks are checked natively.
         assertTrue(search.contains("PhosphorIcon(R.drawable.ph_arrow_left, \"返回\""))
     }
 }

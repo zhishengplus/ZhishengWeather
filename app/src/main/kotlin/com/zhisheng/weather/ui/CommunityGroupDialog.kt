@@ -1,34 +1,30 @@
 package com.zhisheng.weather.ui
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.zhisheng.weather.ui.theme.zhishengScreen
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,148 +32,94 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.zhisheng.weather.BuildConfig
-import com.zhisheng.weather.R
-import com.zhisheng.weather.ui.theme.ZhishengBg
-import com.zhisheng.weather.ui.theme.ZhishengCardBorder
-import com.zhisheng.weather.ui.theme.ZhishengCyan
-import com.zhisheng.weather.ui.theme.ZhishengMint
-import com.zhisheng.weather.ui.theme.ZhishengSurface
-import com.zhisheng.weather.ui.theme.ZhishengText
-import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
-import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
-import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 import com.zhisheng.weather.i18n.uiText
-
-internal val CommunityQqGroup: String
-    get() = BuildConfig.COMMUNITY_QQ_GROUP
+import com.zhisheng.weather.ui.components.WeatherDialogWindow
+import com.zhisheng.weather.ui.theme.*
 
 @Composable
 fun CommunityGroupDialog(onClose: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
+    var selectedIndex by rememberSaveable { mutableIntStateOf(CommunityGroups.first().index) }
+    val group = CommunityGroups.first { it.index == selectedIndex }
 
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zhishengScreen()
-                .safeDrawingPadding()
-                .padding(12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 440.dp)
-                    .zhishengDialogPanel(),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
-                        Text(
-                            "QQ 交流群",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZhishengCyan,
-                            letterSpacing = 1.4.sp,
-                        )
-                        Text(
-                            "枳生天气用户交流群",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = ZhishengText,
-                            fontWeight = FontWeight.Bold,
-                        )
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(
+        usePlatformDefaultWidth = true, decorFitsSystemWindows = false,
+    )) {
+        WeatherDialogWindow(overlay = true)
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .38f)).clickable(onClick = onClose))
+            val panelHeight = (maxHeight - 64.dp).coerceAtLeast(120.dp).coerceAtMost(640.dp)
+            Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center) {
+                Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = panelHeight)
+                    .zhishengDialogPanel()) {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = 14.dp)) {
+                            Text("QQ 交流群", style = MaterialTheme.typography.labelSmall,
+                                color = ZhishengCyan, letterSpacing = 1.4.sp)
+                            Text("枳生天气用户交流群", style = MaterialTheme.typography.titleLarge,
+                                color = ZhishengText, fontWeight = FontWeight.Bold)
+                        }
+                        Box(Modifier.size(52.dp).semantics { contentDescription = uiText("关闭") }
+                            .clickable(role = Role.Button, onClick = onClose), contentAlignment = Alignment.Center) {
+                            Text("×", style = MaterialTheme.typography.headlineSmall, color = ZhishengTextSecondary)
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clickable(role = Role.Button, onClick = onClose),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("×", style = MaterialTheme.typography.headlineSmall, color = ZhishengTextSecondary)
-                    }
-                }
-
-                HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
-
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("CHANNEL ID", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-                        Text(
-                            CommunityQqGroup,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = ZhishengMint,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.2.sp,
-                            textAlign = TextAlign.End,
-                            maxLines = 1,
-                        )
-                    }
-
-                    Spacer(Modifier.size(12.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .widthIn(max = 300.dp)
-                            .aspectRatio(1016f / 1099f)
-                            .background(ZhishengBg)
-                            .border(1.dp, ZhishengCyan.copy(alpha = 0.72f), RectangleShape)
-                            .padding(7.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Image(
-                            painter = painterResource(R.drawable.qq_group_qr),
-                            contentDescription = uiText("枳生天气 QQ 群二维码，群号 $CommunityQqGroup"),
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit,
-                        )
-                    }
-
-                    Spacer(Modifier.size(12.dp))
-                    Text(
-                        "扫码申请加入，或复制群号后在 QQ 中搜索。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = ZhishengTextSecondary,
-                    )
-                }
-
-                HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable(role = Role.Button) {
-                                clipboard.setText(AnnotatedString(CommunityQqGroup))
-                                Toast.makeText(context, uiText("群号已复制"), Toast.LENGTH_SHORT).show()
+                    HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
+                    Row(Modifier.fillMaxWidth().selectableGroup().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CommunityGroups.forEach { choice ->
+                            val selected = choice.index == selectedIndex
+                            Box(Modifier.weight(1f)
+                                .background(if (selected) ZhishengCyan.copy(alpha = .12f) else Color.Transparent)
+                                .selectable(selected, role = Role.Tab) { selectedIndex = choice.index }
+                                .padding(horizontal = 8.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+                                Text(if (choice.index == 2) "2 群 · 推荐" else "1 群",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (selected) ZhishengCyan else ZhishengTextSecondary,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                             }
-                            .padding(vertical = 15.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("[ 复制群号 ]", style = MaterialTheme.typography.labelLarge, color = ZhishengMint)
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(ZhishengCardBorder.copy(alpha = 0.16f))
-                            .clickable(role = Role.Button, onClick = onClose)
-                            .padding(vertical = 15.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("[ 关闭 ]", style = MaterialTheme.typography.labelLarge, color = ZhishengCyan)
+                    Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(group.number, style = MaterialTheme.typography.titleLarge, color = ZhishengMint,
+                            fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                        Spacer(Modifier.height(10.dp))
+                        Image(painterResource(group.qrResource),
+                            contentDescription = uiText("枳生天气 QQ 群二维码，群号 ${group.number}"),
+                            modifier = Modifier.widthIn(max = 240.dp).fillMaxWidth().aspectRatio(1f),
+                            contentScale = ContentScale.Fit)
+                        Spacer(Modifier.height(10.dp))
+                        Text("前瞻预览、使用交流与反馈。优先加入 2 群。",
+                            style = MaterialTheme.typography.bodyMedium, color = ZhishengTextSecondary,
+                            textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(14.dp))
+                    }
+                    HorizontalDivider(thickness = 1.dp, color = ZhishengCardBorder)
+                    Row(Modifier.fillMaxWidth()) {
+                        Box(Modifier.weight(1f).background(ZhishengMint.copy(alpha = .12f))
+                            .clickable(role = Role.Button) {
+                                val opened = openCommunityGroupLink(group) { url, packageName ->
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                            packageName?.let { setPackage(it) }
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        })
+                                    }.isSuccess
+                                }
+                                if (!opened) Toast.makeText(context,
+                                    uiText("暂时无法打开加群入口，可复制群号在 QQ 中搜索。"), Toast.LENGTH_LONG).show()
+                            }.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                            Text("一键加群", style = MaterialTheme.typography.labelLarge,
+                                color = ZhishengMint, fontWeight = FontWeight.Bold)
+                        }
+                        Box(Modifier.weight(1f).clickable(role = Role.Button) {
+                            clipboard.setText(AnnotatedString(group.number))
+                            Toast.makeText(context, uiText("群号已复制"), Toast.LENGTH_SHORT).show()
+                        }.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                            Text("复制群号", style = MaterialTheme.typography.labelLarge, color = ZhishengCyan)
+                        }
                     }
                 }
             }

@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import com.zhisheng.weather.ui.theme.zhishengScreen
 import androidx.compose.ui.draw.alpha
@@ -80,6 +81,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.zhisheng.weather.R
+import com.zhisheng.weather.ui.components.PhosphorIcon
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -262,9 +265,14 @@ private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onCl
     val (title, provider) = when (state.kind) {
         ProviderWizardKind.QWEATHER -> "接入和风天气" to "QWEATHER"
         ProviderWizardKind.CAIYUN -> "接入彩云天气" to "CAIYUN"
-        ProviderWizardKind.AMAP -> "接入高德地理服务" to "AMAP GEO"
-        ProviderWizardKind.BAIDU -> "接入百度地理服务" to "BAIDU GEO"
+        ProviderWizardKind.AMAP -> "接入高德服务" to "AMAP"
+        ProviderWizardKind.BAIDU -> "接入百度服务" to "BAIDU"
+        ProviderWizardKind.SENIVERSE -> "接入心知天气" to "SENIVERSE"
+        ProviderWizardKind.MOJI -> "接入墨迹天气" to "MOJI"
     }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val stacked = maxWidth < 400.dp && LocalDensity.current.fontScale >= 1.5f
+    Column {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -275,11 +283,12 @@ private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onCl
                 onClick = onBack,
                 tone = ButtonTone.NEUTRAL,
                 accessibilityLabel = "返回上一步",
+                iconRes = R.drawable.ph_arrow_left,
                 modifier = Modifier.size(52.dp),
             )
             Spacer(Modifier.width(8.dp))
         }
-        Column(Modifier.weight(1f)) {
+        if (stacked) Spacer(Modifier.weight(1f)) else Column(Modifier.weight(1f)) {
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium,
@@ -304,8 +313,16 @@ private fun ProviderHeader(state: ProviderSetupUiState, onBack: () -> Unit, onCl
             onClick = onClose,
             tone = ButtonTone.NEUTRAL,
             accessibilityLabel = "关闭接入向导",
+            iconRes = R.drawable.ph_x,
             modifier = Modifier.size(52.dp),
         )
+    }
+    if (stacked) Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, color = ZhishengText, fontWeight = FontWeight.Bold)
+        Text(if (com.zhisheng.weather.ui.theme.isPhosphorVista) "数据源接入" else provider,
+            style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary, letterSpacing = 1.2.sp)
+    }
+    }
     }
 }
 
@@ -320,6 +337,8 @@ private fun StepRail(state: ProviderSetupUiState) {
             listOf("准备", "创建 Web 应用", "复制并验证", "接入完成")
         ProviderWizardKind.BAIDU ->
             listOf("准备", "创建服务端应用", "复制并验证", "接入完成")
+        ProviderWizardKind.SENIVERSE, ProviderWizardKind.MOJI ->
+            listOf("准备", "个人控制台", "复制并验证", "接入完成")
     }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -354,6 +373,7 @@ private fun ProviderStepContent(state: ProviderSetupUiState, model: ProviderSetu
         ProviderWizardKind.CAIYUN -> CaiyunStep(state, model)
         ProviderWizardKind.AMAP -> AmapStep(state, model)
         ProviderWizardKind.BAIDU -> BaiduStep(state, model)
+        ProviderWizardKind.SENIVERSE, ProviderWizardKind.MOJI -> DomesticProviderStep(state, model)
     }
 }
 
@@ -586,11 +606,11 @@ private fun AmapStep(state: ProviderSetupUiState, model: ProviderSetupViewModel)
         0 -> {
             StepIntro(
                 title = "接入地址与街道解析",
-                body = "高德 Web 服务 Key 用于地址解析和精确地点搜索。beta6 不再接入高德天气，普通天气自动优选仍使用小米与 Open-Meteo。",
+                body = "高德 Web 服务 Key 用于地址解析和地点搜索；也可在数据源设置中选择区县天气。天气查询需要对应权限与额度，保存地理服务 Key 不代表天气权限已通过。",
             )
             TerminalCommand("location enhance amap --web-service")
             FactRow("地理能力", "GPS 坐标转换、逆地理编码与精确地点搜索")
-            FactRow("能力范围", "仅地理服务，不调用高德天气接口")
+            FactRow("天气能力", "区县实况与每日预报，无逐小时和分钟降水")
             FactRow("存储", "Web 服务 Key 仅保存在本机 no_backup 私密目录")
         }
         1 -> {
@@ -638,7 +658,7 @@ private fun BaiduStep(state: ProviderSetupUiState, model: ProviderSetupViewModel
         0 -> {
             StepIntro(
                 title = "接入精确地址搜索",
-                body = "百度服务端 AK 用于逆地理编码与精确地点搜索。beta6 不再接入百度天气，不需要为了天气查询申请企业认证。",
+                body = "百度服务端 AK 用于逆地理编码与地点搜索；具备天气查询权限时，可在数据源设置选择区县天气。可用天气字段取决于账号授权，保存地理服务 AK 不代表天气权限已通过。",
             )
             TerminalCommand("provider add baidu --server-ak")
             FactRow("坐标", "直接使用手机 WGS84 经纬度，不替换系统定位")
@@ -676,6 +696,53 @@ private fun BaiduStep(state: ProviderSetupUiState, model: ProviderSetupViewModel
                 enabled = !state.testing,
             )
             ClipboardPasteButton("从剪贴板粘贴百度 AK", model::setBaiduAk)
+            ConnectionTrace(state)
+            ResultBanner(state)
+        }
+        3 -> SuccessStep(state)
+    }
+}
+
+@Composable
+private fun DomesticProviderStep(state: ProviderSetupUiState, model: ProviderSetupViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val moji = state.kind == ProviderWizardKind.MOJI
+    val name = if (moji) "墨迹天气" else "心知天气"
+    when (state.step) {
+        0 -> {
+            StepIntro("使用你的${name}账号", if (moji)
+                "接入阿里云市场的墨迹经纬度产品，返回实况及所订阅的日预报。它不是永久免费服务；是否有试用、剩余额度及费用，以你的控制台为准。应用不提供共享账号，也不代购。"
+                else "个人免费版提供主要城市实况、3天日预报和基础生活指数，按坐标匹配城市。它不提供街道级、逐小时或短时降水预报。额度与覆盖以个人控制台为准。")
+            FactRow("查询", "只有选为主源或模块来源后才请求，不自动参与融合或比较")
+            FactRow("保存", "凭据仅保存在本机私密存储，失败或取消保留原配置")
+        }
+        1 -> {
+            StepIntro("从个人控制台复制凭据", if (moji)
+                "打开已有订阅的墨迹经纬度产品，复制 AppCode。分别从实况、日预报调用示例复制 HTTPS 请求地址和对应 Token。不同产品或接口的 Token 不能混用，CityID 产品不能用于本入口。"
+                else "注册个人账号并申请免费版，进入 API 控制台复制 API 私钥。这里接入城市版 V3，不需要企业网格服务的公钥签名。")
+            ProviderLink(if (moji) "打开墨迹官方店铺" else "打开心知官网", "额度、覆盖及订阅由个人账号管理") {
+                openUrl(context, if (moji) "https://market.aliyun.com/store/1799190/index.html" else "https://www.seniverse.com/pricing")
+            }
+            if (moji) ProviderLink("打开已购买的服务", "复制 AppCode 与接口调用示例") { openUrl(context, "https://market.console.aliyun.com/") }
+        }
+        2 -> {
+            StepIntro("验证并保存$name", if (moji)
+                "验证会真实查询北京测试坐标，实况消耗1次额度；填写日预报后共查询2次。日预报两项可同时留空，仅保存实况。两项均通过才替换原配置。"
+                else "验证会真实查询北京测试坐标的城市实况，消耗1次个人额度。成功后保存；选用来源时再查询3天预报和基础指数。")
+            TerminalField(if (moji) "墨迹 AppCode" else "心知 API 私钥", state.apiKey, model::setApiKey,
+                helper = "从个人控制台复制，不填写他人的共享凭据", error = state.fieldErrors[ProviderField.API_KEY],
+                sensitive = true, keyboardType = KeyboardType.Password, enabled = !state.testing)
+            ClipboardPasteButton(if (moji) "粘贴 AppCode" else "粘贴 API 私钥", model::setApiKey)
+            if (moji) {
+                TerminalField("实况 HTTPS 请求地址", state.mojiCurrentEndpoint, model::setMojiCurrentEndpoint,
+                    helper = "复制坐标版 condition 或 briefcondition 的完整 HTTPS 地址，不带参数", error = state.fieldErrors[ProviderField.MOJI_NOW_URL], enabled = !state.testing)
+                TerminalField("实况接口 Token", state.mojiCurrentToken, model::setMojiCurrentToken,
+                    helper = "复制该接口调用示例中的 Token", error = state.fieldErrors[ProviderField.MOJI_NOW_TOKEN], sensitive = true, enabled = !state.testing)
+                TerminalField("日预报 HTTPS 请求地址（可选）", state.mojiDailyEndpoint, model::setMojiDailyEndpoint,
+                    helper = "复制所订阅的3/6/15天日预报 HTTPS 地址", error = state.fieldErrors[ProviderField.MOJI_DAY_URL], enabled = !state.testing)
+                TerminalField("日预报接口 Token（可选）", state.mojiDailyToken, model::setMojiDailyToken,
+                    helper = "必须对应上方日预报接口；不用预报时两项同时留空", error = state.fieldErrors[ProviderField.MOJI_DAY_TOKEN], sensitive = true, enabled = !state.testing)
+            }
             ConnectionTrace(state)
             ResultBanner(state)
         }
@@ -927,6 +994,7 @@ internal fun TerminalField(
     keyboardType: KeyboardType = KeyboardType.Text,
 ) {
     var reveal by remember { mutableStateOf(false) }
+    LaunchedEffect(enabled) { if (!enabled) reveal = false }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val outline = when {
@@ -946,7 +1014,7 @@ internal fun TerminalField(
             singleLine = true,
             interactionSource = interaction,
             visualTransformation = if (sensitive && !reveal) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            keyboardOptions = KeyboardOptions(keyboardType = if (sensitive && keyboardType == KeyboardType.Text) KeyboardType.Password else keyboardType),
             cursorBrush = SolidColor(ZhishengMint),
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = ZhishengText, fontFamily = ZhishengMono),
             modifier = Modifier
@@ -967,15 +1035,15 @@ internal fun TerminalField(
                     if (sensitive) {
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clickable(role = Role.Button) { reveal = !reveal },
+                                .size(48.dp)
+                                .semantics {
+                                    contentDescription = (if (reveal) "隐藏" else "显示") + label
+                                    selected = reveal
+                                }
+                                .clickable(enabled = enabled || reveal, role = Role.Button) { reveal = !reveal },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                if (reveal) "隐藏" else "显示",
-                                color = ZhishengCyan,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
+                            PhosphorIcon(R.drawable.ph_eye, null, Modifier.size(22.dp), if (reveal) ZhishengMint else ZhishengCyan)
                         }
                     }
                 }
@@ -1078,12 +1146,14 @@ private fun SuccessStep(state: ProviderSetupUiState) {
         )
         ProviderWizardKind.AMAP -> Triple(
             "高德地理服务", "amap-geo",
-            "连接验证和本机保存都已完成。可用于地点搜索和街道名称，不影响普通天气数据源。",
+            "地理连接验证和本机保存已完成。可用于地点搜索和街道名称；天气权限需在选择对应天气源后另行检查。",
         )
         ProviderWizardKind.BAIDU -> Triple(
             "百度地理服务", "baidu-geo",
-            "连接验证和本机保存都已完成。可用于精确地点搜索和街道名称，不影响普通天气数据源。",
+            "地理连接验证和本机保存已完成。可用于精确地点搜索和街道名称；天气权限需在选择对应天气源后另行检查。",
         )
+        ProviderWizardKind.SENIVERSE -> Triple("心知天气", "seniverse", "城市实况验证和本机保存已完成，可在天气来源中选择心知。预报与指数按账号免费权限返回。")
+        ProviderWizardKind.MOJI -> Triple("墨迹天气", "moji", "已填写接口的验证和本机保存已完成，可在天气来源中选择墨迹。未填写日预报时仅显示实况。")
     }
     StepIntro(
         title = "$provider 已接入",
@@ -1107,6 +1177,7 @@ private fun ProviderFooter(
         (state.kind == ProviderWizardKind.CAIYUN && state.step == 3) ||
         (state.kind == ProviderWizardKind.AMAP && state.step == 2)
         || (state.kind == ProviderWizardKind.BAIDU && state.step == 2)
+        || (state.kind in setOf(ProviderWizardKind.SENIVERSE, ProviderWizardKind.MOJI) && state.step == 2)
     val finished = state.status == ProviderSetupStatus.SUCCESS || state.step == state.lastStep
     val primaryLabel = when {
         finished -> "完成"
@@ -1117,6 +1188,7 @@ private fun ProviderFooter(
             state.kind == ProviderWizardKind.CAIYUN -> "开始接入"
             state.kind == ProviderWizardKind.AMAP -> "开始接入"
             state.kind == ProviderWizardKind.BAIDU -> "开始接入"
+            state.kind == ProviderWizardKind.SENIVERSE || state.kind == ProviderWizardKind.MOJI -> "开始接入"
             else -> "开始高级配置"
         }
         state.kind == ProviderWizardKind.QWEATHER && state.step == 1 -> "项目已打开，去创建凭据"
@@ -1210,6 +1282,7 @@ internal fun TerminalButton(
     tone: ButtonTone = ButtonTone.PRIMARY,
     previewState: ButtonVisualState? = null,
     accessibilityLabel: String? = null,
+    iconRes: Int? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -1269,10 +1342,10 @@ internal fun TerminalButton(
             .semantics {
                 if (accessibilityLabel != null) contentDescription = accessibilityLabel
             }
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = if (iconRes == null) 12.dp else 6.dp, vertical = if (iconRes == null) 12.dp else 6.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
+        if (iconRes != null) PhosphorIcon(iconRes, null, Modifier.size(22.dp), signal) else Text(
             displayLabel,
             color = signal,
             style = MaterialTheme.typography.labelLarge,

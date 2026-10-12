@@ -65,6 +65,7 @@ class WeatherProviderAuditRegressionTest {
                     high = 30.0, low = 22.0, dayText = sample.dayText, nightText = sample.nightText,
                     dayCode = sample.dayCode, nightCode = sample.nightCode,
                     windText = null, windPower = null,
+                    forecastTime = "202609300800",
                 ),
                 indices = emptyList(), alarms = emptyList(),
             ), now)!!

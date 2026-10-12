@@ -12,6 +12,8 @@ import com.zhisheng.weather.model.radarTileSample
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -49,11 +51,12 @@ object RadarRepository {
             ?: return@withContext RadarTimeline("", emptyList(), true)
         val frames = orderRadarFrames(meta.radar.past.takeLast(MAX_FRAMES)) { it.time }
             .map { RadarFrame(it.time * 1000L, it.path) }
+        currentCoroutineContext().ensureActive()
         val coverage = city?.let { loadCoverage(meta.host, it) } ?: RadarCoverageState.UNKNOWN
         RadarTimeline(meta.host, frames, stale, coverage)
     }
 
-    private fun loadCoverage(host: String, city: City): RadarCoverageState {
+    private suspend fun loadCoverage(host: String, city: City): RadarCoverageState {
         val key = String.format(Locale.US, "%.2f,%.2f", city.latitude, city.longitude)
         synchronized(coverageCache) {
             coverageCache[key]?.takeIf { System.currentTimeMillis() - it.first < COVERAGE_CACHE_MS }?.let { return it.second }
@@ -62,10 +65,13 @@ object RadarRepository {
         val url = host.trimEnd('/') +
             "/v2/coverage/0/256/$COVERAGE_ZOOM/${sample.tileX}/${sample.tileY}/0/0_0.png"
         val state = try {
-            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                val bytes = response.body?.bytes() ?: return@use RadarCoverageState.UNKNOWN
-                if (!response.isSuccessful || bytes.isEmpty()) return@use RadarCoverageState.UNKNOWN
-                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@use RadarCoverageState.UNKNOWN
+            val response = radarRequestBytes(client, Request.Builder().url(url).build(), 1_048_576)
+            val bytes = response.bytes
+            if (!response.successful || bytes.isEmpty()) RadarCoverageState.UNKNOWN else run {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                if (bounds.outWidth != 256 || bounds.outHeight != 256) return@run RadarCoverageState.UNKNOWN
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@run RadarCoverageState.UNKNOWN
                 try {
                     val half = 4
                     val width = (half * 2 + 1).coerceAtMost(bitmap.width)
@@ -88,18 +94,24 @@ object RadarRepository {
         } catch (_: Exception) {
             RadarCoverageState.UNKNOWN
         }
+        currentCoroutineContext().ensureActive()
         synchronized(coverageCache) { coverageCache[key] = System.currentTimeMillis() to state }
         return state
     }
 
-    private fun loadMetadata(): Pair<RadarMetadata, Boolean>? {
+    private suspend fun loadMetadata(): Pair<RadarMetadata, Boolean>? {
         val cachedFile = File(directory, "metadata.json")
         return try {
-            client.newCall(Request.Builder().url(META_URL).build()).execute().use { response ->
-                val raw = response.body?.string()
-                if (!response.isSuccessful || raw.isNullOrBlank()) error("metadata unavailable")
+            run {
+                val response = radarRequestBytes(client, Request.Builder().url(META_URL).build(), 512_000)
+                val raw = response.bytes.toString(Charsets.UTF_8)
+                if (!response.successful || raw.isBlank()) error("metadata unavailable")
                 val metadata = json.decodeFromString<RadarMetadata>(raw)
-                if (metadata.host.isBlank() || metadata.radar.past.isEmpty()) error("metadata incomplete")
+                if (!isRainviewerHost(metadata.host) || metadata.radar.past.isEmpty() ||
+                    metadata.radar.past.any { !it.path.matches(Regex("/v2/radar/[A-Za-z0-9_-]+")) } ||
+                    !isRadarMetadataCacheUsable(metadata.generated, metadata.radar.past.maxOfOrNull { it.time }, System.currentTimeMillis()))
+                    error("metadata incomplete or expired")
+                currentCoroutineContext().ensureActive()
                 cachedFile.writeText(raw)
                 metadata to false
             }
@@ -111,8 +123,9 @@ object RadarRepository {
                 else {
                     val cached = json.decodeFromString<RadarMetadata>(cachedFile.readText())
                     cached.takeIf {
-                        it.host.isNotBlank() &&
+                        isRainviewerHost(it.host) &&
                             it.radar.past.isNotEmpty() &&
+                            it.radar.past.all { frame -> frame.path.matches(Regex("/v2/radar/[A-Za-z0-9_-]+")) } &&
                             isRadarMetadataCacheUsable(
                                 generatedSeconds = it.generated,
                                 latestFrameSeconds = it.radar.past.maxOfOrNull(RadarFrameDescriptor::time),
@@ -168,8 +181,17 @@ internal fun isRadarMetadataCacheUsable(
     nowMillis: Long,
     maxStaleMs: Long = 45 * 60_000L,
 ): Boolean {
-    val newestSeconds = maxOf(generatedSeconds, latestFrameSeconds ?: 0L)
-    if (newestSeconds <= 0L) return false
-    val ageMs = nowMillis - newestSeconds * 1000L
-    return ageMs in -5 * 60_000L..maxStaleMs
+    if (maxStaleMs < 0) return false
+    fun withinWindow(seconds: Long?): Boolean {
+        if (seconds == null || seconds <= 0 || seconds > Long.MAX_VALUE / 1000L) return false
+        val ageMs = nowMillis - seconds * 1000L
+        return ageMs in -5 * 60_000L..maxStaleMs
+    }
+    return withinWindow(generatedSeconds) && withinWindow(latestFrameSeconds)
 }
+
+private fun isRainviewerHost(host: String): Boolean = runCatching {
+    val uri = java.net.URI(host)
+    uri.scheme == "https" && uri.userInfo == null && (uri.port == -1 || uri.port == 443) &&
+        (uri.host == "tilecache.rainviewer.com" || uri.host?.endsWith(".rainviewer.com") == true)
+}.getOrDefault(false)

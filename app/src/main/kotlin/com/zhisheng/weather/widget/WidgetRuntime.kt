@@ -87,17 +87,33 @@ object WidgetRuntime {
         val ctx = c.applicationContext
         // 升级或开机后配置流可能一个值都不变，distinctUntilChanged 就不会触发渲染，
         // 桌面会一直挂着旧包的 RemoteViews。进程启动先兜底重绘一次。
-        scope.launch { renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.schedule(ctx) }
+        scope.launch { WidgetStore.migrateWeatherCache(ctx); renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.schedule(ctx) }
+        scope.launch {
+            SettingsRepository.moduleSources.drop(1).collect {
+                renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.request(ctx, force = true)
+            }
+        }
         scope.launch {
             combine(SettingsRepository.livingSky, SettingsRepository.ambience) { sky, level -> sky to level }
                 .distinctUntilChanged().catch { android.util.Log.w("DesktopWeather", "Sky preferences unavailable", it) }
                 .collect { (sky, level) -> renderAll(ctx); WidgetRefresh.scheduleSky(ctx, sky, level) }
         }
         scope.launch {
+            var previousContext: WidgetWeatherContext? = null
             combine(CityRepository.selectedCity, CityRepository.cities, CityRepository.locatedCityKey,
-                SettingsRepository.sourcePref, SettingsRepository.tempUnit) { a, b, d, e, f -> listOf(a, b, d, e, f) }
-                .distinctUntilChanged().catch { android.util.Log.w("DesktopWeather", "Preferences unavailable", it) }
-                .collect { renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.schedule(ctx); WidgetRefresh.request(ctx) }
+                SettingsRepository.sourcePref, SettingsRepository.tempUnit) { a, b, d, e, f ->
+                listOf(a, b, d, e, f) to widgetWeatherContext(a, b, d, e, f)
+            }.distinctUntilChanged().catch { android.util.Log.w("DesktopWeather", "Preferences unavailable", it) }
+                .collect { (_, context) ->
+                    val changed = previousContext != context
+                    renderAll(ctx)
+                    WidgetNotification.refresh(ctx, runReminderChecks = changed)
+                    if (changed) {
+                        previousContext = context
+                        WidgetRefresh.schedule(ctx)
+                        WidgetRefresh.request(ctx)
+                    }
+                }
         }
     }
     fun publishAndRender(c: Context, city: City, weather: WeatherData) {
@@ -109,8 +125,8 @@ object WidgetRuntime {
     suspend fun snapshot(c: Context, config: WidgetConfig): WidgetSnapshot? {
         val city = city(c, config) ?: return null
         val source = SettingsRepository.sourcePref.first()
-        val own = WidgetStore.snapshot(c, city.locationKey)?.takeIf { source.matches(it.weather) }
-        val cached = WeatherCache.load(c, city.locationKey)?.data?.takeIf { source.matches(it) }
+        val own = WidgetStore.snapshot(c, city.locationKey)?.takeIf { WeatherRepository.cacheCompatible(it.weather, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it.weather) }
+        val cached = WeatherCache.load(c, city.locationKey)?.data?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
         val data = listOfNotNull(own?.weather, cached).maxByOrNull { it.fetchedAt ?: 0L } ?: return WidgetSnapshot(city, WeatherData())
         return WidgetSnapshot(city, data)
     }
@@ -180,13 +196,20 @@ object WidgetRefresh {
         work.enqueueUniquePeriodicWork(SKY_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<WidgetSkyWorker>(30, TimeUnit.MINUTES).build())
     }
-    fun active(c: Context) = WidgetRuntime.instances(c).isNotEmpty() || WidgetStore.notification(c).let { it.enabled || it.alertsEnabled }
+    fun active(c: Context) = WidgetRuntime.instances(c).isNotEmpty() ||
+        WidgetStore.notification(c).let { it.enabled || it.alertsEnabled } || AutomationSettingsRepository.read(c).needsBackground
     fun schedule(c: Context) {
+        WeatherReminderSchedule.schedule(c)
         val work = WorkManager.getInstance(c)
         WidgetRuntime.scope.launch { scheduleSky(c, SettingsRepository.livingSky.first(), SettingsRepository.ambience.first()) }
         if (!active(c)) { work.cancelUniqueWork(PERIODIC); work.cancelUniqueWork("widget-beta9-now"); return }
+        val automation = AutomationSettingsRepository.read(c)
+        val desktopIntervals = WidgetRuntime.instances(c).map { WidgetStore.config(c, it.id, it.style).intervalMinutes } +
+            listOfNotNull(WidgetStore.notification(c).takeIf { it.enabled || it.alertsEnabled }?.config?.intervalMinutes)
+        val interval = (desktopIntervals + listOfNotNull(automation.checkMinutes.takeIf { automation.needsBackground }))
+            .minOrNull()?.coerceAtLeast(15) ?: 30
         work.enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<WidgetRefreshWorker>(30, TimeUnit.MINUTES)
+            PeriodicWorkRequestBuilder<WidgetRefreshWorker>(interval.toLong(), TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
     }
     fun request(c: Context, force: Boolean = false) {
@@ -213,26 +236,31 @@ class WidgetRefreshWorker(context: Context, params: WorkerParameters) : Coroutin
         val ctx = applicationContext
         val configs = WidgetRuntime.instances(ctx).map { WidgetStore.config(ctx, it.id, it.style) }.toMutableList()
         WidgetStore.notification(ctx).takeIf { it.enabled || it.alertsEnabled }?.let { configs += it.config }
-        val pairs = configs.mapNotNull { cfg -> WidgetRuntime.city(ctx, cfg)?.let { it to cfg.intervalMinutes } }
+        val automation = AutomationSettingsRepository.read(ctx)
+        val pairs = configs.mapNotNull { cfg -> WidgetRuntime.city(ctx, cfg)?.let { it to cfg.intervalMinutes } }.toMutableList()
+        if (automation.needsBackground) CityRepository.selectedCity.first()?.let { pairs += it to automation.checkMinutes }
         val source = SettingsRepository.sourcePref.first()
         var failed = false
         pairs.groupBy { it.first.locationKey }.values.forEach { group ->
             val city = group.first().first
             val interval = group.minOf { it.second }
-            val existing = WidgetStore.snapshot(ctx, city.locationKey)?.weather?.takeIf { source.matches(it) }
-                ?: WeatherCache.load(ctx, city.locationKey)?.data?.takeIf { source.matches(it) }
+            val existing = WidgetStore.snapshot(ctx, city.locationKey)?.weather?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
+                ?: WeatherCache.load(ctx, city.locationKey)?.data?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
             val age = System.currentTimeMillis() - (existing?.fetchedAt ?: 0L)
             if (age in 0..10_000 || (!inputData.getBoolean("force", false) && age in 0 until interval * 60_000L)) return@forEach
             try {
                 val data = withTimeout(25_000) { WeatherRepository.fetchWeather(city, source) }
-                if (data.current != null && data.error == null) {
+                if (data.current != null && data.error == null && SettingsRepository.sourcePref.first() == source &&
+                    WeatherRepository.cacheCompatible(data, source) &&
+                    CityRepository.savedCities().firstOrNull { it.locationKey == city.locationKey }
+                        ?.let { weatherCityIdentity(it) == weatherCityIdentity(city) } == true) {
                     WeatherCache.save(ctx, city.locationKey, data); WidgetStore.publish(ctx, city, data)
                 } else failed = true
             } catch (e: TimeoutCancellationException) { failed = true }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { failed = true }
         }
-        WidgetRuntime.renderAll(ctx); WidgetNotification.refresh(ctx)
+        WidgetRuntime.renderAll(ctx); WidgetNotification.refresh(ctx); WeatherReminderSchedule.schedule(ctx)
         if (failed && runAttemptCount < 2) Result.retry() else Result.success()
     }
     companion object { private val lock = Mutex() }

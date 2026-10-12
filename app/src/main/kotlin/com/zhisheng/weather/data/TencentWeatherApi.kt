@@ -1,11 +1,7 @@
 package com.zhisheng.weather.data
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -19,9 +15,7 @@ import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.model.YesterdayInfo
 import com.zhisheng.weather.model.alertLevelOf
 import com.zhisheng.weather.model.cityDate
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 /**
  * 腾讯天气（wis.qq.com）免密钥接口——网页自用数据通道，与 NMC 同级定位：
@@ -35,11 +29,6 @@ object TencentWeatherApi {
     private const val UA =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val okHttp = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(6, TimeUnit.SECONDS)
-        .build()
 
     internal data class TencentObserve(
         val temperature: Double?,
@@ -88,19 +77,18 @@ object TencentWeatherApi {
 
     /**
      * @param province 省级名称（"北京市"/"海南省"），@param city 市级名称（"北京市"/"三亚市"）。
-     * 四路并发，任一路失败该块为空（不拖垮整包）。
+     * 合并一次网站请求，减少公共服务流量；请求可取消且响应体有界。
      */
     internal suspend fun fetch(province: String, city: String): TencentBundle? = coroutineScope {
         try {
             val area = "province=${encode(province)}&city=${encode(city)}"
-            val observeDeferred = async { getJsonObject("$BASE?source=pc&weather_type=observe&$area") }
-            val dailyDeferred = async { getJsonObject("$BASE?source=pc&weather_type=forecast_24h&$area") }
-            val indexDeferred = async { getJsonObject("$BASE?source=pc&weather_type=index&$area") }
-            val alarmDeferred = async { getJsonObject("$BASE?source=pc&weather_type=alarm&$area") }
-            val observe = parseObserve(observeDeferred.await())
-            val daily = parseDaily(dailyDeferred.await())
-            val indices = parseIndex(indexDeferred.await())
-            val alarms = parseAlarm(alarmDeferred.await())
+            val root = weatherAwaitJson(Request.Builder()
+                .url("$BASE?source=pc&weather_type=observe%7Cforecast_24h%7Cindex%7Calarm&$area")
+                .header("User-Agent", UA).build())?.takeIf { it.primString("status") == "200" }
+            val observe = parseObserve(root)
+            val daily = parseDaily(root)
+            val indices = parseIndex(root)
+            val alarms = parseAlarm(root)
             if (observe == null && daily.isEmpty()) return@coroutineScope null
             TencentBundle(observe, daily, indices, alarms)
         } catch (ce: CancellationException) {
@@ -178,19 +166,6 @@ object TencentWeatherApi {
     }
 
     private fun JsonObject.dataObj(): JsonObject? = this["data"] as? JsonObject
-
-    private suspend fun getJsonObject(url: String): JsonObject? = withContext(Dispatchers.IO) {
-        try {
-            okHttp.newCall(
-                Request.Builder().url(url).header("User-Agent", UA).build()
-            ).execute().use { resp ->
-                if (!resp.isSuccessful) null
-                else json.parseToJsonElement(resp.body?.string() ?: return@use null) as? JsonObject
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
 
     private fun encode(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
 

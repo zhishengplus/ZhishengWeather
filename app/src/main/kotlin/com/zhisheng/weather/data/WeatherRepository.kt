@@ -25,13 +25,108 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.coroutines.coroutineContext
 
-// 天气仓储：默认小米为主源，Open-Meteo 常规兜底（0.1.5-beta6 起百度/高德天气下线，
-// 两把 AK 只服务定位地理——街道/区县/搜索）；手动选择时保持源纯净。
+// 天气仓储：默认小米为主源，中央气象台/Open-Meteo 兜底；未单独指定模块时保留主源行为。
+// beta10.4 恢复用户 Key/AK 下的高德、百度区县天气，按实际能力与授权返回字段。
 object WeatherRepository {
+    private data class Configuration(
+        val policy: ModuleSourcePolicy,
+        val fingerprint: String,
+        val available: Set<SourcePref>,
+        val credentialsEmpty: Boolean,
+    )
+
+    private suspend fun configuration(primary: SourcePref): Configuration {
+        val policy = SettingsRepository.moduleSources.first()
+        val developer = SettingsRepository.developerMode.first()
+        val qw = SecretStore.currentQw()
+        val cy = SecretStore.currentCaiyun()
+        val amap = SecretStore.currentAmap()
+        val baidu = SecretStore.currentBaidu()
+        val seniverse = SecretStore.currentSeniverse()
+        val moji = SecretStore.currentMoji()
+        val credentials = listOf(qw.host, qw.projectId, qw.kid, qw.privateKey, qw.apiKey,
+            cy.token, amap.webServiceKey, baidu.webServiceAk, seniverse.apiKey, moji.appCode,
+            moji.currentEndpoint, moji.currentToken, moji.dailyEndpoint, moji.dailyToken)
+        val available = SourcePref.visible(false).toMutableSet()
+        if (developer) {
+            if (QWeatherApi.enabled) available += SourcePref.QWEATHER
+            if (cy.ready) available += SourcePref.CAIYUN
+            if (amap.ready) available += SourcePref.AMAP
+            if (baidu.ready) available += SourcePref.BAIDU
+            if (seniverse.ready) available += SourcePref.SENIVERSE
+            if (moji.ready) available += SourcePref.MOJI
+        }
+        return Configuration(policy, weatherConfigurationFingerprint(primary, policy, developer, credentials),
+            available, credentials.all(String::isBlank))
+    }
+
+    /** Configuration-aware replacement for SourcePref.matches at cache read sites. */
+    suspend fun cacheCompatible(data: WeatherData, source: SourcePref): Boolean {
+        val config = configuration(source)
+        return cacheMatchesConfiguration(data, source, config.policy, config.fingerprint, config.credentialsEmpty)
+    }
+
+    suspend fun configuredSources(): Set<SourcePref> = configuration(SourcePref.AUTO).available
+
+    suspend fun fetchWeather(city: City, pref: SourcePref = SourcePref.AUTO): WeatherData = withContext(Dispatchers.IO) {
+        val config = configuration(pref)
+        val startedAt = System.currentTimeMillis()
+        val requested = config.policy.selections.values.filter { it != pref && it in config.available }.distinct()
+        // One fetch per chosen source, even when several modules use it. The bounded batch owns
+        // cancellation, so a slow/failed optional provider cannot hold the primary weather open.
+        val eligible = requested.filter { source -> config.policy.selections.any { (module, selected) ->
+            selected == source && WeatherSourceCapabilities.supports(source, module)
+        } }
+        val batch = if (eligible.isEmpty()) null else WeatherFetchBatch(
+            eligible.map { source -> suspend { stampModules(fetchPrimaryWeather(city, source, includeHistory = false), city) } },
+            coroutineContext.job,
+        )
+        try {
+        var result = stampModules(fetchPrimaryWeather(city, pref), city)
+        val completed = batch?.collect(timeoutMs = (startedAt + 22_000 - System.currentTimeMillis()).coerceIn(0, 8_000)) ?: emptyList()
+        val donors = eligible.zip(completed).toMap()
+        val diagnostics = result.sourceDiagnostics.toMutableMap()
+        config.policy.selections.forEach { (module, selected) ->
+            when {
+                selected == pref -> Unit
+                selected !in config.available -> diagnostics[module.key] = "${selected.cn}未配置或开发者模式已关闭，保留主源${module.cn}"
+                !WeatherSourceCapabilities.supports(selected, module) -> diagnostics[module.key] = "${selected.cn}不提供${module.cn}，保留主源该模块"
+                else -> {
+                    val donor = donors[selected]
+                    if (donor != null && donor.error == null && modulePresent(donor, module)) {
+                        result = replaceModule(result, donor, module)
+                    } else diagnostics[module.key] = "${selected.cn}${module.cn}请求失败或服务未返回该字段，保留主源该模块"
+                }
+            }
+        }
+        markSuccessfulFetch(result.copy(configurationFingerprint = config.fingerprint, sourceDiagnostics = diagnostics), System.currentTimeMillis())
+        } finally { batch?.close() }
+    }
+
+    data class SourceComparison(val source: SourcePref, val data: WeatherData?, val requestedAt: Long, val diagnostic: String? = null)
+
+    suspend fun fetchComparison(city: City): List<SourceComparison> = withContext(Dispatchers.IO) {
+        val config = configuration(SourcePref.AUTO)
+        // The fusion and AUTO products combine sources; comparisons use their individual inputs.
+        val sources = SourcePref.entries.filter { it in config.available && it != SourcePref.AUTO && it != SourcePref.ZHISHENG &&
+            it != SourcePref.SENIVERSE && it != SourcePref.MOJI }
+        val startedAt = System.currentTimeMillis()
+        val values = WeatherFetchBatch(sources.map { source -> suspend {
+            try { stampModules(fetchPrimaryWeather(city, source, includeHistory = false), city) }
+            catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { null }
+        } }, coroutineContext.job).collect(timeoutMs = 12_000)
+        sources.zip(values).map { (source, data) -> SourceComparison(source,
+            data?.takeIf { it.error == null }, startedAt,
+            if (data == null || data.error != null) "暂未取得有效天气，请检查网络、服务覆盖和本机凭据授权" else null)
+        }
+    }
 
     internal val CHINA_POLLUTANT_UNITS = mapOf(
         "pm2p5" to "μg/m³",
@@ -44,10 +139,10 @@ object WeatherRepository {
 
     // AUTO 与枳生天气源（融合+完整性）允许公共源补缺；其余手动锁定源保持完全纯源，
     // 让设置名称与实际数据严格一致。
-    suspend fun fetchWeather(city: City, pref: SourcePref = SourcePref.AUTO): WeatherData = withContext(Dispatchers.IO) {
-        val history = WeatherFetchBatch(listOf<suspend () -> List<MinutePrecip>?>(
+    private suspend fun fetchPrimaryWeather(city: City, pref: SourcePref, includeHistory: Boolean = true): WeatherData = withContext(Dispatchers.IO) {
+        val history = if (includeHistory) WeatherFetchBatch(listOf<suspend () -> List<MinutePrecip>?>(
             { PrecipitationHistorySource.fetch(city) },
-        ), coroutineContext.job)
+        ), coroutineContext.job) else null
         try {
             val data = when (pref) {
                 SourcePref.QWEATHER -> {
@@ -65,6 +160,12 @@ object WeatherRepository {
                 SourcePref.XIAOMI -> fetchXiaomi(city)
                 SourcePref.NMC -> NmcSource.fetch(city)
                 SourcePref.OPEN_METEO -> OpenMeteoSource.fetch(city)
+                SourcePref.AMAP -> MapWeatherSource.fetchAmap(city)
+                SourcePref.BAIDU -> MapWeatherSource.fetchBaidu(city)
+                SourcePref.TENCENT -> DomesticWeatherSource.fetchTencent(city)
+                SourcePref.WEATHERCN -> DomesticWeatherSource.fetchWeatherCn(city)
+                SourcePref.SENIVERSE -> DomesticWeatherSource.fetchSeniverse(city)
+                SourcePref.MOJI -> DomesticWeatherSource.fetchMoji(city)
                 SourcePref.ZHISHENG -> fetchZhishengFusion(city)
                 SourcePref.AUTO -> autoChain(city)
             }
@@ -80,12 +181,12 @@ object WeatherRepository {
                 System.currentTimeMillis(),
             )
             // 历史是可选模型回溯；仅收下已完成的结果，不能让它阻塞有效的当前天气。
-            val historyPoints = history.collect(timeoutMs = 0).firstOrNull().orEmpty()
+            val historyPoints = history?.collect(timeoutMs = 0)?.firstOrNull().orEmpty()
             if (result.current == null || result.error != null) result else result.copy(
                 rainHistory = historyPoints,
                 rainHistorySource = if (historyPoints.isNotEmpty()) "OPEN-METEO" else null,
             )
-            } finally { history.close() }
+            } finally { history?.close() }
     }
 
     private suspend fun supplementWithinBudget(data: WeatherData, city: City): WeatherData {
@@ -647,6 +748,7 @@ object WeatherRepository {
                 dataSource = "QWEATHER",
                 blockSources = buildMap {
                     put("current", "QWEATHER")
+                    if (w != null) put("alerts", "QWEATHER")
                     if (!h?.hours.isNullOrEmpty()) put("hourly", "QWEATHER")
                     if (dailyList.isNotEmpty()) put("daily", "QWEATHER")
                     if (minuteList.isNotEmpty()) put("minutely", "QWEATHER")
@@ -817,6 +919,21 @@ object WeatherRepository {
         val sourceKey = city.weatherLocationKey ?: city.locationKey
         if (sourceKey.startsWith("weathercn:", true) || sourceKey.startsWith("accu:", true)) {
             return sourceKey
+        }
+        if (city.isPreciseLocation) {
+            val cacheKey = "coordinate|${city.latitude}|${city.longitude}"
+            xiaomiKeyCache[cacheKey]?.let { return it }
+            val key = try {
+                kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                    coordinateXiaomiKey(XiaomiApi.instance.geoCity(city.latitude, city.longitude), city.latitude, city.longitude)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            if (key != null) {
+                if (xiaomiKeyCache.size >= 128) xiaomiKeyCache.clear()
+                xiaomiKeyCache[cacheKey] = key
+                return key
+            }
         }
         return nearestXiaomiKey(city.name, city.latitude, city.longitude)
     }
@@ -1260,7 +1377,8 @@ object WeatherRepository {
                 )
             } ?: emptyList(),
             dataSource = "XIAOMI",
-            blockSources = mapOf("current" to "XIAOMI", "hourly" to "XIAOMI", "daily" to "XIAOMI", "minutely" to "XIAOMI"),
+            blockSources = mapOf("current" to "XIAOMI", "hourly" to "XIAOMI", "daily" to "XIAOMI", "minutely" to "XIAOMI") +
+                if (r.alerts != null) mapOf("alerts" to "XIAOMI") else emptyMap(),
             utcOffsetSeconds = offsetSeconds(r.current?.pubTime ?: r.forecastDaily?.pubTime ?: r.forecastHourly?.pubTime),
         )
     }

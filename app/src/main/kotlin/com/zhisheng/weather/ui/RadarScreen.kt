@@ -27,21 +27,27 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,6 +58,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -106,11 +114,15 @@ import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 import com.zhisheng.weather.ui.theme.zhishengPanel
 import com.zhisheng.weather.ui.theme.zhishengScreen
+import com.zhisheng.weather.ui.components.WeatherOverlayDialog
 import com.zhisheng.weather.ui.home.Scanlines
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -171,6 +183,7 @@ private suspend fun radarLoadState(city: City, source: RadarSource): RadarScreen
     when (source) {
         RadarSource.RAINVIEWER -> {
             val timeline = RadarRepository.loadTimeline(city)
+            currentCoroutineContext().ensureActive()
             if (timeline.frames.isEmpty()) throw CaiyunRadarException(
                 CaiyunRadarReason.EMPTY_FRAMES, "当前位置暂时没有可用回波帧",
             )
@@ -184,6 +197,7 @@ private suspend fun radarLoadState(city: City, source: RadarSource): RadarScreen
         RadarSource.CAIYUN -> {
             val token = SecretStore.currentCaiyun().token
             val feed = CaiyunRadarRepository.loadFeed(city.longitude, city.latitude, token)
+            currentCoroutineContext().ensureActive()
             return RadarScreenState.Ready(source = RadarSource.CAIYUN, feed = feed)
         }
     }
@@ -197,104 +211,91 @@ internal fun caiyunRadarMessage(reason: CaiyunRadarReason): String = when (reaso
 }
 
 @Composable
-fun RadarScreen(
+internal fun RadarMapScreen(
     city: City?,
     utcOffsetSeconds: Int?,
     onBack: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val context = LocalContext.current
     var retry by remember { mutableIntStateOf(0) }
-    var state by remember { mutableStateOf<RadarScreenState>(RadarScreenState.Loading) }
-    val radarSource by SettingsRepository.radarSource.collectAsState(initial = RadarSource.RAINVIEWER)
+    val storedSource by SettingsRepository.radarSource.collectAsState(initial = null)
+    val accepted by rememberRainviewerDisclosureAccepted()
+    val switchScope = rememberCoroutineScope()
+    val radarSource = storedSource
+    var showErrorSources by remember { mutableStateOf(false) }
+    val caiyunRuntime by SecretStore.caiyunRuntimeFlow.collectAsState(initial = SecretStore.caiyunRuntime)
+    if (radarSource == null) {
+        RadarLoading(onBack)
+        return
+    }
+    if (radarSource == RadarSource.RAINVIEWER && !accepted) {
+        RadarUseNotice(onBack) { acceptRainviewerDisclosure(context) }
+        return
+    }
+    var state by remember(city?.locationKey, radarSource) { mutableStateOf<RadarScreenState>(RadarScreenState.Loading) }
     val refreshClock = remember(city?.locationKey, radarSource) {
         RadarRefreshClock(SystemClock.elapsedRealtime())
     }
-    // 彩云不可用自动回退 RainViewer 后的说明，显示在顶部提示条
-    var fallbackNotice by remember { mutableStateOf<String?>(null) }
 
-    // 切城市 / 重试 / 切源都会重载；切城市时保留画面只挪相机，不打断浏览
+    // One lifecycle-owned loop survives the Loading/Ready/Error transitions it produces.
+    // Expired frames disappear before reload, but expiration never blocks the new request.
     LaunchedEffect(city?.locationKey, retry, radarSource, lifecycle) {
-        var loaded = false
+        var attempted = false
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (loaded) return@repeatOnLifecycle
             if (city == null) {
                 state = RadarScreenState.Error("先在主页选择一座城市")
                 return@repeatOnLifecycle
             }
-            if (state !is RadarScreenState.Ready) state = RadarScreenState.Loading
-            fallbackNotice = null
-            refreshClock.attempted(SystemClock.elapsedRealtime())
-            state = try {
-                radarLoadState(city, radarSource).also { refreshClock.succeeded(SystemClock.elapsedRealtime()) }
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (e: CaiyunRadarException) {
-                if (radarSource == RadarSource.CAIYUN) {
-                    // 彩云不可用：回退到 RainViewer 并保留原因，而不是把用户困在错误页；
-                    // 偏好同步落回 RainViewer，避免每次进页面都重撞一次彩云
-                    fallbackNotice = listOfNotNull(caiyunRadarMessage(e.reason), e.message?.takeIf(String::isNotBlank))
-                        .distinct()
-                        .joinToString(" · ")
-                    try {
-                        SettingsRepository.setRadarSource(RadarSource.RAINVIEWER)
-                        radarLoadState(city, RadarSource.RAINVIEWER).also { refreshClock.succeeded(SystemClock.elapsedRealtime()) }
-                    } catch (ce: CancellationException) {
-                        throw ce
-                    } catch (_: Exception) {
-                        RadarScreenState.Error("雷达数据连接失败")
-                    }
-                } else {
-                    RadarScreenState.Error(e.message ?: "雷达数据连接失败")
-                }
-            } catch (_: Exception) {
-                if (state is RadarScreenState.Ready) state else RadarScreenState.Error("雷达数据连接失败")
-            }
-            loaded = true
-        }
-    }
-
-    // 页面停留期间每 5 分钟复核帧目录（彩云图片 URL 带时效签名，同样需要定期换新）
-    val readyState = state as? RadarScreenState.Ready
-    LaunchedEffect(city?.locationKey, radarSource, readyState?.source, readyState?.feed?.playbackFrames?.map(RadarFrame::frameKey), lifecycle) {
-        val ready = readyState ?: return@LaunchedEffect
-        val cityNow = city ?: return@LaunchedEffect
-        if (ready.source != radarSource) return@LaunchedEffect
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                // Returning from a long background stay refreshes immediately; a short stay
-                // only waits the remaining interval. Failures share the same rate limit.
-                delay(refreshClock.remainingDelay(SystemClock.elapsedRealtime(), METADATA_REFRESH_MS))
-                // A manual refresh may have completed while this loop was waiting.
-                if (refreshClock.remainingDelay(SystemClock.elapsedRealtime(), METADATA_REFRESH_MS) > 0L) continue
-                refreshClock.attempted(SystemClock.elapsedRealtime())
-                val fresh = try {
-                    radarLoadState(cityNow, ready.source)
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (_: Exception) {
-                    continue
+                val previous = state as? RadarScreenState.Ready
+                val usable = previous?.let {
+                    radarObservationUsable(it.feed.past.maxOfOrNull(RadarFrame::timeMillis), System.currentTimeMillis())
+                } == true
+                val reloadImmediately = !attempted || state == RadarScreenState.Loading || (previous != null && !usable)
+                if (!reloadImmediately) {
+                    delay(refreshClock.remainingDelay(SystemClock.elapsedRealtime(), METADATA_REFRESH_MS))
                 }
-                refreshClock.succeeded(SystemClock.elapsedRealtime())
-                val changed = fresh.feed.playbackFrames.map(RadarFrame::frameKey) !=
-                    ready.feed.playbackFrames.map(RadarFrame::frameKey)
-                if (changed || fresh.staleMetadata != ready.staleMetadata) {
-                    state = fresh
+                // The frame can expire while waiting for the normal refresh interval.
+                val previousUsable = previous?.let {
+                    radarObservationUsable(it.feed.past.maxOfOrNull(RadarFrame::timeMillis), System.currentTimeMillis())
+                } == true
+                attempted = true
+                refreshClock.attempted(SystemClock.elapsedRealtime())
+                when (val result = reloadRadarObservation(previous, previousUsable,
+                    onLoading = { state = RadarScreenState.Loading },
+                    load = { radarLoadState(city, radarSource) })) {
+                    is RadarReloadResult.Loaded -> {
+                        if (!result.stale) refreshClock.succeeded(SystemClock.elapsedRealtime())
+                        state = result.value.copy(staleMetadata = result.value.staleMetadata || result.stale)
+                    }
+                    is RadarReloadResult.Failed -> {
+                        val error = result.error
+                        state = if (error is CaiyunRadarException && radarSource == RadarSource.CAIYUN) {
+                            RadarScreenState.Error(caiyunRadarMessage(error.reason),
+                                "所选数据源未改变，可重试或改用 RainViewer 历史回波。")
+                        } else RadarScreenState.Error("雷达数据连接失败", "暂无当前可用的雷达观测，请重试或查看官方图。")
+                    }
                 }
             }
         }
     }
-
+    if (showErrorSources) RadarSourceDialog(radarSource, caiyunRuntime.ready,
+        onSelect = { chosen -> showErrorSources = false; switchScope.launch { SettingsRepository.setRadarSource(chosen) } },
+        onDismiss = { showErrorSources = false })
     Box(Modifier.fillMaxSize().zhishengScreen()) {
         when (val current = state) {
             RadarScreenState.Loading -> RadarLoading(onBack)
-            is RadarScreenState.Error -> RadarError(current.message, current.detail, onBack) { retry++ }
+            is RadarScreenState.Error -> RadarError(current.message, current.detail, onBack,
+                onRetry = { retry++ },
+                onSwitchSource = { showErrorSources = true })
             is RadarScreenState.Ready -> RadarInstrumentPage(
                 city = city!!,
                 source = current.source,
                 feed = current.feed,
                 staleMetadata = current.staleMetadata,
                 coverage = current.coverage,
-                fallbackNotice = fallbackNotice,
+                fallbackNotice = null,
                 utcOffsetSeconds = utcOffsetSeconds,
                 onBack = onBack,
             )
@@ -303,12 +304,38 @@ fun RadarScreen(
 }
 
 @Composable
+private fun RadarUseNotice(onBack: () -> Unit, onAccept: () -> Unit) {
+    val palette = LocalZhishengPalette.current
+    val context = LocalContext.current
+    Column(Modifier.fillMaxSize().zhishengScreen()) {
+
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text("RainViewer 历史回波", color = palette.text, style = MaterialTheme.typography.titleLarge)
+            Text("用于个人、学习和小型非商业社区参考。公开接口提供过去约两小时的雷达拼图，不提供未来回波或红外卫星图。",
+                color = palette.textSecondary)
+            Text("覆盖因地区而异，图上无颜色不代表地面没有降雨。放大只方便定位，回波最高精度为地图 7 级。防灾以当地气象部门为准。",
+                color = palette.textSecondary)
+            Text("天气回波由 RainViewer 提供 ↗", color = palette.mint,
+                modifier = Modifier.clickable(role = Role.Button) {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.rainviewer.com/api.html"))) }
+                }.padding(vertical = 8.dp))
+            Box(Modifier.fillMaxWidth().zhishengCompactPanel().clickable(role = Role.Button, onClick = onAccept)
+                .padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("了解并打开地图", color = palette.mint)
+            }
+            OfficialRadarLink()
+        }
+    }
+}
+
+@Composable
 private fun RadarLoading(onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
         if (isPhosphorVista) {
-            VistaMapToolbar("降雨雷达", "正在看看附近下没下雨", onBack) {}
+            // The enclosing precipitation page owns the header.
         } else {
-            FeaturePageHeader("雷达回波", "RADAR LINK", onBack)
+
         }
         FeatureBootLoader(
             channel = "雷达观测",
@@ -325,13 +352,14 @@ private fun RadarLoading(onBack: () -> Unit) {
 }
 
 @Composable
-private fun RadarError(message: String, detail: String?, onBack: () -> Unit, onRetry: () -> Unit) {
+private fun RadarError(message: String, detail: String?, onBack: () -> Unit, onRetry: () -> Unit,
+    onSwitchSource: (() -> Unit)? = null) {
     val palette = LocalZhishengPalette.current
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
         if (isPhosphorVista) {
-            VistaMapToolbar("降雨雷达", "暂时打不开", onBack) {}
+            // Keep recovery actions scrollable beneath the shared header.
             Column(
-                modifier = Modifier.weight(1f).padding(28.dp),
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -342,7 +370,8 @@ private fun RadarError(message: String, detail: String?, onBack: () -> Unit, onR
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
-                Text("检查网络后可以再试一次", style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
+                Text(if (onSwitchSource == null) "检查网络后可以再试一次" else "检查网络或服务接入，也可以更换数据源",
+                    style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
                 if (!detail.isNullOrBlank()) {
                     Spacer(Modifier.height(10.dp))
                     Text(detail, style = MaterialTheme.typography.bodySmall, color = palette.textSecondary, textAlign = TextAlign.Center)
@@ -356,11 +385,12 @@ private fun RadarError(message: String, detail: String?, onBack: () -> Unit, onR
                     Text("再试一次", style = MaterialTheme.typography.labelMedium, color = palette.mint)
                 }
                 Spacer(Modifier.height(12.dp))
+                onSwitchSource?.let { switch -> RadarTextAction("更换数据源", "选择另一套雷达图", switch) }
                 OfficialRadarLink()
             }
             return
         }
-        FeaturePageHeader("雷达回波", "RADAR LINK", onBack)
+
         Box(Modifier.weight(1f)) {
             FeatureErrorState(
                 title = message,
@@ -376,11 +406,20 @@ private fun RadarError(message: String, detail: String?, onBack: () -> Unit, onR
                         Spacer(Modifier.height(10.dp))
                     }
                     OfficialRadarLink()
+                    onSwitchSource?.let { switch -> RadarTextAction("更换数据源", "选择另一套雷达图", switch) }
                 },
             )
         }
     }
 }
+
+/** Await the callback so a completed/cancelled effect cannot attach an old frame to a new style. */
+private suspend fun useRadarStyle(map: MapLibreMap, action: (Style) -> Unit) =
+    suspendCancellableCoroutine<Unit> { continuation ->
+        map.getStyle { style ->
+            if (continuation.isActive) continuation.resumeWith(runCatching { action(style) })
+        }
+    }
 
 @Composable
 private fun RadarInstrumentPage(
@@ -421,6 +460,14 @@ private fun RadarInstrumentPage(
     val mapRef = remember { mutableStateOf<MapLibreMap?>(null) }
     val lastStyledCity = remember { mutableStateOf<String?>(null) }
     var styleEpoch by remember { mutableIntStateOf(0) }
+    val currentSource by rememberUpdatedState(source)
+    val imageStates = remember(source, framesKey, styleEpoch) { mutableStateMapOf<String, RadarImageState>() }
+    var imageRetry by remember(source, framesKey, styleEpoch) { mutableIntStateOf(0) }
+    var overlaysInstalled by remember(source, framesKey, styleEpoch) { mutableStateOf(false) }
+    fun selectedFrameReady(): Boolean {
+        val frame = playbackFrames.firstOrNull { it.timeMillis == selectedTime }
+        return overlaysInstalled && radarFrameReady(frame, frame?.let { imageStates[it.frameKey] }, radarTilesReady)
+    }
 
     LaunchedEffect(Unit) {
         delay(6_000)
@@ -432,10 +479,10 @@ private fun RadarInstrumentPage(
             onCreate(null)
             // 全帧以极低透明度参与渲染，地图空闲后才开始播放，避免第一轮逐帧白等。
             addOnDidFinishLoadingMapListener {
-                if (mapReadyState.value) radarTilesReady = true
+                if (mapReadyState.value && currentSource == RadarSource.RAINVIEWER) radarTilesReady = true
             }
             addOnDidBecomeIdleListener {
-                if (mapReadyState.value) {
+                if (mapReadyState.value && currentSource == RadarSource.RAINVIEWER) {
                     radarTilesReady = true
                     tileError = false
                 }
@@ -492,13 +539,16 @@ private fun RadarInstrumentPage(
         tileError = false
         baseStyleApplied = false
         val camera = readyMap.cameraPosition
-        readyMap.setStyle(weatherMapBaseStyle(palette)) { _ ->
-            if (lastStyledCity.value != null) {
-                readyMap.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
+        suspendCancellableCoroutine<Unit> { continuation ->
+            readyMap.setStyle(weatherMapBaseStyle(palette)) { _ ->
+                if (continuation.isActive) continuation.resumeWith(runCatching {
+                    if (lastStyledCity.value != null) readyMap.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
+                    baseStyleApplied = true
+                    mapReady = true
+                    styleEpoch++
+                    Unit
+                })
             }
-            baseStyleApplied = true
-            mapReady = true
-            styleEpoch++
         }
     }
 
@@ -507,11 +557,12 @@ private fun RadarInstrumentPage(
         if (!mapReady || styleEpoch == 0) return@LaunchedEffect
         radarTilesReady = false
         tileError = false
+        overlaysInstalled = false
         val initialTime = selectedTime.takeIf { it != 0L }
             ?: feed.past.lastOrNull()?.timeMillis
             ?: playbackFrames.firstOrNull()?.timeMillis
             ?: 0L
-        readyMap.getStyle { style ->
+        useRadarStyle(readyMap) { style ->
             clearRadarOverlays(style)
             val labelAnchor = mapLabelAnchorId(style)
             if (source == RadarSource.CAIYUN) {
@@ -527,6 +578,7 @@ private fun RadarInstrumentPage(
                 )
             }
             installCityMarker(style, city, palette)
+            overlaysInstalled = true
             if (lastStyledCity.value != city.locationKey) {
                 readyMap.moveCamera(
                     CameraUpdateFactory.newCameraPosition(
@@ -546,15 +598,15 @@ private fun RadarInstrumentPage(
         }
     }
 
-    // 自动播放：等首屏瓦片就绪（最多 8 秒兜底）再起步，避免动画先于数据出现。
-    // 序列 = 过去实测回波 → 未来外推；未解锁时只有过去段。
-    LaunchedEffect(playing, framesKey, lifecycle) {
+    LaunchedEffect(playing, framesKey, lifecycle, source, styleEpoch) {
         if (!playing || playbackFrames.size < 2) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (!radarTilesReady) {
-                withTimeoutOrNull(TILE_WAIT_TIMEOUT_MS) { snapshotFlow { radarTilesReady }.first { it } }
-            }
             while (true) {
+                if (source == RadarSource.CAIYUN) {
+                    snapshotFlow { selectedFrameReady() }.first { it }
+                } else if (!radarTilesReady) {
+                    withTimeoutOrNull(TILE_WAIT_TIMEOUT_MS) { snapshotFlow { radarTilesReady }.first { it } }
+                }
                 val idx = playbackFrames.indexOfFirst { it.timeMillis == selectedTime }.takeIf { it >= 0 } ?: playbackFrames.lastIndex
                 delay(if (idx == playbackFrames.lastIndex) LATEST_FRAME_HOLD_MS else FRAME_INTERVAL_MS)
                 selectedTime = playbackFrames[(idx + 1) % playbackFrames.size].timeMillis
@@ -562,32 +614,49 @@ private fun RadarInstrumentPage(
         }
     }
 
-    LaunchedEffect(mapRef.value, mapReady, selectedTime, framesKey) {
-        if (!mapReady) return@LaunchedEffect
-        mapRef.value?.getStyle { style ->
+    LaunchedEffect(mapRef.value, mapReady, selectedTime, framesKey, imageStates.toMap(), overlaysInstalled) {
+        if (!mapReady || !overlaysInstalled) return@LaunchedEffect
+        mapRef.value?.let { readyMap -> useRadarStyle(readyMap) { style ->
             (frames.map { it to false } + futureFrames.map { it to true }).forEach { (frame, future) ->
                 val layerId = if (frame.isImageFrame) caiyunLayerId(frame) else radarLayerId(frame, future)
-                style.getLayer(layerId)?.setProperties(
-                    rasterOpacity(if (frame.timeMillis == selectedTime) RADAR_FRAME_OPACITY else RADAR_PREFETCH_OPACITY),
-                )
+                style.getLayer(layerId)?.setProperties(rasterOpacity(radarFrameOpacity(frame, selectedTime, imageStates[frame.frameKey])))
             }
-        }
+        } }
     }
 
-    // 彩云图片帧按需取位图：选中帧与下一帧解码后贴进 ImageSource（磁盘短缓存命中时很快）
-    LaunchedEffect(mapRef.value, mapReady, selectedTime, source, framesKey, lifecycle) {
-        if (!mapReady || source != RadarSource.CAIYUN) return@LaunchedEffect
+    // Only a successfully attached bitmap marks an image ready. Leaving, switching or restyling cancels the load.
+    LaunchedEffect(mapRef.value, mapReady, overlaysInstalled, selectedTime, source, framesKey, lifecycle, imageRetry, styleEpoch) {
+        if (!mapReady || !overlaysInstalled || source != RadarSource.CAIYUN || playbackFrames.isEmpty()) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val selIdx = playbackFrames.indexOfFirst { it.timeMillis == selectedTime }.coerceAtLeast(0)
-            val pending = listOfNotNull(
-                playbackFrames.getOrNull(selIdx),
-                playbackFrames.getOrNull(selIdx + 1),
-            ).filter(RadarFrame::isImageFrame)
+            val pending = listOfNotNull(playbackFrames.getOrNull(selIdx),
+                playbackFrames.getOrNull((selIdx + 1) % playbackFrames.size)).distinctBy { it.frameKey }.filter(RadarFrame::isImageFrame)
             pending.forEach { frame ->
-                CaiyunRadarRepository.loadBitmap(context, frame)?.let { bitmap ->
-                    mapRef.value?.getStyle { style ->
-                        (style.getSourceAs<ImageSource>(caiyunSourceId(frame)))?.setImage(bitmap)
+                if (imageStates[frame.frameKey] == RadarImageState.READY) return@forEach
+                imageStates[frame.frameKey] = RadarImageState.LOADING
+                try {
+                    val bitmap = CaiyunRadarRepository.loadBitmap(context, frame)
+                    currentCoroutineContext().ensureActive()
+                    if (bitmap == null) {
+                        imageStates[frame.frameKey] = RadarImageState.FAILED
+                        if (frame.timeMillis == selectedTime) playing = false
+                    } else {
+                        val readyMap = mapRef.value ?: return@forEach
+                        useRadarStyle(readyMap) { style ->
+                            val image = style.getSourceAs<ImageSource>(caiyunSourceId(frame))
+                            if (image != null) {
+                                image.setImage(bitmap)
+                                imageStates[frame.frameKey] = RadarImageState.READY
+                            } else {
+                                imageStates[frame.frameKey] = RadarImageState.FAILED
+                                if (frame.timeMillis == selectedTime) playing = false
+                            }
+                        }
                     }
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) {
+                    imageStates[frame.frameKey] = RadarImageState.FAILED
+                    if (frame.timeMillis == selectedTime) playing = false
                 }
             }
         }
@@ -595,21 +664,23 @@ private fun RadarInstrumentPage(
 
     val selected = playbackFrames.firstOrNull { it.timeMillis == selectedTime } ?: feed.past.lastOrNull()
     val selectedIndex = playbackFrames.indexOfFirst { it.timeMillis == selected?.timeMillis }.coerceAtLeast(0)
-    val statusText = if (isPhosphorVista) {
-        vistaRadarMapStatus(baseStyleApplied, staleMetadata, tileError, radarTilesReady, mapReady)
+    val frameReady = selectedFrameReady()
+    val imageFailed = source == RadarSource.CAIYUN && selected?.let { imageStates[it.frameKey] } == RadarImageState.FAILED
+    val statusText = if (imageFailed) "这一帧未加载成功" else if (source == RadarSource.CAIYUN && !frameReady && mapReady) "正在加载这时刻的雷达图" else if (isPhosphorVista) {
+        vistaRadarMapStatus(baseStyleApplied, staleMetadata, tileError, frameReady, mapReady)
     } else when {
         !baseStyleApplied -> "正在载入开源底图"
         staleMetadata -> "暂时显示上次更新的雷达图"
         tileError -> "雷达图加载较慢，正在重试"
-        !radarTilesReady && mapReady -> "正在加载雷达图"
+        !frameReady && mapReady -> "正在加载雷达图"
         else -> null
     }
 
-    Box(Modifier.fillMaxSize().background(palette.bg)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(palette.bg)) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
         // 与主页同一台「屏幕」的 CRT 扫描线；不拦截触摸，仅在静止图层之上
-        Scanlines()
+        if (!isPhosphorVista) Scanlines()
 
         RadarTopChrome(
             city = city,
@@ -627,10 +698,17 @@ private fun RadarInstrumentPage(
             onSource = { showSourceDialog = true },
         )
 
-        RadarScanOverlay(visible = mapReady && !radarTilesReady)
+        RadarScanOverlay(visible = mapReady && !frameReady && !imageFailed)
+        if (imageFailed) {
+            Row(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 104.dp)
+                .zhishengPanel().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { imageRetry++ }) { Text("重试这一帧", color = palette.mint) }
+                TextButton(onClick = { showSourceDialog = true }) { Text("更换来源", color = palette.mint) }
+            }
+        }
 
         RadarBottomController(
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .48f).verticalScroll(rememberScrollState()),
             source = source,
             frames = playbackFrames,
             nowIndex = nowBoundary,
@@ -639,7 +717,9 @@ private fun RadarInstrumentPage(
             selectedIndex = selectedIndex,
             playing = playing,
             utcOffsetSeconds = utcOffsetSeconds,
-            onTogglePlaying = { playing = !playing },
+            onTogglePlaying = {
+                if (imageFailed) { imageRetry++; playing = true } else playing = !playing
+            },
             onSelect = { index ->
                 playbackFrames.getOrNull(index)?.let { selectedTime = it.timeMillis }
                 playing = false
@@ -698,11 +778,12 @@ private fun RadarTopChrome(
         RadarCoverageState.UNKNOWN -> "覆盖状态待确认" to palette.textTertiary
     }
     if (isPhosphorVista) {
-        Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-            VistaMapToolbar("降雨雷达", "${city.name} · $coverageText", onBack) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).zhishengPanel().padding(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(coverageText, Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, color = palette.text)
                 VistaMapTool(R.drawable.ph_crosshair, "回到这里", onRecenter)
-                VistaMapTool(R.drawable.ph_database, "换一套降雨图", onSource)
-                VistaMapTool(R.drawable.ph_info, "这张图怎么看", onInfo)
+                VistaMapTool(R.drawable.ph_database, "更换回波来源", onSource)
+                VistaMapTool(R.drawable.ph_info, "回波说明", onInfo)
             }
             if (hintVisible || statusText != null) Text(
                 statusText ?: "两指放大能看到街道",
@@ -711,7 +792,7 @@ private fun RadarTopChrome(
         }
         return
     }
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -730,7 +811,7 @@ private fun RadarTopChrome(
             Spacer(Modifier.width(6.dp))
             RadarTextAction("◎", "回到当前城市", onRecenter)
             Spacer(Modifier.width(6.dp))
-            RadarTextAction("数据源", "切换雷达数据源", onSource)
+            RadarTextAction("来源", "切换雷达数据源", onSource)
             Spacer(Modifier.width(6.dp))
             RadarIconAction(Icons.Filled.Info, "雷达说明", onInfo)
         }
@@ -768,11 +849,11 @@ private fun RadarIconAction(icon: ImageVector, description: String, onClick: () 
 private fun RadarTextAction(label: String, description: String, onClick: () -> Unit) {
     val palette = LocalZhishengPalette.current
     Box(
-        Modifier.size(44.dp).background(palette.surface.copy(alpha = 0.94f)).border(1.dp, palette.cardBorder)
-            .clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
+        Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp).background(palette.surface.copy(alpha = 0.94f)).border(1.dp, palette.cardBorder)
+            .clickable(role = Role.Button, onClickLabel = description, onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = MaterialTheme.typography.titleLarge, color = palette.text)
+        Text(label, style = if (label.length == 1) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium, color = palette.text)
     }
 }
 
@@ -821,7 +902,7 @@ private fun RadarScanOverlay(visible: Boolean) {
 }
 
 @Composable
-private fun RadarBottomController(
+internal fun RadarBottomController(
     modifier: Modifier,
     source: RadarSource,
     frames: List<RadarFrame>,
@@ -837,11 +918,11 @@ private fun RadarBottomController(
     val palette = LocalZhishengPalette.current
     val viewingFuture = selectedIndex > nowIndex
     val panel = if (isPhosphorVista) {
-        Modifier.fillMaxWidth().zhishengPanel(containerColor = palette.surface.copy(alpha = 0.96f)).padding(horizontal = 16.dp, vertical = 14.dp)
+        Modifier.fillMaxWidth().zhishengPanel().padding(horizontal = 16.dp, vertical = 12.dp)
     } else {
         Modifier.fillMaxWidth().background(palette.surface.copy(alpha = 0.96f)).border(1.dp, palette.cardBorder).padding(horizontal = 12.dp, vertical = 10.dp)
     }
-    Box(modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = if (isPhosphorVista) 12.dp else 10.dp, vertical = 8.dp)) {
+    Box(modifier.fillMaxWidth().padding(horizontal = if (isPhosphorVista) 12.dp else 10.dp, vertical = 8.dp)) {
         Column(panel) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadarPlayButton(playing = playing, enabled = frames.size > 1, onToggle = onTogglePlaying)
@@ -849,20 +930,20 @@ private fun RadarBottomController(
                 Column(Modifier.weight(1f)) {
                     Text(
                         selected?.let { Fmt.clock(it.timeMillis, utcOffsetSeconds) } ?: "--:--",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = if (viewingFuture) palette.cyan else palette.mint,
+                        style = if (isPhosphorVista) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
+                        color = if (isPhosphorVista) palette.text else if (viewingFuture) palette.cyan else palette.mint,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
                         if (isPhosphorVista) {
-                            vistaRadarKindLine(viewingFuture)
+                            if (viewingFuture) "未来外推 · ${source.cn}" else "历史回波 · ${source.cn}"
                         } else {
                             "${selected?.let { Fmt.date(it.timeMillis, utcOffsetSeconds) } ?: "--"} · " +
                                 if (viewingFuture) "未来外推 · ${source.cn} · 约5分钟/帧" else "过去回波 · ${source.cn} · 实测"
                         },
                         style = MaterialTheme.typography.labelSmall,
-                        color = palette.textTertiary,
-                        maxLines = 1,
+                        color = palette.textSecondary,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 if (!isPhosphorVista) {
@@ -873,7 +954,7 @@ private fun RadarBottomController(
             RadarScrubber(frames, nowIndex, selectedIndex, utcOffsetSeconds, onSelect)
             vistaRadarLimitLine(source, futureUnlocked)?.takeIf { isPhosphorVista }?.let { line ->
                 Spacer(Modifier.height(6.dp))
-                Text(line, style = MaterialTheme.typography.labelSmall, color = palette.textTertiary, maxLines = 2)
+                Text(line, style = MaterialTheme.typography.labelSmall, color = palette.textSecondary, modifier = Modifier.fillMaxWidth())
             }
             if (!isPhosphorVista && !futureUnlocked) {
                 Spacer(Modifier.height(6.dp))
@@ -889,7 +970,7 @@ private fun RadarBottomController(
                 )
             }
             Spacer(Modifier.height(5.dp))
-            RadarLegend(Modifier.fillMaxWidth())
+            RadarLegend(source, Modifier.fillMaxWidth())
             RadarAttribution(Modifier.fillMaxWidth(), source)
         }
     }
@@ -899,12 +980,11 @@ private fun RadarBottomController(
 private fun RadarPlayButton(playing: Boolean, enabled: Boolean, onToggle: () -> Unit) {
     val palette = LocalZhishengPalette.current
     val chrome = LocalZhishengChrome.current
-    val accent = if (playing) palette.mint else palette.orange
+    val accent = if (isPhosphorVista) palette.text else if (playing) palette.mint else palette.orange
     Box(
         Modifier.size(48.dp)
             .clip(chrome.compactShape)
-            .background(accent.copy(alpha = 0.12f), chrome.compactShape)
-            .border(1.dp, accent, chrome.compactShape)
+            .then(if (isPhosphorVista) Modifier.zhishengCompactPanel() else Modifier.background(accent.copy(alpha = 0.12f), chrome.compactShape).border(1.dp, accent, chrome.compactShape))
             .clickable(enabled = enabled, role = Role.Button, onClickLabel = if (playing) "暂停" else "播放", onClick = onToggle),
         contentAlignment = Alignment.Center,
     ) {
@@ -1040,23 +1120,26 @@ private fun RadarScrubber(
 }
 
 @Composable
-private fun RadarLegend(modifier: Modifier = Modifier) {
+private fun RadarLegend(source: RadarSource, modifier: Modifier = Modifier) {
     val palette = LocalZhishengPalette.current
+    if (source == RadarSource.CAIYUN) {
+        Text("回波配色以彩云原图说明为准", modifier, color = palette.textTertiary,
+            style = MaterialTheme.typography.labelSmall)
+        return
+    }
+    // RainViewer Universal Blue (scheme 2), official 15/20/30/35/45 dBZ samples.
     val colors = listOf(
-        Color(0xFF27D7FF),
-        Color(0xFF45FF70),
-        Color(0xFFFFE24B),
-        Color(0xFFFF8A35),
-        Color(0xFFFF3F68),
+        Color(0xFF88DDEE), Color(0xFF00A3E0), Color(0xFF005588),
+        Color(0xFFFFEE00), Color(0xFFFF4400),
     )
     Column(modifier) {
         Row(Modifier.fillMaxWidth().height(6.dp)) {
             colors.forEach { color -> Box(Modifier.weight(1f).fillMaxSize().background(color)) }
         }
         Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-            Text(if (isPhosphorVista) "小雨" else "弱回波", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
+            Text("弱回波 · 15 dBZ", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
             Spacer(Modifier.weight(1f))
-            Text(if (isPhosphorVista) "大雨" else "强回波", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
+            Text("45 dBZ · 强回波", style = MaterialTheme.typography.labelSmall, color = palette.textTertiary)
         }
     }
 }
@@ -1093,177 +1176,16 @@ private fun RadarAttribution(modifier: Modifier = Modifier, source: RadarSource)
 }
 
 @Composable
-private fun RadarInfoDialog(
-    source: RadarSource,
-    staleMetadata: Boolean,
-    onDismiss: () -> Unit,
-) {
-    val palette = LocalZhishengPalette.current
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(role = Role.Button, onClickLabel = "关闭") { onDismiss() },
-        contentAlignment = Alignment.Center,
-    ) {
-        TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("这张图怎么看", style = MaterialTheme.typography.titleMedium, color = if (isPhosphorVista) palette.text else palette.orange)
-                if (isPhosphorVista) {
-                    Text(
-                        if (source == RadarSource.CAIYUN) {
-                            "颜色越亮，雨越大。时间轴左边是刚才，中间是现在，右边是未来一两小时的估计。图上没有颜色，不等于外面一定没下雨。"
-                        } else {
-                            "颜色越亮，雨越大。现在只能回看过去两小时。两指放大能看到街道和地名。图上没有颜色，不等于外面一定没下雨。"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = palette.textSecondary,
-                    )
-                    Text("防灾听当地气象台。地图来自 OpenStreetMap。", style = MaterialTheme.typography.bodySmall, color = palette.textTertiary)
-                } else {
-                    Text(
-                        if (source == RadarSource.CAIYUN) "彩云拼图 // RADAR LINK" else "RAINVIEWER // RADAR LINK",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.cyan,
-                    )
-                    Text(
-                        (if (source == RadarSource.CAIYUN) {
-                            "· 过去约 2 小时为彩云区域拼图实测，5 分钟一帧；\n" +
-                                "· 未来约 2 小时为彩云外推预报图，约 5 分钟一帧；\n" +
-                                "· 彩云雷达图属企业套餐增值接口，Token 需开通雷达权限；\n" +
-                                "· 图片 URL 带时效签名，仅短缓存几分钟，离线时旧图不会长期保留；\n" +
-                                "· 帧图片由彩云按 Web Mercator 生成，直接叠加在开源底图上；\n" +
-                                "· 图上无明显回波，不等于地面一定无降水，防灾以当地气象部门为准。"
-                        } else {
-                            "· RainViewer 当前公开接口只提供过去 2 小时实测回波，约 10 分钟一帧，无需 API Key；\n" +
-                                "· RainViewer 不提供未来回波，未来约 2 小时外推仅在已开通权限的彩云拼图中显示；\n" +
-                                "· 图上无明显回波，不等于地面一定无降水；\n" +
-                                "· 页面会读取 RainViewer 覆盖掩膜，区分“无明显回波”和“暂缺雷达覆盖”；\n" +
-                                "· 覆盖掩膜更新频率较低，边界附近仍应以当地气象部门信息为准；\n" +
-                                "· 彩云拼图可在「SRC」中切换，实况与预报同样为实测与外推；"
-                        }) +
-                            "\n· 底图使用 OpenFreeMap（OpenStreetMap 矢量瓦片，$OPEN_MAP_ATTRIBUTION）；\n" +
-                            "· 街道、建筑与中文地名随缩放出现，可放到约 20 级；\n" +
-                            "· 底图仅用于回波定位，不替代专业地图。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.textSecondary,
-                    )
-                    Text(
-                        "META // " + when {
-                            staleMetadata -> "网络不稳定，当前使用已保存的帧目录"
-                            source == RadarSource.CAIYUN -> "帧目录实时获取 · 图片短缓存 5 分钟"
-                            else -> "帧目录实时获取 · 地图瓦片由引擎缓存"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (staleMetadata) palette.orange else palette.textTertiary,
-                    )
-                }
-                OfficialRadarLink()
-                Spacer(Modifier.height(2.dp))
-                Box(
-                    Modifier.fillMaxWidth()
-                        .clip(LocalZhishengChrome.current.compactShape)
-                        .background(palette.mint.copy(alpha = 0.14f), LocalZhishengChrome.current.compactShape)
-                        .clickable(role = Role.Button) { onDismiss() }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("关闭", style = MaterialTheme.typography.labelMedium, color = palette.mint)
-                }
-            }
-        }
+private fun RadarInfoDialog(source: RadarSource, staleMetadata: Boolean, onDismiss: () -> Unit) {
+    WeatherOverlayDialog(onDismiss) { modifier ->
+        RadarInfoPanel(source, staleMetadata, onDismiss, modifier) { OfficialRadarLink() }
     }
 }
 
 @Composable
-private fun RadarSourceDialog(
-    current: RadarSource,
-    caiyunConfigured: Boolean,
-    onSelect: (RadarSource) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val palette = LocalZhishengPalette.current
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(role = Role.Button, onClickLabel = "关闭") { onDismiss() },
-        contentAlignment = Alignment.Center,
-    ) {
-        TerminalPanel(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (isPhosphorVista) "换一套降雨图" else "雷达数据源", style = MaterialTheme.typography.titleMedium, color = if (isPhosphorVista) palette.text else palette.orange)
-                if (!isPhosphorVista) {
-                    Text("RADAR SOURCE // SELECT", style = MaterialTheme.typography.labelMedium, color = palette.cyan)
-                }
-                RadarSourceChoice(
-                    title = if (isPhosphorVista) "公开降雨图" else "RainViewer",
-                    detail = if (isPhosphorVista) "过去两小时，不用账号" else "全球过去 2 小时回波 · 免费 · 无需 Key",
-                    selected = current == RadarSource.RAINVIEWER,
-                    onClick = { onSelect(RadarSource.RAINVIEWER) },
-                )
-                RadarSourceChoice(
-                    title = if (isPhosphorVista) "彩云天气" else "彩云拼图",
-                    detail = if (isPhosphorVista) {
-                        if (caiyunConfigured) "全国图，还能看接下来两小时" else "还没开通，去设置里接上"
-                    } else if (caiyunConfigured) {
-                        "全国拼图 · 企业套餐 · 实况 + 外推"
-                    } else {
-                        "未配置彩云 Token · 前往 设置 → 实验室"
-                    },
-                    selected = current == RadarSource.CAIYUN,
-                    enabled = caiyunConfigured,
-                    onClick = { onSelect(RadarSource.CAIYUN) },
-                )
-                Text(
-                    if (isPhosphorVista) "换图以后，刚才和未来会一起跟着变。" else "过去段与未来段随所选数据源一起切换；彩云不可用时自动回到 RainViewer",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.textTertiary,
-                )
-                Spacer(Modifier.height(2.dp))
-                Box(
-                    Modifier.fillMaxWidth()
-                        .clip(LocalZhishengChrome.current.compactShape)
-                        .background(palette.mint.copy(alpha = 0.14f), LocalZhishengChrome.current.compactShape)
-                        .clickable(role = Role.Button) { onDismiss() }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("关闭", style = MaterialTheme.typography.labelMedium, color = palette.mint)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RadarSourceChoice(
-    title: String,
-    detail: String,
-    selected: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    val palette = LocalZhishengPalette.current
-    val chrome = LocalZhishengChrome.current
-    val border = if (selected) palette.cyan else palette.cardBorder
-    val textColor = when {
-        selected -> palette.cyan
-        enabled -> palette.text
-        else -> palette.textTertiary
-    }
-    Box(
-        Modifier.fillMaxWidth()
-            .clip(chrome.compactShape)
-            .background(if (selected) palette.cyan.copy(alpha = 0.10f) else Color.Transparent, chrome.compactShape)
-            .border(1.dp, border, chrome.compactShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-    ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!isPhosphorVista) {
-                    Text(if (selected) "● " else "○ ", style = MaterialTheme.typography.titleSmall, color = textColor)
-                }
-                Text(title, style = MaterialTheme.typography.titleSmall, color = textColor, fontWeight = FontWeight.Bold)
-            }
-            Text(detail, style = MaterialTheme.typography.labelSmall, color = palette.textSecondary, maxLines = 2)
-        }
-    }
+private fun RadarSourceDialog(current: RadarSource, caiyunConfigured: Boolean,
+    onSelect: (RadarSource) -> Unit, onDismiss: () -> Unit) {
+    WeatherOverlayDialog(onDismiss) { modifier -> RadarSourcePanel(current, caiyunConfigured, onSelect, onDismiss, modifier) }
 }
 
 @Composable
@@ -1310,7 +1232,7 @@ private fun installRadarOverlays(
             ),
         )
         val layer = RasterLayer(radarLayerId(frame, future), radarSourceId(frame, future)).withProperties(
-            rasterOpacity(if (frame.timeMillis == selectedTime) RADAR_FRAME_OPACITY else RADAR_PREFETCH_OPACITY),
+            rasterOpacity(0f),
             rasterFadeDuration(RADAR_CROSSFADE_MS.toFloat()),
         )
         if (labelAnchor != null) style.addLayerBelow(layer, labelAnchor) else style.addLayer(layer)

@@ -28,6 +28,15 @@ object WidgetBinder {
              snapshot: WidgetSnapshot?, hostWidth: Int, hostHeight: Int, now: Long = System.currentTimeMillis(), interactive: Boolean = true,
              previewBackground: Int? = null, livingSkyEnabled: Boolean = false,
              ambienceLevel: com.zhisheng.weather.data.AmbienceLevel = com.zhisheng.weather.data.AmbienceLevel.SUBTLE): RemoteViews {
+        fun put(views: RemoteViews, id: Int, text: String) {
+            views.setViewVisibility(id, if (text.isEmpty()) View.GONE else View.VISIBLE)
+            views.setTextViewText(id, if (config.boldText) android.text.SpannableString(text).apply {
+                setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            } else text)
+        }
+        fun fitText(c: Context, views: RemoteViews, id: Int, text: String, preferredSp: Float, widthDp: Float, heightDp: Float,
+                    numberScale: Float? = null) = WidgetBinder.fitText(c, views, id, text, preferredSp, widthDp, heightDp,
+            numberScale, if (numberScale == null) config.detailScale else 1f)
         val basePalette = widgetPalette(context, instance.style, config, previewBackground)
         val sky = widgetSky(instance.style, snapshot, basePalette.isLight, livingSkyEnabled, ambienceLevel, now)
         val p = if (sky == null) basePalette else widgetPalette(context, instance.style, config, previewBackground, sky.contrastColors)
@@ -77,8 +86,13 @@ object WidgetBinder {
         val stripVerticalInset = minOf(if (instance.kind == WidgetKind.BAND) 20 else 16,
             ((height - stripMinimumContent) / 2).coerceAtLeast(2))
         val pulseInset = if (instance.kind == WidgetKind.PULSE && compact) ((height - 40) / 2).coerceIn(2, 8) else 0
-        val name = "widget_${instance.style.key}_${instance.kind.name.lowercase(Locale.ROOT)}" +
-            (if (roomyScene) "_roomy" else if (compact) "_compact" else "") + if (legible) "_legible_${if (ColorUtils.calculateLuminance(p.ink) > .5) "light" else "dark"}" else ""
+        val classicCurrentWeek = instance.style == WidgetStyle.CLASSIC && instance.kind == WidgetKind.WEEK && !config.showForecast
+        // The forecast-free card reserves city/footer widths and gives all
+        // remaining vertical room to the complete current temperature.
+        val name = (if (classicCurrentWeek) "widget_classic_week_current" else
+            "widget_${instance.style.key}_${instance.kind.name.lowercase(Locale.ROOT)}" +
+                (if (roomyScene) "_roomy" else if (compact) "_compact" else "")) +
+            if (legible) "_legible_${if (ColorUtils.calculateLuminance(p.ink) > .5) "light" else "dark"}" else ""
         val v = RemoteViews(context.packageName, context.resources.getIdentifier(name, "layout", context.packageName).takeIf { it != 0 } ?: layoutFor(instance.style, instance.kind))
         if (instance.kind == WidgetKind.NOW) {
             // Root padding constrains both background and content on Android 8+
@@ -137,6 +151,11 @@ object WidgetBinder {
         val timeFormat = if (config.clock24) "HH:mm" else "h:mm"
         v.setCharSequence(R.id.widget_time, "setFormat12Hour", timeFormat)
         v.setCharSequence(R.id.widget_time, "setFormat24Hour", timeFormat)
+        val dateFormat: CharSequence = if (config.boldText) android.text.SpannableString("M月d日 E").apply {
+            setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        } else "M月d日 E"
+        v.setCharSequence(R.id.widget_date, "setFormat12Hour", dateFormat)
+        v.setCharSequence(R.id.widget_date, "setFormat24Hour", dateFormat)
         val clockSize = when (kind) { WidgetKind.PULSE -> 34f; WidgetKind.WEEK -> if (compact) 32f else 42f; WidgetKind.SCENE -> if (roomyScene) 40f else if (compact) 32f else 39f; else -> 46f }
         val tempSize = when (kind) { WidgetKind.PULSE -> 28f; WidgetKind.WEEK -> 28f; WidgetKind.NOW -> 48f; WidgetKind.BAND -> 32f; WidgetKind.SCENE -> if (roomyScene) 40f else 34f }
         // A home-screen widget has very little horizontal room. Use the district/city
@@ -147,14 +166,19 @@ object WidgetBinder {
         // must remain whole even when the launcher only gives a narrow two-cell slot.
         val padding = if (weatherStrip) stripHorizontalInset * 2 else if (kind == WidgetKind.NOW) nowInset * 2 else if (compact && kind == WidgetKind.PULSE) pulseInset * 2 else if (roomyScene) 28 else if (compact) 16 else if (kind == WidgetKind.PULSE) 20 else if (style == WidgetStyle.CLASSIC && kind != WidgetKind.SCENE) 28 else 32
         val verticalPadding = if (weatherStrip) stripVerticalInset * 2 else padding
-        val tempWidth = when (kind) {
+        val tempWidth = when {
+            classicCurrentWeek -> (width - padding - 58).toFloat()
+            !config.showClock && kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.PULSE) -> (width - padding - 60).toFloat()
+            else -> when (kind) {
             WidgetKind.NOW -> (width - padding - if (compact) 34 else 52).toFloat()
             WidgetKind.PULSE -> ((width - 32) / 2 - 49).toFloat()
             WidgetKind.WEEK -> (width - padding) / 2.55f - if (compact) 40 else 52
             WidgetKind.BAND -> if (compact) (width - padding) * .36f else 90f
             WidgetKind.SCENE -> if (roomyScene) (width - padding) / 2.05f - 54f else (width - padding) / 2.42f - if (compact) 46 else 62
+            }
         }.toFloat()
         val tempHeight = when {
+            classicCurrentWeek -> (height - verticalPadding - 60).coerceAtLeast(24).toFloat()
             roomyScene -> 48f
             kind == WidgetKind.NOW -> if (compact) 38f else 50f
             compact && (kind == WidgetKind.PULSE || kind == WidgetKind.BAND) -> 23f
@@ -162,10 +186,24 @@ object WidgetBinder {
             compact -> 30f
             else -> 42f
         }
-        fitText(context, v, R.id.widget_temp, temperature(current?.temperature, config), tempSize, tempWidth, tempHeight, config.textScale)
+        val extraReadingRoom = !config.showForecast && kind == WidgetKind.WEEK && style == WidgetStyle.VISTA && android.os.Build.VERSION.SDK_INT >= 31
+        val extraSceneRoom = !config.showForecast && kind == WidgetKind.SCENE && android.os.Build.VERSION.SDK_INT >= 31
+        val sceneHeroHeight = if (extraSceneRoom) (height - padding - 24 - 24 -
+            (if (height >= 250) if (roomyScene) 78 else if (compact) 66 else 70 else 0) -
+            (if (height >= 280) 40 else 0)).coerceAtLeast(if (roomyScene) 80 else if (compact) 60 else 82).toFloat()
+            else if (roomyScene) 80f else if (compact) 60f else 82f
+        val requestedTempHeight = if (extraSceneRoom) sceneHeroHeight - 24f else if (extraReadingRoom) (height - verticalPadding - 44).coerceAtLeast(tempHeight.toInt()).toFloat() else tempHeight
+        fitText(context, v, R.id.widget_temp, temperature(current?.temperature, config), tempSize, tempWidth, requestedTempHeight, config.textScale)
+        val clockWidth = (width - padding) * when (kind) {
+            WidgetKind.PULSE -> .51f
+            WidgetKind.SCENE -> if (config.textScale > 1.25f) 1.05f / 2.05f else .55f
+            else -> .55f
+        }
+        val clockHeight = if (extraSceneRoom) sceneHeroHeight - 44f else if (extraReadingRoom) (height - verticalPadding - 38).coerceAtLeast(28).toFloat()
+            else if (roomyScene) 48f else if (compact) (if (kind == WidgetKind.PULSE) 23f else 28f)
+            else when (kind) { WidgetKind.PULSE -> 35f; WidgetKind.WEEK -> 46f; else -> 54f }
         fitText(context, v, R.id.widget_time, if (config.clock24) "23:59" else "12:59", clockSize,
-            (width - padding) * if (kind == WidgetKind.PULSE) .51f else .55f,
-            if (roomyScene) 48f else if (compact) (if (kind == WidgetKind.PULSE) 23f else 28f) else when (kind) { WidgetKind.PULSE -> 35f; WidgetKind.WEEK -> 46f; else -> 54f }, config.textScale)
+            clockWidth - if (kind == WidgetKind.SCENE && config.textScale > 1.25f) 2f else 0f, clockHeight, config.textScale)
         put(v, R.id.widget_condition, current?.weatherText?.takeIf(String::isNotBlank) ?: current?.condition?.label ?: "暂无天气")
         put(v, R.id.widget_range, "${temperature(today?.low, config)} / ${temperature(today?.high, config)}")
         // NOW shows air quality in the lower reading; the legacy air TextView
@@ -219,7 +257,7 @@ object WidgetBinder {
         run {
             val cityWidth = when (kind) {
                 WidgetKind.PULSE -> (width - padding - 12) / 2.34f - if (compact) 39 else 49
-                WidgetKind.WEEK -> if (style == WidgetStyle.VISTA) (width - padding) / 2.55f - (if (compact) 40 else 52) else (width - padding) * .6f
+                WidgetKind.WEEK -> if (classicCurrentWeek) (width - padding - 84).toFloat() else if (style == WidgetStyle.VISTA) (width - padding) / 2.55f - (if (compact) 40 else 52) else (width - padding) * .6f
                 WidgetKind.NOW -> (width - padding - if (compact) 0 else 64).toFloat()
                 WidgetKind.BAND -> (width - padding) * .36f
                 else -> (width - padding).toFloat()
@@ -235,7 +273,7 @@ object WidgetBinder {
             val updateText = weather?.fetchedAt?.let { (if (widgetStale(weather, now, config.intervalMinutes)) "上次 " else "更新 ") + time(it, zone) } ?: "待更新"
             put(v, R.id.widget_footer, updateText)
             fitText(context, v, R.id.widget_footer, updateText, if (kind == WidgetKind.NOW || roomyScene) 10f else 9f,
-                if (kind == WidgetKind.WEEK) (width - padding) / 2.55f else if (kind == WidgetKind.NOW) 59f else (width - padding).toFloat(), 12f)
+                if (classicCurrentWeek) 76f else if (kind == WidgetKind.WEEK) (width - padding) / 2.55f else if (kind == WidgetKind.NOW) 59f else (width - padding).toFloat(), 12f)
             if (compact && kind == WidgetKind.BAND) v.setViewVisibility(R.id.widget_footer, View.GONE)
             fitText(context, v, R.id.widget_air, "空气 ${weather?.aqi?.level ?: weather?.aqi?.value ?: "—"}", 11f, (width - padding) * .5f, 16f)
         }
@@ -405,6 +443,37 @@ object WidgetBinder {
             }
         }
         // The final beta9 widget language deliberately has no alarm badge.
+        // Apply display choices last, after put()/forecast binding, so reapply can
+        // both hide and restore each section without resurrecting hidden children.
+        if (kind in listOf(WidgetKind.PULSE, WidgetKind.WEEK, WidgetKind.SCENE)) {
+            v.setViewVisibility(R.id.widget_clock_hit, if (config.showClock) View.VISIBLE else View.GONE)
+            v.setViewVisibility(R.id.widget_time, if (config.showClock) View.VISIBLE else View.GONE)
+            v.setViewVisibility(R.id.widget_date, if (config.showClock) View.VISIBLE else View.GONE)
+            v.setViewVisibility(R.id.widget_lunar, if (config.showClock && config.showLunar) View.VISIBLE else View.GONE)
+        }
+        if (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK, WidgetKind.SCENE)) {
+            if (!config.showForecast) v.setViewVisibility(R.id.widget_forecast, View.GONE)
+            else if (kind != WidgetKind.SCENE) v.setViewVisibility(R.id.widget_forecast, View.VISIBLE)
+        }
+        if (kind == WidgetKind.SCENE) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                v.setViewLayoutHeight(R.id.widget_scene_hero, sceneHeroHeight, TypedValue.COMPLEX_UNIT_DIP)
+                v.setViewLayoutHeight(R.id.widget_temperature_row, if (extraSceneRoom) sceneHeroHeight - 22f else if (roomyScene) 54f else if (compact) 37f else 48f, TypedValue.COMPLEX_UNIT_DIP)
+            }
+            if (!config.showForecast) {
+                v.setViewVisibility(R.id.widget_scene_day_title, View.GONE)
+                v.setViewVisibility(R.id.widget_scene_hourly_title, View.GONE)
+                v.setViewVisibility(R.id.widget_hourly_forecast, View.GONE)
+            }
+            bindPrecipitation(context, v, config, weather, now, width - padding, height, p)
+            // A shrunken 3-column host cannot fit the condition and the full
+            // temperature range side by side. Keep current weather; the range
+            // remains in the day forecast and in accessibility text.
+            v.setViewVisibility(R.id.widget_range, if (width < 240) View.GONE else View.VISIBLE)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 31 && kind == WidgetKind.WEEK && style == WidgetStyle.VISTA) {
+            v.setViewLayoutHeight(R.id.widget_main_hero, if (extraReadingRoom) (height - verticalPadding).toFloat() else if (compact) 62f else 86f, TypedValue.COMPLEX_UNIT_DIP)
+        }
         v.setViewVisibility(R.id.widget_alarm, View.GONE)
         v.setViewVisibility(R.id.widget_alarm_hit, View.GONE)
         put(v, R.id.widget_alarm_label, "")
@@ -458,12 +527,17 @@ object WidgetBinder {
         set(R.id.widget_edit, "settings")
     }
     private fun fitText(c: Context, views: RemoteViews, id: Int, text: String, preferredSp: Float, widthDp: Float, heightDp: Float,
-                        numberScale: Float? = null) {
+                        numberScale: Float? = null, detailScale: Float = 1f) {
         val metrics = c.resources.displayMetrics
         val paint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD) }
         // Fit the upper end once, leaving space for the full slider range. Fitting
         // each requested size independently cancels scaling whenever a row is full.
-        val maximumScale = if (numberScale != null) WidgetMaximumNumberScale else 1f
+        // Keep the established 85..125% baseline. Expanding the slider to 200%
+        // must not shrink every default 100% widget to reserve that upper bound.
+        // Detail rows have fixed height. Measure their cap once at 150%, otherwise
+        // CJK StaticLayout rounding changes the cap on each slider step and can
+        // make a larger requested size render smaller than the preceding step.
+        val maximumScale = if (numberScale != null) 1.25f else 1.5f
         var size = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, preferredSp * maximumScale, metrics)
         paint.textSize = size
         val width = paint.measureText(text).coerceAtLeast(1f)
@@ -473,7 +547,9 @@ object WidgetBinder {
             .setIncludePad(false).setMaxLines(1)
         if (android.os.Build.VERSION.SDK_INT >= 28) layout.setUseLineSpacingFromFallbacks(true)
         val height = layout.build().height.toFloat().coerceAtLeast(1f)
-        size *= minOf(1f, (widthDp.coerceAtLeast(24f) * metrics.density - 1) / width, (heightDp * metrics.density - 1) / height)
+        val roomRatio = minOf((widthDp.coerceAtLeast(24f) * metrics.density - 1) / width, (heightDp * metrics.density - 1) / height).coerceAtLeast(.01f)
+        val roomCap = size * roomRatio
+        size *= minOf(1f, roomRatio)
         if (numberScale != null) {
             // Secondary numbers must not become microscopic just to preserve a
             // percentage. Interpolate from a readable floor to the measured cap;
@@ -481,11 +557,61 @@ object WidgetBinder {
             // the cap when an unusually narrow host or long value cannot fit.
             val small = maxOf(size * WidgetMinimumNumberScale / maximumScale,
                 minOf(MINIMUM_NUMBER_SIZE_DP * metrics.density, size))
-            val progress = (normalizedWidgetNumberScale(numberScale) - WidgetMinimumNumberScale) /
-                (WidgetMaximumNumberScale - WidgetMinimumNumberScale)
+            val requestedScale = normalizedWidgetNumberScale(numberScale)
+            val progress = (requestedScale.coerceAtMost(1.25f) - WidgetMinimumNumberScale) /
+                (1.25f - WidgetMinimumNumberScale)
             size = small + (size - small) * progress
+            if (requestedScale > 1.25f) size = minOf(roomCap, size * requestedScale / 1.25f)
+        } else {
+            size = minOf(size, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, preferredSp * detailScale, metrics))
+        }
+        if (id == R.id.widget_city) {
+            // Long administrative names should ellipsize at a readable size;
+            // shrinking the complete name to two pixels is not a usable label.
+            val heightCap = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, preferredSp * maximumScale, metrics) *
+                ((heightDp * metrics.density - 1) / height).coerceAtLeast(.01f)
+            size = maxOf(size, minOf(9f * metrics.density, heightCap))
         }
         views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_PX, size)
+    }
+    private fun bindPrecipitation(context: Context, views: RemoteViews, config: WidgetConfig, weather: WeatherData?, now: Long,
+                                  widthDp: Int, heightDp: Int, palette: WidgetPalette) {
+        val visible = config.showPrecipitation && heightDp >= 280
+        views.setViewVisibility(R.id.widget_precip_section, if (visible) View.VISIBLE else View.GONE)
+        if (!visible) return
+        // This section replaces the short briefing, so it cannot push the
+        // forecast below the host boundary. It uses stored real samples only.
+        views.setViewVisibility(R.id.widget_scene_briefing, View.GONE)
+        val points = widgetMinuteSeries(weather, now)
+        val source = weather?.rainMeta?.source ?: weather?.blockSources?.get("minutely")
+        val title = if (points.isEmpty()) "短时降水暂无有效数据"
+            else "短时降水 · ${source?.let(Nowcast::sourceLabel) ?: "来源未标注"} · mm/h"
+        views.setTextViewText(R.id.widget_precip_title, title)
+        views.setTextColor(R.id.widget_precip_title, palette.ink)
+        fitText(context, views, R.id.widget_precip_title, title, 10f, widthDp.toFloat(), 14f, detailScale = config.detailScale)
+        views.setViewVisibility(R.id.widget_precip_chart, if (points.isEmpty()) View.GONE else View.VISIBLE)
+        views.setContentDescription(R.id.widget_precip_section, if (points.isEmpty()) title else
+            "$title，${points.size}个预报采样，未来${((points.last().timeMillis - now) / 60_000).coerceAtLeast(0)}分钟；最高${points.maxOf { it.precip }}毫米每小时；不是雷达图")
+        if (points.isEmpty()) return
+        val density = context.resources.displayMetrics.density
+        val bitmap = Bitmap.createBitmap((widthDp * density).roundToInt().coerceIn(32, 1400),
+            (24 * density).roundToInt().coerceIn(16, 160), Bitmap.Config.ARGB_8888)
+        bitmap.density = Bitmap.DENSITY_NONE
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = ColorUtils.setAlphaComponent(palette.muted, 70)
+        canvas.drawLine(0f, bitmap.height - 1f, bitmap.width.toFloat(), bitmap.height - 1f, paint)
+        val ceiling = Nowcast.precipChartCeiling(points).coerceAtLeast(.05f)
+        val interval = (weather?.rainMeta?.intervalMinutes ?: 1).coerceIn(1, 60)
+        val horizon = maxOf(interval * 60_000L, points.last().timeMillis - now + interval * 60_000L)
+        paint.color = palette.accent
+        for (point in points) {
+            val left = ((point.timeMillis - now).coerceAtLeast(0) / horizon.toFloat() * bitmap.width)
+            val right = ((point.timeMillis - now + interval * 60_000L).coerceAtLeast(0) / horizon.toFloat() * bitmap.width)
+            val top = bitmap.height - 2f - point.precip / ceiling * (bitmap.height - 3f)
+            if (point.precip > 0) canvas.drawRect(left, top, (right - density).coerceAtLeast(left + 1), bitmap.height - 2f, paint)
+        }
+        views.setImageViewBitmap(R.id.widget_precip_chart, bitmap)
     }
     private fun rangeBar(context: Context, widthDp: Int, heightDp: Int, low: Double?, high: Double?, min: Double?, max: Double?, p: WidgetPalette, current: Double? = null): Bitmap {
         val density = context.resources.displayMetrics.density

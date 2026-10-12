@@ -157,6 +157,7 @@ fun HistoryScreen(
     var years by rememberSaveable { mutableIntStateOf(10) }
     var retry by remember { mutableIntStateOf(0) }
     var backgroundProgress by remember { mutableStateOf<HistoryLoadProgress?>(null) }
+    var reloadFailure by remember(city?.locationKey) { mutableStateOf<String?>(null) }
     var state by remember(city?.locationKey, retry) {
         mutableStateOf<HistoryScreenState>(HistoryScreenState.Loading(0, years))
     }
@@ -168,6 +169,7 @@ fun HistoryScreen(
             state = HistoryScreenState.Error("先在主页选择一座城市", "回主页选中城市后再进来")
             return@LaunchedEffect
         }
+        reloadFailure = null
         val keepCurrentContent = state is HistoryScreenState.Ready
         if (keepCurrentContent) backgroundProgress = HistoryLoadProgress(selectedDate, 0, years)
         else state = HistoryScreenState.Loading(0, years)
@@ -181,7 +183,7 @@ fun HistoryScreen(
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Exception) {
-            if (keepCurrentContent) state else HistoryScreenState.Error("往年数据读取失败")
+            if (keepCurrentContent) { reloadFailure = "新日期读取失败，下方仍显示原日期记录；重新选择日期可重试"; state } else HistoryScreenState.Error("往年数据读取失败")
         } finally {
             backgroundProgress = null
         }
@@ -208,8 +210,12 @@ fun HistoryScreen(
         modifier = Modifier.fillMaxSize().zhishengScreen()
             .statusBarsPadding().navigationBarsPadding(),
     ) {
-        FeaturePageHeader("天气回看", "WEATHER MEMORY", onBack)
-        HistoryViewToggle(view) { viewName = it.name }
+        if (isPhosphorVista) WeatherFeatureNavigation("天气回看", city?.displayName, onBack, listOf("过去7天", "往年同日"),
+            if (view == HistoryView.RECENT_WEEK) 0 else 1) { viewName = (if (it == 0) HistoryView.RECENT_WEEK else HistoryView.SAME_DAY).name }
+        else {
+            FeaturePageHeader("天气回看", "WEATHER MEMORY", onBack)
+            HistoryViewToggle(view) { viewName = it.name }
+        }
         if (view == HistoryView.RECENT_WEEK) {
             when (val current = recentState) {
                 RecentWeekState.Loading -> RecentWeekLoading()
@@ -224,6 +230,7 @@ fun HistoryScreen(
                     week = current.week,
                     tempUnit = tempUnit,
                     windUnit = windUnit,
+                    endDate = today.minusDays(1),
                 )
             }
         } else {
@@ -244,6 +251,7 @@ fun HistoryScreen(
                     years = years,
                     today = today,
                     backgroundProgress = backgroundProgress,
+                    reloadFailure = reloadFailure,
                     onDateChange = { selectedEpochDay = it.toEpochDay() },
                     onYearsChange = { years = it },
                 )
@@ -254,6 +262,10 @@ fun HistoryScreen(
 
 @Composable
 private fun HistoryViewToggle(selected: HistoryView, onSelect: (HistoryView) -> Unit) {
+    if (isPhosphorVista) {
+        WeatherFeatureTabs(listOf("过去7天", "往年同日"), if (selected == HistoryView.RECENT_WEEK) 0 else 1) { onSelect(if (it == 0) HistoryView.RECENT_WEEK else HistoryView.SAME_DAY) }
+        return
+    }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp)
             .heightIn(min = 52.dp).selectableGroup().then(if (isPhosphorVista) Modifier.zhishengCompactPanel() else Modifier.background(ZhishengSurface).border(1.dp, ZhishengCardBorder)),
@@ -306,7 +318,9 @@ internal fun RecentWeekContent(
     week: RecentWeatherWeek,
     tempUnit: String,
     windUnit: String,
+    endDate: LocalDate = week.endDate ?: LocalDate.now().minusDays(1),
 ) {
+    if (isPhosphorVista) { VistaRecentHistory(week, tempUnit, windUnit, endDate); return }
     val summary = week.summary
     val range = recentRangeDisplay(week)
     LazyColumn(
@@ -389,6 +403,7 @@ private fun HistoryContent(
     years: Int,
     today: LocalDate,
     backgroundProgress: HistoryLoadProgress?,
+    reloadFailure: String?,
     onDateChange: (LocalDate) -> Unit,
     onYearsChange: (Int) -> Unit,
 ) {
@@ -396,6 +411,11 @@ private fun HistoryContent(
         cityDate(it.dateMillis, weather.utcOffsetSeconds) == review.referenceDate
     }?.takeIf { !review.referenceDate.isBefore(today) }
 
+    if (isPhosphorVista) {
+        VistaSameDayHistory(review, forecast, tempUnit, windUnit, years, today,
+            backgroundProgress?.let { "正在读取 ${it.date} · ${it.completed}/${it.total}；下方仍为原日期记录" } ?: reloadFailure, onDateChange, onYearsChange)
+        return
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 36.dp),
@@ -409,6 +429,7 @@ private fun HistoryContent(
                 years = years,
                 today = today,
                 backgroundProgress = backgroundProgress,
+                reloadFailure = reloadFailure,
                 onDateChange = onDateChange,
                 onYearsChange = onYearsChange,
             )
@@ -481,6 +502,7 @@ private fun HistoryHero(
     years: Int,
     today: LocalDate,
     backgroundProgress: HistoryLoadProgress?,
+    reloadFailure: String?,
     onDateChange: (LocalDate) -> Unit,
     onYearsChange: (Int) -> Unit,
 ) {
@@ -1017,7 +1039,7 @@ internal fun recentRangeDisplay(week: RecentWeatherWeek): RecentRangeDisplay {
     )
 }
 
-private fun recentWeekInsight(week: RecentWeatherWeek, tempUnit: String): String {
+internal fun recentWeekInsight(week: RecentWeatherWeek, tempUnit: String): String {
     val warmest = week.summary.warmest
     val coldest = week.summary.coldest
     return when {

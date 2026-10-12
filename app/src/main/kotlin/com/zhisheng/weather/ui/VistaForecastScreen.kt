@@ -31,6 +31,7 @@ import java.util.Locale
 internal fun VistaForecastScreen(
     city: City?, days: List<DailyWeather>, yesterday: YesterdayInfo?,
     tempUnit: String, windUnit: String, utcOffsetSeconds: Int?, onBack: () -> Unit,
+    hourly: List<HourlyWeather> = emptyList(),
 ) {
     val chrome = LocalZhishengChrome.current
     val nowMillis = weatherPresentationTime()
@@ -53,6 +54,12 @@ internal fun VistaForecastScreen(
             } else {
                 item {
                     ForecastDateTrack(track, selected.dateMillis, tempUnit, utcOffsetSeconds) { selectedDate = it }
+                }
+                item {
+                    val hours = remember(hourly, selected.dateMillis, utcOffsetSeconds) {
+                        forecastHoursForDate(hourly, selected.dateMillis, utcOffsetSeconds)
+                    }
+                    ForecastHourlyTemperature(hours, tempUnit, utcOffsetSeconds)
                 }
                 item {
                     val visual = forecastDayNightVisual(selected)
@@ -98,6 +105,57 @@ internal fun VistaForecastScreen(
                         Text("天气娘简报", color = ZhishengTextSecondary, style = MaterialTheme.typography.labelLarge)
                         Text(digest.headline, color = ZhishengText, style = MaterialTheme.typography.bodyLarge)
                         Text(digest.overview, color = ZhishengTextSecondary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ForecastHourlyTemperature(hours: List<HourlyWeather>, unit: String, offset: Int?) {
+    val palette = LocalZhishengPalette.current
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("当日逐小时温度", color = palette.text, fontWeight = FontWeight.SemiBold)
+        if (hours.none { it.temperature?.isFinite() == true }) {
+            Text("数据源未提供这一天的小时温度", color = palette.textSecondary,
+                style = MaterialTheme.typography.bodyMedium)
+        } else {
+            Text("仅显示数据源实际提供的小时；缺失处不连线", color = palette.textTertiary,
+                style = MaterialTheme.typography.labelSmall)
+            val values = hours.mapNotNull { it.temperature?.takeIf(Double::isFinite) }
+            val min = values.min() - 2.0
+            val max = values.max() + 2.0
+            val column = 64.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+            // A new date starts at its first available hour instead of inheriting another day's scroll.
+            androidx.compose.runtime.key(hours.firstOrNull()?.timeMillis) {
+                Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    Canvas(Modifier.width(column * hours.size).height(110.dp)) {
+                        fun point(i: Int, t: Double) = Offset(column.toPx() * (i + .5f),
+                            size.height - 8.dp.toPx() - ((t - min) / (max - min)).toFloat() * (size.height - 16.dp.toPx()))
+                        var previous: Offset? = null
+                        hours.forEachIndexed { i, hour ->
+                            val value = hour.temperature?.takeIf(Double::isFinite)
+                            if (value == null) previous = null else {
+                                val p = point(i, value)
+                                if (i > 0 && hour.timeMillis - hours[i - 1].timeMillis > 90 * 60_000L) previous = null
+                                previous?.let { drawLine(palette.mint, it, p, 2.dp.toPx()) }
+                                drawCircle(palette.mint, 3.dp.toPx(), p)
+                                previous = p
+                            }
+                        }
+                    }
+                    Row {
+                        hours.forEach { hour ->
+                            Column(Modifier.width(column).padding(vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(Fmt.hour(hour.timeMillis, offset), color = palette.textSecondary,
+                                    style = MaterialTheme.typography.labelSmall)
+                                Text(Fmt.temp(hour.temperature?.takeIf(Double::isFinite), unit)?.let { "$it°" } ?: "—",
+                                    color = palette.text, style = MaterialTheme.typography.titleSmall)
+                            }
+                        }
                     }
                 }
             }

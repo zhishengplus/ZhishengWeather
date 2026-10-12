@@ -7,12 +7,16 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -38,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
@@ -58,10 +64,13 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -122,23 +131,20 @@ fun HourlyDetailScreen(
     val chrome = LocalZhishengChrome.current
     val palette = rememberChartPalette()
     val nowMs = weatherPresentationTime()
-    val displayBase = hourlyDisplayItems(data.current, data.hourly, nowMs, data.aqi?.value)
-    // “现在”观测点补齐：实况 AQI、下一小时的紫外线/体感/阵风，避免各图起点出现空洞。
-    val display = displayBase.mapIndexed { i, item ->
-        if (!item.isNow) item else item.copy(weather = item.weather.copy(
-            uvIndex = item.weather.uvIndex ?: displayBase.getOrNull(i + 1)?.weather?.uvIndex,
-            feelsLike = item.weather.feelsLike ?: displayBase.getOrNull(i + 1)?.weather?.feelsLike,
-            windGust = item.weather.windGust ?: displayBase.getOrNull(i + 1)?.weather?.windGust,
-        ))
-    }
-    val selected = rememberSaveable { mutableIntStateOf(0) }
+    val allHours = hourlyDetailDisplayItems(data.current, data.hourly, nowMs, data.aqi?.value)
+    val offset = data.utcOffsetSeconds
+    val days = hourlyDetailDays(allHours, offset)
+    var selectedDate by rememberSaveable(cityName, offset) { mutableStateOf<String?>(null) }
+    val today = com.zhisheng.weather.model.cityDate(nowMs, offset).toString()
+    val dateKey = selectedDate?.takeIf { it in days } ?: today.takeIf { it in days } ?: days.keys.firstOrNull()
+    val display = days[dateKey].orEmpty()
+    val selected = rememberSaveable(cityName, dateKey) { mutableIntStateOf(0) }
     val hourlyHaptic = LocalHapticFeedback.current
     LaunchedEffect(selected, hourlyHaptic) {
         snapshotFlow { selected.intValue }.drop(1).collect {
             hourlyHaptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
-    val offset = data.utcOffsetSeconds
     LazyColumn(
         Modifier.fillMaxSize().zhishengScreen().statusBarsPadding().navigationBarsPadding(),
         contentPadding = PaddingValues(horizontal = chrome.pagePadding, vertical = 6.dp),
@@ -157,11 +163,27 @@ fun HourlyDetailScreen(
                 }
             }
         }
+        if (days.size > 1) item {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                days.forEach { (key, hours) ->
+                    val active = key == dateKey
+                    Box(Modifier.clip(RoundedCornerShape(12.dp))
+                        .background(if (active) ZhishengMint.copy(alpha = .14f) else ZhishengCard.copy(alpha = .35f))
+                        .selectable(active, role = Role.Tab) { selectedDate = key }
+                        .heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                        Text("${forecastTemporalLabel(hours.first().weather.timeMillis, offset, nowMs)} · ${key.substring(5)}",
+                            color = if (active) ZhishengMint else ZhishengTextSecondary,
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
         if (display.size >= 2) item {
-            Text("在任意图表左右拖动，其他图表同步对准同一时刻",
+            Text("左右拖动图表查看同一天的时刻；缺失数据保留空位",
                 color = ZhishengTextSecondary, style = MaterialTheme.typography.bodySmall)
         }
-        if (display.size < 2) {
+        if (display.isEmpty()) {
             item {
                 Text("暂无逐时数据", color = ZhishengTextSecondary,
                     style = MaterialTheme.typography.bodyMedium)
@@ -222,7 +244,7 @@ fun HourlyDetailScreen(
                     }
                 }
             }
-            if (display.count { it.weather.uvIndex != null } >= 2) {
+            if (display.any { it.weather.uvIndex != null }) {
                 item {
                     ChartCard(R.drawable.ph_sun, palette.uv, "紫外线",
                         legend = {
@@ -334,10 +356,19 @@ private fun LegendSwatch(color: Color, text: String) {
 /** 时间横轴按实际预报时刻标注；只有实时观测点标为“现在”。 */
 @Composable
 private fun HourlyAxisLabels(display: List<HourlyDisplayItem>, utcOffsetSeconds: Int?, nowMillis: Long) {
-    val labels = hourlyAxisLabels(display, utcOffsetSeconds, nowMillis)
-    Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        labels.forEach { (_, text) ->
-            Text(text, color = ZhishengTextTertiary, style = MaterialTheme.typography.labelSmall)
+    val candidates = hourlyAxisLabels(display, utcOffsetSeconds, nowMillis)
+    val style = MaterialTheme.typography.labelSmall
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        val totalWidth = candidates.sumOf { (_, text) -> measurer.measure(AnnotatedString(text), style).size.width }
+        val roomForGaps = with(density) { (candidates.size - 1).coerceAtLeast(0) * 8.dp.toPx() }
+        val labels = if (candidates.size > 2 && totalWidth + roomForGaps > constraints.maxWidth)
+            listOf(candidates.first(), candidates.last()) else candidates
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            labels.forEach { (_, text) ->
+                Text(text, color = ZhishengTextTertiary, style = style)
+            }
         }
     }
 }
@@ -351,10 +382,13 @@ internal fun hourlyAxisLabels(
     if (times.size < 2) return emptyList()
     val marks = listOf(0, times.size / 3, times.size * 2 / 3, times.lastIndex).distinct()
     val today = com.zhisheng.weather.model.cityDate(nowMillis, utcOffsetSeconds)
+    val oneDay = times.map { com.zhisheng.weather.model.cityDate(it, utcOffsetSeconds) }.distinct().size == 1
     return marks.mapIndexed { mi, idx ->
         val date = com.zhisheng.weather.model.cityDate(times[idx], utcOffsetSeconds)
         idx to when {
             display[idx].isNow -> "现在"
+            // The date selector already identifies this whole graph's day.
+            oneDay -> Fmt.clock(times[idx], utcOffsetSeconds)
             mi == marks.lastIndex && date == today.plusDays(1) -> "明天"
             date != today -> "${date.monthValue}/${date.dayOfMonth} ${Fmt.clock(times[idx], utcOffsetSeconds)}"
             else -> Fmt.clock(times[idx], utcOffsetSeconds)
@@ -434,7 +468,7 @@ private fun HourlyCurveChart(
     ) {
         val si = selected.value.coerceIn(0, times.lastIndex)
         val n = times.size
-        if (n < 2) return@Canvas
+        if (n == 0) return@Canvas
         val inset = 4.dp.toPx()
         val top = 24.dp.toPx()
         val base = size.height - 2.dp.toPx()
@@ -448,23 +482,26 @@ private fun HourlyCurveChart(
         val pad = (max - min) * 0.14
         if (!floorAtZero) min -= pad
         max += pad
-        fun x(i: Int): Float = inset + (size.width - inset * 2) * i / (n - 1)
+        fun x(i: Int): Float = if (n == 1) size.width / 2 else inset + (size.width - inset * 2) * i / (n - 1)
         fun y(v: Double): Float = base - ((v.coerceAtLeast(min) - min) / (max - min)).toFloat() * plotHeight
         series.forEach { s ->
-            val run = s.values.mapIndexed { i, v ->
-                if (v != null && v.isFinite()) Offset(x(i), y(v)) else null
-            }.filterNotNull()
-            if (run.size < 2) return@forEach
-            val path = weatherCurve(run)
-            if (s.fill) {
-                val fillPath = Path().apply {
-                    addPath(path); lineTo(run.last().x, base); lineTo(run.first().x, base); close()
+            hourlyCurveSegments(times, s.values).forEach { indices ->
+                val run = indices.map { i -> Offset(x(i), y(s.values[i]!!)) }
+                if (run.size == 1) {
+                    drawCircle(s.color, 2.5.dp.toPx(), run.single())
+                } else {
+                    val path = weatherCurve(run)
+                    if (s.fill) {
+                        val fillPath = Path().apply {
+                            addPath(path); lineTo(run.last().x, base); lineTo(run.first().x, base); close()
+                        }
+                        drawPath(fillPath, Brush.verticalGradient(
+                            listOf(s.color.copy(alpha = .18f), Color.Transparent), top, base))
+                    }
+                    drawPath(path, s.color,
+                        style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
-                drawPath(fillPath, Brush.verticalGradient(
-                    listOf(s.color.copy(alpha = .18f), Color.Transparent), top, base))
             }
-            drawPath(path, s.color,
-                style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         // 选中时刻：序列圆点 + 向下的细线 + 顶部气泡（气泡描边带主题色，同参考稿）
         val sx = x(si)
@@ -521,7 +558,7 @@ private fun HourlyAqiBars(
     ) {
         val si = selected.value.coerceIn(0, times.lastIndex)
         val n = times.size
-        if (n < 2) return@Canvas
+        if (n == 0) return@Canvas
         val top = 24.dp.toPx()
         val base = size.height - 2.dp.toPx()
         val plotHeight = (base - top).coerceAtLeast(1f)

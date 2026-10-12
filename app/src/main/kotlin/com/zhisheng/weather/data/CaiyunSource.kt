@@ -299,7 +299,8 @@ object CaiyunSource {
                 ?.div(1_000.0),
             extraIndices = mapLifeIndices(r.daily?.lifeIndex),
             dataSource = "CAIYUN",
-            blockSources = mapOf("current" to "CAIYUN", "hourly" to "CAIYUN", "daily" to "CAIYUN", "minutely" to "CAIYUN"),
+            blockSources = mapOf("current" to "CAIYUN", "hourly" to "CAIYUN", "daily" to "CAIYUN", "minutely" to "CAIYUN") +
+                if (r.alert != null) mapOf("alerts" to "CAIYUN") else emptyMap(),
             locationMatch = WeatherLocationMatch(
                 requestedLatitude = city.latitude,
                 requestedLongitude = city.longitude,

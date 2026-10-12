@@ -55,7 +55,9 @@ class JapaneseLocalizationTest {
         val uiRoot = File(root, "src/main/kotlin/com/zhisheng/weather/ui")
         val offenders = uiRoot.walkTopDown()
             .filter { it.isFile && it.extension == "kt" && it.name != "LocalizedText.kt" }
-            .filter { it.readText().contains("import androidx.compose.material3.Text") }
+            // Match the Text symbol, not unrelated imports such as TextButton.
+            .filter { Regex("(?m)^import\\s+androidx\\.compose\\.material3\\.Text(?:\\s+as\\s+\\w+)?\\s*$")
+                .containsMatchIn(it.readText()) }
             .map(File::getName)
             .toList()
 

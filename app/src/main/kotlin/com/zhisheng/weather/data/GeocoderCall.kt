@@ -5,6 +5,7 @@ import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.resume
 
 // Some pre-33 system geocoders ignore interruption. Bound the workers and do not
@@ -16,14 +17,23 @@ private val geocoderWorkers = ThreadPoolExecutor(
 )
 
 /** A timeout releases the caller even if the Android binder service remains stuck. */
-internal suspend fun <T> geocoderCall(block: () -> T?): T? = suspendCancellableCoroutine { cont ->
+internal suspend fun <T> geocoderCall(strict: Boolean = false, block: () -> T?): T? = suspendCancellableCoroutine { cont ->
     try {
         val future = geocoderWorkers.submit {
-            val value = try { block() } catch (_: Exception) { null }
+            val value = try { block() } catch (_: Exception) {
+                if (strict) {
+                    if (cont.isActive) cont.resumeWithException(PlaceServiceException(PlaceFailure.UNAVAILABLE))
+                    return@submit
+                }
+                null
+            }
             if (cont.isActive) cont.resume(value)
         }
         cont.invokeOnCancellation { future.cancel(true) }
     } catch (_: RejectedExecutionException) {
-        if (cont.isActive) cont.resume(null)
+        if (cont.isActive) {
+            if (strict) cont.resumeWithException(PlaceServiceException(PlaceFailure.UNAVAILABLE))
+            else cont.resume(null)
+        }
     }
 }

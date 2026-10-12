@@ -86,7 +86,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     private var lastFetchedKey: String? = null
     private var lastFetchKey: String? = null
-    private var lastFetchAt: Long = 0L
+    private val refreshGate = com.zhisheng.weather.data.RefreshGate()
 
     // 同一时间只保留一次抓取：换城市立即取消旧任务，
     // 避免新旧城市结果乱序覆盖（v0.0.1：切城市偶发数据错乱的修复）
@@ -234,15 +234,15 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             var first = true
             combine(sourcePref, com.zhisheng.weather.data.SecretStore.qwRuntimeFlow,
-                com.zhisheng.weather.data.SecretStore.caiyunRuntimeFlow) { pref, qw, caiyun ->
-                pref to when (pref) {
-                    SourcePref.QWEATHER -> qw
-                    SourcePref.CAIYUN -> caiyun
-                    // 枳生天气源"有钥匙就上桌"：新配和风/彩云凭据时重拉一次
-                    SourcePref.ZHISHENG -> qw to caiyun
-                    else -> Unit
-                }
-            }.distinctUntilChanged().collect {
+                com.zhisheng.weather.data.SecretStore.caiyunRuntimeFlow,
+                com.zhisheng.weather.data.SecretStore.amapRuntimeFlow,
+                com.zhisheng.weather.data.SecretStore.baiduRuntimeFlow) { pref, qw, caiyun, amap, baidu ->
+                listOf(pref, qw, caiyun, amap, baidu)
+            }.combine(com.zhisheng.weather.data.SecretStore.seniverseRuntimeFlow) { credentials, seniverse -> credentials + seniverse }
+                .combine(com.zhisheng.weather.data.SecretStore.mojiRuntimeFlow) { credentials, moji -> credentials + moji }
+                .combine(SettingsRepository.moduleSources) { credentials, modules -> credentials to modules }
+                .combine(SettingsRepository.developerMode) { setup, mode -> setup to mode }
+                .distinctUntilChanged().collect {
                 if (first) { first = false; return@collect }
                 refresh()
             }
@@ -260,18 +260,20 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // force=false 用于 ON_RESUME 自动刷新：同城 10 分钟内不重复拉，
+    // force=false 用于前台自动刷新：成功请求按用户间隔去重，失败短暂退避，
     // 避免与启动时 selectedCity 首发射叠加成双份请求（v0.0.1）
-    fun refresh(city: City? = null, force: Boolean = true) {
+    fun refresh(city: City? = null, force: Boolean = true, intervalElapsed: Boolean = false) {
         val target = city ?: selectedCity.value ?: return
-        refreshScene(target, force)
         val now = System.currentTimeMillis()
-        if (!force && target.locationKey == lastFetchKey && now - lastFetchAt < 10 * 60_000L) return
+        val interval = com.zhisheng.weather.data.AutomationSettingsRepository.read(getApplication()).foregroundMinutes * 60_000L
+        if (!force && !refreshGate.shouldFetch(target.locationKey, now, interval,
+                lastFetchKey.takeIf { fetchJob?.isActive == true }, intervalElapsed)) return
+        refreshScene(target, force)
         if (target.locationKey != lastFetchedKey) lastFetchedKey = target.locationKey
         lastFetchKey = target.locationKey
-        lastFetchAt = now
         fetchJob?.cancel()
-        if (_weatherCityKey.value != target.locationKey) {
+        if (_weatherCityKey.value != target.locationKey ||
+            _weather.value?.let { !com.zhisheng.weather.data.weatherCoordinatesMatch(target, it) } == true) {
             // 城市名切换后绝不允许继续挂着上一城市的温度/天气。
             _weather.value = null
             _staleAge.value = null
@@ -284,13 +286,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 // stateIn 的占位值是 AUTO；冷启动时城市可能先于 DataStore 中的真实来源发出。
                 // 每次请求直接读取已落盘的来源，避免设置页显示锁定和风、首页却先走自动源。
                 val requestedSource = SettingsRepository.sourcePref.first()
-                if (_weather.value?.let { !requestedSource.matches(it) } == true) {
+                if (_weather.value?.let { !WeatherRepository.cacheCompatible(it, requestedSource) } == true) {
                     _weather.value = null
                     _staleAge.value = null
                 }
                 if (_weather.value == null) {
-                    WeatherCache.load(getApplication(), target.locationKey)
-                        ?.takeIf { requestedSource.matches(it.data) && it.isUsableOfflineAt(System.currentTimeMillis()) }
+                    WeatherCache.load(getApplication(), target)
+                        ?.takeIf { WeatherRepository.cacheCompatible(it.data, requestedSource) && it.isUsableOfflineAt(System.currentTimeMillis()) &&
+                            com.zhisheng.weather.data.weatherCoordinatesMatch(target, it.data) }
                         ?.let { cached ->
                             if (selectedCity.value?.locationKey == target.locationKey) {
                                 _weather.value = WeatherConsistency.align(cached.data)
@@ -313,12 +316,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     android.util.Log.w("ZhishengWeather", "抓取异常 ${target.name}", e)
                     WeatherData(error = WeatherRepository.userFacingFetchError("天气数据"))
                 }
-                if (result.current == null) {
+                if (result.current == null || result.error != null) {
+                    refreshGate.failure(target.locationKey, System.currentTimeMillis())
                     // 失败兜底：只复用同一数据源的缓存。换源失败时不能把上一源的卡片当成当前结果。
                     val cacheNow = System.currentTimeMillis()
-                    val cached = WeatherCache.load(getApplication(), target.locationKey)
-                        ?.takeIf { requestedSource.matches(it.data) }
+                    val cached = WeatherCache.load(getApplication(), target)
+                        ?.takeIf { WeatherRepository.cacheCompatible(it.data, requestedSource) }
                         ?.takeIf { it.isUsableOfflineAt(cacheNow) }
+                        ?.takeIf { com.zhisheng.weather.data.weatherCoordinatesMatch(target, it.data) }
                     if (cached != null) {
                         result = WeatherConsistency.align(cached.data)
                         _staleAge.value = System.currentTimeMillis() - cached.savedAtMillis
@@ -327,9 +332,13 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         _staleAge.value = null
                     }
                 } else {
+                    if (SettingsRepository.sourcePref.first() != requestedSource ||
+                        !WeatherRepository.cacheCompatible(result, requestedSource)) return@launch
+                    refreshGate.success(target.locationKey, System.currentTimeMillis())
                     _staleAge.value = null
                     runCatching { WeatherCache.save(getApplication(), target.locationKey, result) }
                     runCatching { WidgetRuntime.publishAndRender(getApplication(), target, result) }
+                    com.zhisheng.weather.data.WeatherReminderSchedule.schedule(getApplication())
                 }
                 if (selectedCity.value?.locationKey == target.locationKey) {
                     _weather.value = result
@@ -430,9 +439,33 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     // —— 定位（v0.0.2）——
     // 手动触发时总是优先取新位置；权限申请由 UI 层负责，这里假定已授权。
     fun locateCurrentCity() {
-        autoLocateJob?.cancel()
-        autoLocateJob = null
+        cancelLocateForSelection()
         beginLocate(automatic = false)
+    }
+
+    /** The ViewModel owns locating and its success commit across Activity recreation. */
+    private val initialLocationRequest = RetainedLocationRequest(viewModelScope)
+
+    suspend fun locateInitialCity(): Boolean = initialLocationRequest.run {
+        cancelLocateForSelection(cancelInitial = false)
+        val revision = selectionRevision
+        _locateMessage.value = null
+        cityInitializationJob.join()
+        if (selectionRevision != revision) return@run false
+        beginLocate(automatic = false)
+        locateJob?.join()
+        if (selectionRevision != revision || lastAppliedLocationRevision != revision) return@run false
+        val locatedKey = CityRepository.locatedCityKey.first()
+        if (locatedKey == null || CityRepository.selectedCity.first()?.locationKey != locatedKey) return@run false
+        SettingsRepository.setLocationEnabled(true)
+        true
+    }
+
+    suspend fun resumeInitialLocation(): Boolean = initialLocationRequest.awaitResult()
+
+    fun cancelLocationRequest() {
+        cancelLocateForSelection()
+        _locateMessage.value = null
     }
 
     // 定位开关开启且已授权后，回到前台最多每 30 分钟复核一次城市；
@@ -442,8 +475,10 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private var locateJob: kotlinx.coroutines.Job? = null
     private var autoLocateJob: kotlinx.coroutines.Job? = null
     private var selectionRevision = 0L
+    private var lastAppliedLocationRevision = -1L
 
-    private fun cancelLocateForSelection() {
+    private fun cancelLocateForSelection(cancelInitial: Boolean = true) {
+        if (cancelInitial) initialLocationRequest.cancel()
         selectionRevision++
         autoLocateJob?.cancel()
         autoLocateJob = null
@@ -518,45 +553,55 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         var job: kotlinx.coroutines.Job? = null
         job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             if (!automatic) _locateMessage.value = null
+            var appliedFix: City? = null
             try {
-                when (val r = LocationSource.locate(getApplication())) {
-                    is LocationSource.Result.Ok -> {
-                        if (selectionRevision != revision) return@launch
-                        if (!com.zhisheng.weather.data.shouldApplyLocation(startedKey, selectedCity.value?.locationKey)) return@launch
-                        if (refreshTarget != null && selectedCity.value?.locationKey != refreshTarget.locationKey) return@launch
-                        val locatedCity = CityRepository.addOrUpdateLocatedCity(r.city, startedKey) ?: return@launch
-                        if (selectionRevision != revision) return@launch
-                        val prefix = when {
-                            automatic && r.streetStatus == LocationSource.StreetStatus.RESOLVED -> "已自动精确定位"
-                            automatic -> "已自动更新定位"
-                            r.streetStatus == LocationSource.StreetStatus.RESOLVED -> "已精确定位"
-                            else -> "已定位"
+                when (val r = LocationSource.locate(getApplication()) { initial ->
+                    if (selectionRevision != revision ||
+                        !com.zhisheng.weather.data.shouldApplyLocation(startedKey, selectedCity.value?.locationKey) ||
+                        (refreshTarget != null && selectedCity.value?.locationKey != refreshTarget.locationKey)) {
+                        false
+                    } else {
+                        val located = CityRepository.addOrUpdateLocatedCity(initial.city, startedKey, initial.configurationRevision) {
+                            lastFetchedKey = it.locationKey
                         }
+                        if (located == null || selectionRevision != revision) false
+                        else {
+                            appliedFix = located
+                            lastAppliedLocationRevision = revision
+                            _locateMessage.value = "已取得当前位置，正在识别地址…"
+                            SettingsRepository.setLastAutoLocateAt(System.currentTimeMillis())
+                            refresh(located)
+                            true
+                        }
+                    }
+                }) {
+                    is LocationSource.Result.Ok -> {
+                        val initial = appliedFix ?: return@launch
+                        if (selectionRevision != revision) return@launch
+                        val enriched = r.city.copy(locationKey = initial.locationKey)
+                        val locatedCity = CityRepository.updateLocatedLabel(enriched, r.configurationRevision) ?: return@launch
+                        val prefix = if (automatic) "已自动更新定位" else "已定位"
                         val suffix = when (r.streetStatus) {
                             LocationSource.StreetStatus.APPROXIMATE_PERMISSION -> "（系统仅授予大致位置）"
                             LocationSource.StreetStatus.INSUFFICIENT_ACCURACY -> "（精度不足，未显示街道）"
                             LocationSource.StreetStatus.UNAVAILABLE -> "（暂未识别到街道）"
                             else -> ""
                         }
-                        val accuracy = r.accuracyMeters?.let { "约${it.toInt()}米" } ?: "精度未知"
+                        val accuracy = r.accuracyMeters?.takeIf { it > 0f }?.let { "约${it.toInt().coerceAtLeast(1)}米" } ?: "精度未知"
                         _locateMessage.value = "$prefix：${locatedCity.displayName}$suffix · $accuracy · ${r.fixAgeSeconds}秒前的位置"
-                        lastFetchedKey = locatedCity.locationKey
-                        // 定位结果需要覆盖同城旧坐标与街道；手动搜索城市仍保持原有去重行为。
-                        SettingsRepository.setLastAutoLocateAt(System.currentTimeMillis())
-                        if (selectionRevision == revision) refresh(locatedCity)
                     }
                     is LocationSource.Result.Failed -> {
                         if (selectionRevision != revision) return@launch
-                        if (!automatic) _locateMessage.value = r.message
-                        if (refreshTarget != null && selectedCity.value?.locationKey == refreshTarget.locationKey) refresh(refreshTarget)
+                        if (!automatic) _locateMessage.value = if (appliedFix != null) "已保留取得的坐标，地址暂不可用" else r.message
+                        if (appliedFix == null && refreshTarget != null && selectedCity.value?.locationKey == refreshTarget.locationKey) refresh(refreshTarget)
                     }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 if (selectionRevision != revision) return@launch
-                if (!automatic) _locateMessage.value = "暂时无法更新位置，已保留原地点"
-                if (refreshTarget != null && selectedCity.value?.locationKey == refreshTarget.locationKey) refresh(refreshTarget)
+                if (!automatic) _locateMessage.value = if (appliedFix != null) "已保留取得的坐标，地址暂不可用" else "暂时无法更新位置，已保留原地点"
+                if (appliedFix == null && refreshTarget != null && selectedCity.value?.locationKey == refreshTarget.locationKey) refresh(refreshTarget)
             } finally {
                 if (locateJob === job) _locating.value = false
             }

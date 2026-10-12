@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.zhisheng.weather.model.WeatherData
+import com.zhisheng.weather.model.City
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,7 +45,11 @@ object WeatherCache {
         val entry = CachedWeather(data = data, savedAtMillis = System.currentTimeMillis())
         // 两个 DataStore 分开读取，避免在 weather_cache 的 edit 事务里悬挂读取城市 DataStore。
         // 当前键始终保留，兼容“刚选中城市、城市流尚未完成刷新”的极短竞态窗口。
-        val validCacheKeys = CityRepository.savedCities()
+        val savedCities = CityRepository.savedCities()
+        savedCities.firstOrNull { it.locationKey == locationKey }?.let {
+            if (!weatherCoordinatesMatch(it, data)) return
+        }
+        val validCacheKeys = savedCities
             .map { key(it.locationKey).name }
             .toSet() + key(locationKey).name
         context.applicationContext.weatherCacheStore.edit { prefs ->
@@ -68,4 +73,7 @@ object WeatherCache {
             null
         }
     }
+
+    suspend fun load(context: Context, city: City): CachedWeather? =
+        load(context, city.locationKey)?.takeIf { weatherCoordinatesMatch(city, it.data) }
 }

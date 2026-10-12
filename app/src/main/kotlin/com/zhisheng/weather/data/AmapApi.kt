@@ -23,6 +23,10 @@ internal data class AmapLookupResult(
     val info: String? = null,
     val infocode: String? = null,
     val adcode: String? = null,
+    val district: String? = null,
+    val city: String? = null,
+    val province: String? = null,
+    val failure: PlaceFailure? = null,
 )
 
 internal data class AmapPlaceResult(
@@ -33,6 +37,7 @@ internal data class AmapPlaceResult(
     val province: String?,
     val latitude: Double,
     val longitude: Double,
+    val sourceId: String? = null,
 )
 
 private data class AmapRawResult(val result: AmapLookupResult, val root: JsonObject? = null)
@@ -57,6 +62,7 @@ internal object AmapApi {
     ): AmapLookupResult {
         val candidate = key.trim()
         if (candidate.isEmpty()) return AmapLookupResult(false, info = "EMPTY_KEY")
+        PlaceServiceGate.check(candidate, "amap:reverse")
         return try {
             val converted = request(
                 path = listOf("v3", "assistant", "coordinate", "convert"),
@@ -66,13 +72,22 @@ internal object AmapApi {
                     "coordsys" to "gps",
                 ),
             )
-            if (!converted.result.ok) return converted.result
+            if (!converted.result.ok) {
+                PlaceServiceGate.record(candidate, "amap:reverse", amapFailure(converted.result.infocode))
+                return converted.result
+            }
             val location = converted.result.formattedAddress?.takeIf(::validCoordinatePair)
                 ?: return AmapLookupResult(false, info = "坐标转换未返回有效结果")
-            reverseGcj(candidate, location, cityName)
+            reverseGcj(candidate, location, cityName).also { result ->
+                if (result.ok) PlaceServiceGate.clear(candidate, "amap:reverse")
+                else PlaceServiceGate.record(candidate, "amap:reverse", amapFailure(result.infocode))
+            }
         } catch (ce: CancellationException) {
             throw ce
-        } catch (_: Throwable) {
+        } catch (error: PlaceServiceException) {
+            PlaceServiceGate.record(candidate, "amap:reverse", error.failure, error.retryAfterMillis)
+            AmapLookupResult(false, info = "高德街道服务暂不可用", failure = error.failure)
+        } catch (_: Exception) {
             AmapLookupResult(false, info = "高德街道服务暂不可用")
         }
     }
@@ -82,6 +97,8 @@ internal object AmapApi {
         val candidate = key.trim()
         if (candidate.isEmpty()) return AmapLookupResult(false, info = "请填写 Web 服务 API Key")
         return try {
+            PlaceServiceGate.clear(candidate, "amap:reverse")
+            PlaceServiceGate.clear(candidate, "amap:search")
             reverseGcj(candidate, "116.397428,39.909230", "北京")
         } catch (ce: CancellationException) {
             throw ce
@@ -93,6 +110,7 @@ internal object AmapApi {
     suspend fun searchPlaces(key: String, keyword: String, cityName: String? = null): List<AmapPlaceResult> {
         val candidate = key.trim()
         if (candidate.isEmpty() || keyword.trim().length < 2) return emptyList()
+        PlaceServiceGate.check(candidate, "amap:search")
         return try {
             val query = linkedMapOf(
                 "key" to candidate,
@@ -103,8 +121,13 @@ internal object AmapApi {
             )
             cityName?.trim()?.takeIf(String::isNotBlank)?.let { query["city"] = it }
             val raw = request(listOf("v3", "place", "text"), query)
-            if (!raw.result.ok) return emptyList()
-            (raw.root?.get("pois") as? JsonArray).orEmpty().mapNotNull { item ->
+            if (!raw.result.ok) {
+                val failure = amapFailure(raw.result.infocode)
+                PlaceServiceGate.record(candidate, "amap:search", failure)
+                throw PlaceServiceException(failure)
+            }
+            PlaceServiceGate.clear(candidate, "amap:search")
+            (raw.root?.get("pois") as? JsonArray ?: throw PlaceServiceException(PlaceFailure.UNAVAILABLE)).mapNotNull { item ->
                 val poi = item.asObject() ?: return@mapNotNull null
                 val parts = poi.string("location")?.split(',') ?: return@mapNotNull null
                 val gcjLon = parts.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
@@ -118,12 +141,16 @@ internal object AmapApi {
                     province = poi.string("pname"),
                     latitude = wgs.latitude,
                     longitude = wgs.longitude,
+                    sourceId = poi.string("id"),
                 )
             }
         } catch (ce: CancellationException) {
             throw ce
-        } catch (_: Throwable) {
-            emptyList()
+        } catch (error: PlaceServiceException) {
+            PlaceServiceGate.record(candidate, "amap:search", error.failure, error.retryAfterMillis)
+            throw error
+        } catch (_: Exception) {
+            throw PlaceServiceException(PlaceFailure.UNAVAILABLE)
         }
     }
 
@@ -154,6 +181,9 @@ internal object AmapApi {
             info = raw.result.info,
             infocode = raw.result.infocode,
             adcode = adcode,
+            district = component?.string("district"),
+            city = component?.string("city") ?: component?.string("province"),
+            province = component?.string("province"),
         )
     }
 
@@ -163,31 +193,30 @@ internal object AmapApi {
             val builder = "https://restapi.amap.com/".toHttpUrl().newBuilder()
             path.forEach(builder::addPathSegment)
             query.forEach(builder::addQueryParameter)
-            val response = client.newCall(Request.Builder().url(builder.build()).get().build()).execute()
-            response.use {
-                if (!it.isSuccessful) {
-                    return@withContext AmapRawResult(
-                        AmapLookupResult(false, info = "高德服务返回 HTTP ${it.code}"),
-                    )
-                }
-                val root = runCatching {
-                    json.parseToJsonElement(it.body?.string().orEmpty()).jsonObject
-                }.getOrNull()
-                val status = root?.string("status")
-                val info = root?.string("info")
-                val infocode = root?.string("infocode")
-                if (status != "1") {
-                    return@withContext AmapRawResult(
-                        AmapLookupResult(false, info = info ?: "高德鉴权未通过", infocode = infocode),
-                        root,
-                    )
-                }
-                val locations = root?.string("locations")
-                AmapRawResult(
-                    AmapLookupResult(true, formattedAddress = locations, info = info, infocode = infocode),
+            val response = radarRequestBytes(client, Request.Builder().url(builder.build()).get().build(), 1_000_000)
+            if (!response.successful) {
+                if (response.code == 429) throw PlaceServiceException(PlaceFailure.QUOTA, placeRetryAfterMillis(response.retryAfter))
+                return@withContext AmapRawResult(
+                    AmapLookupResult(false, info = "高德服务返回 HTTP ${response.code}"),
+                )
+            }
+            val root = runCatching {
+                json.parseToJsonElement(response.bytes.toString(Charsets.UTF_8)).jsonObject
+            }.getOrNull()
+            val status = root?.string("status")
+            val info = root?.string("info")
+            val infocode = root?.string("infocode")
+            if (status != "1") {
+                return@withContext AmapRawResult(
+                    AmapLookupResult(false, info = info ?: "高德鉴权未通过", infocode = infocode),
                     root,
                 )
             }
+            val locations = root?.string("locations")
+            AmapRawResult(
+                AmapLookupResult(true, formattedAddress = locations, info = info, infocode = infocode),
+                root,
+            )
         }
 
     private fun coordinate(longitude: Double, latitude: Double): String =

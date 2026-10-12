@@ -1,8 +1,8 @@
 {
-  "versionCode": 20261028,
-  "versionName": "0.1.5-beta10.3-public",
-  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.3-public/ZhishengWeather-v0.1.5-beta10.3-public.apk",
-  "sha256": "A577A077D04E131C5BA373876DEED514B37984651565E208078C33B045348EBF",
-  "notes": "10.1 → 10.3 累计更新\n\n• 小组件比例、清晰度、预览与字号调节优化，长摘要可换行。\n• 编辑底栏改为轻透玻璃，选项可完整滚动；点击跳转和添加反馈更完善。\n• 定位重进、收藏固定与城市去重修复。\n• 紫外线、刷新时间及多项天气读数修正。\n• 可开关的日照天光融入主页与五款澄空组件，保留透明度和字色。\n• 横屏待机增加轻微移位保护，移除开屏动画；更新说明重新设计。",
-  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.3-public"
+  "versionCode": 20261068,
+  "versionName": "0.1.5-beta10.5-public",
+  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk",
+  "sha256": "A6858E9300CC5AFE41E59E12532D6F0E779EE7012B757963F4ECEF201B4EB28C",
+  "notes": "10.3 → 10.5 累计更新\n\n• 新增国内天气来源，支持按模块选源与来源比较。\n• 小组件内容、字号、透明护字、预览及点击操作完善。\n• 无雨时可玩云间小鸟，随机云柱、渐进难度、每10根换景与奖励，振翅震动可关闭。\n• 逐时预报、过去7天与往年同日回看完善，缺失数据如实保留。\n• 新增早晚天气与短时降水提醒，支持精确到分钟的时间滑选。\n• 免Key定位、基础搜索、国内海外搜索与首次地点选择完善。\n• 诊断隐私、天气氛围及应用图标优化。",
+  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.5-public"
 }

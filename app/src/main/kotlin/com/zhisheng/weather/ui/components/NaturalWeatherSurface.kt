@@ -54,7 +54,14 @@ internal fun NaturalWeatherSurface(
     content: @Composable BoxScope.() -> Unit,
 ) {
     if (!isPhosphorVista) {
-        Box(modifier.zhishengScreen(), content = content)
+        val now = weatherPresentationTime()
+        val minutes = weather?.utcOffsetSeconds?.let { Math.floorMod(now / 60_000L + it / 60L, 1440L).toInt() }
+            ?: java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+        val state = naturalLightState(weather, night, minutes, now)
+        Box(modifier.zhishengScreen()) {
+            ClassicWeatherField(state, level, active, parallax)
+            Box(Modifier.fillMaxSize().graphicsLayer(), content = content)
+        }
         return
     }
     val now = weatherPresentationTime()
@@ -197,6 +204,11 @@ private fun DrawScope.drawNaturalLight(frame: NaturalFrame, phase: Double, gain:
     // An off-centre pool of light, aligned with the large weather form on the right.
     ellipse(glowBrush, w * (0.81f + drift * 0.025f), depth * 0.27f, w * 0.62f, depth * 0.45f,
         gain * sunlight * if (light) 0.38f else 0.13f, p.light)
+    // Gentle local breathing in clear conditions, with the same reduced-motion clock.
+    if (s.weather == NaturalWeather.CLEAR && s.daylight > .5f) {
+        ellipse(glowBrush, w * .85f, depth * (.22f + drift * .018f), w * .22f, depth * .16f,
+            gain * sunlight * (.055f + (drift + 1f) * .015f), p.light)
+    }
     if (s.twilight > 0f) ellipse(glowBrush, w * 0.74f, depth * 0.43f, w * 0.85f, depth * 0.25f,
         gain * s.twilight * (1f - s.cloud * 0.6f) * 0.18f, Color(0xFFFFCDAE))
     val haze = s.weather in setOf(NaturalWeather.FOG, NaturalWeather.HAZE, NaturalWeather.DUST)

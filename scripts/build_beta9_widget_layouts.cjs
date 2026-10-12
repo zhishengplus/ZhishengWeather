@@ -58,7 +58,7 @@ function layout(style,kind,compact=false) {
  if(kind==='week'&&!classic) {
    const weekWeather=col('widget_weather_hit','0dp','match_parent',{layout_weight:'1',gravity:'center_vertical|end'},
      row(null,'wrap_content','wrap_content',{},image('widget_icon','54dp','54dp')+col(null,'wrap_content','wrap_content',{layout_marginStart:'6dp',gravity:'end'},text('widget_temp',28)+text('widget_city',11,{layout_marginTop:'2dp',fontFamily:'sans-serif'})))+text('widget_footer',9,{layout_marginTop:'4dp',fontFamily:'sans-serif',textStyle:'normal'}));
-   const weekHero=row(null,'match_parent','86dp',{},
+   const weekHero=row('widget_main_hero','match_parent','86dp',{},
      col('widget_clock_hit','0dp','match_parent',{layout_weight:'1.25',gravity:'center_vertical'},clock(42)+date()+text('widget_lunar',10,{layout_marginTop:'1dp',fontFamily:'sans-serif'}))+weekWeather);
    content=col(null,'match_parent','match_parent',{},weekHero+forecast());
  }
@@ -67,7 +67,7 @@ function layout(style,kind,compact=false) {
    const sceneHero=row('widget_scene_hero','match_parent',compact?'64dp':'82dp',{},
      col('widget_clock_hit','0dp','match_parent',{layout_weight:'1.05',gravity:'center_vertical'},clock(compact?32:39)+date()+text('widget_lunar',10,{layout_marginTop:'2dp',fontFamily:'sans-serif'}))+
      col('widget_weather_hit','0dp','match_parent',{layout_weight:'1',gravity:'center_vertical|end'},
-       row(null,'wrap_content',compact?'37dp':'48dp',{gravity:'center_vertical|end'},image('widget_icon',compact?'36dp':'46dp',compact?'36dp':'46dp')+text('widget_temp',compact?28:34,{layout_marginStart:'4dp'}))+
+       row('widget_temperature_row','wrap_content',compact?'37dp':'48dp',{gravity:'center_vertical|end'},image('widget_icon',compact?'36dp':'46dp',compact?'36dp':'46dp')+text('widget_temp',compact?28:34,{layout_marginStart:'4dp'}))+
        row(null,'wrap_content','18dp',{gravity:'end'},text('widget_condition',11,{fontFamily:'sans-serif'})+text('widget_range',10,{layout_marginStart:'7dp',fontFamily:'sans-serif'}))));
    const sceneBriefing=row('widget_scene_briefing','match_parent',compact?'36dp':'40dp',{gravity:'center_vertical',paddingStart:'5dp',paddingEnd:'7dp'},
      view('TextView',null,'2dp',compact?'17dp':'23dp',{background:classic?'#A5C9B6':'#527F98'})+
@@ -84,8 +84,11 @@ function layout(style,kind,compact=false) {
      linear('widget_hourly_forecast','match_parent','70dp',{orientation:'horizontal',gravity:'center_vertical'},'');
    const sceneDays=gap(compact?'3dp':'7dp')+title('widget_scene_day_title','未来五天 · 日历')+
      linear('widget_forecast','match_parent',compact?'54dp':'66dp',{orientation:'horizontal',gravity:'center_vertical'},'');
+   const scenePrecip=col('widget_precip_section','match_parent','40dp',{visibility:'gone'},
+     text('widget_precip_title',10,{layout_width:'match_parent',layout_height:'14dp'})+
+     image('widget_precip_chart','match_parent','24dp',{scaleType:'fitXY'}));
    content=col(null,'match_parent','match_parent',{},city()+gap('3dp')+sceneHero+gap('4dp')+sceneBriefing+
-     gap(compact?'3dp':'7dp')+sceneMetrics+sceneHours+sceneDays);
+     gap(compact?'3dp':'7dp')+sceneMetrics+scenePrecip+sceneHours+sceneDays);
  }
  const shape=classic?'widget_classic_surface':'widget_vista_surface';
  const hidden=text('widget_alarm_hit',1,{visibility:'gone'})+text('widget_alarm',1,{visibility:'gone'})+text('widget_alarm_label',1,{visibility:'gone'})+
@@ -123,7 +126,7 @@ for (const style of ['vista','classic']) for (const kind of ['pulse','now','band
  }
  const [w,h,c,r]=kind==='pulse'?[250,60,4,1]:kind==='now'?[110,110,2,2]:kind==='scene'?[250,280,4,4]:[250,kind==='week'?140:120,4,2];
  fs.writeFileSync(path.join(base,'xml','widget_'+style+'_'+kind+'.xml'),'<?xml version="1.0" encoding="utf-8"?>\n<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" '+attrs({
- minWidth:w+'dp',minHeight:h+'dp',minResizeWidth:w+'dp',minResizeHeight:h+'dp',targetCellWidth:c,targetCellHeight:r,updatePeriodMillis:'0',resizeMode:'horizontal|vertical',widgetCategory:'home_screen',widgetFeatures:'reconfigurable',initialLayout:'@layout/widget_'+style+'_'+kind,previewLayout:'@layout/widget_'+style+'_'+kind,configure:'com.zhisheng.weather.widget.WidgetConfigActivity'
+ minWidth:w+'dp',minHeight:h+'dp',minResizeWidth:(kind==='scene'?180:w)+'dp',minResizeHeight:(kind==='scene'?180:h)+'dp',targetCellWidth:c,targetCellHeight:r,updatePeriodMillis:'0',resizeMode:'horizontal|vertical',widgetCategory:'home_screen',widgetFeatures:'reconfigurable',initialLayout:'@layout/widget_'+style+'_'+kind,previewLayout:'@layout/widget_'+style+'_'+kind,configure:'com.zhisheng.weather.widget.WidgetConfigActivity'
  })+' />\n');
 }
 const hour=col('widget_forecast_cell','0dp','match_parent',{layout_weight:'1',gravity:'center'},text('widget_cell_label',10,{gravity:'center'})+image('widget_cell_icon','30dp','30dp',{layout_marginTop:'1dp'})+text('widget_cell_temp',11,{layout_marginTop:'1dp'})+text('widget_cell_extra',9,{layout_marginTop:'1dp'}));
