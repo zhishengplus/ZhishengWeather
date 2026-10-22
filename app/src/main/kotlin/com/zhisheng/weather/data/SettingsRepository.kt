@@ -357,6 +357,15 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
 
 // 设置仓储
 object SettingsRepository {
+    private val KEY_SOURCE_PRIORITY = stringPreferencesKey("weather_source_priority_v1")
+    val sourcePriority: Flow<List<SourcePref>> by lazy {
+        store.data.map { prefs -> prefs[KEY_SOURCE_PRIORITY].orEmpty().split(',')
+            .mapNotNull { key -> SourcePref.entries.firstOrNull { it.key == key } }.distinct() }.distinctUntilChanged()
+    }
+    suspend fun setSourcePriority(sources: List<SourcePref>) = editWeatherContext { prefs ->
+        prefs[KEY_SOURCE_PRIORITY] = sources.distinct().filter { it != SourcePref.AUTO && it != SourcePref.ZHISHENG }
+            .joinToString(",") { it.key }
+    }
     private val KEY_MODULE_SOURCES = stringPreferencesKey("weather_module_sources_v1")
     val moduleSources: Flow<ModuleSourcePolicy> by lazy {
         store.data.map { ModuleSourcePolicy.decode(it[KEY_MODULE_SOURCES]) }.distinctUntilChanged()
@@ -364,9 +373,12 @@ object SettingsRepository {
     suspend fun setModuleSource(module: WeatherModule, source: SourcePref?) = editWeatherContext { prefs ->
         prefs[KEY_MODULE_SOURCES] = ModuleSourcePolicy.decode(prefs[KEY_MODULE_SOURCES]).with(module, source).encode()
     }
-    private val KEY_USAGE_STATISTICS = booleanPreferencesKey("device_version_statistics")
-    val usageStatistics: Flow<Boolean> by lazy { store.data.map { it[KEY_USAGE_STATISTICS] ?: true }.distinctUntilChanged() }
+    private val KEY_USAGE_STATISTICS = PrivacyDefaults.statistics
+    val usageStatistics: Flow<Boolean> by lazy { store.data.map(PrivacyDefaults::statisticsEnabled).distinctUntilChanged() }
     suspend fun setUsageStatistics(enabled: Boolean) = store.edit { it[KEY_USAGE_STATISTICS] = enabled }
+    private val KEY_SERVICE_DIAGNOSTICS = PrivacyDefaults.diagnostics
+    internal val serviceDiagnostics: Flow<Boolean> by lazy { store.data.map(PrivacyDefaults::diagnosticsEnabled).distinctUntilChanged() }
+    internal suspend fun setServiceDiagnostics(enabled: Boolean) = store.edit { it[KEY_SERVICE_DIAGNOSTICS] = enabled }
 
     private lateinit var store: DataStore<Preferences>
 

@@ -123,18 +123,18 @@ object Nowcast {
         val seriesNow = seriesWetAt(sorted, nowMillis, wet, intervalMinutes)
         val rainingNow = currentPrecip || seriesNow
         if (rainingNow) {
-            val end = if (seriesNow) minutesUntilDry(sorted, nowMillis, wet) else null
+            val end = if (seriesNow) minutesUntilDry(sorted, nowMillis, wet, intervalMinutes) else null
             return RainTiming(true, 0, end)
         }
         val start = minutesUntilWet(sorted, nowMillis, wet, intervalMinutes)
         return RainTiming(false, start, null)
     }
 
-    fun rainTimingLabel(timing: RainTiming): String? = when {
+    fun rainTimingLabel(timing: RainTiming, intervalMinutes: Int = 1): String? = when {
         timing.rainingNow && timing.minutesUntilEnd != null ->
-            "${timing.minutesUntilEnd} 分钟后雨会停"
+            "${if (intervalMinutes > 1) "预计约" else "预计"} ${timing.minutesUntilEnd} 分钟后雨会停"
         timing.rainingNow -> "正在下雨"
-        timing.minutesUntilStart != null -> "${timing.minutesUntilStart} 分钟后开始下雨"
+        timing.minutesUntilStart != null -> "${if (intervalMinutes > 1) "预计约" else "预计"} ${timing.minutesUntilStart} 分钟后开始下雨"
         else -> null
     }
 
@@ -158,20 +158,29 @@ object Nowcast {
         if (timing.rainingNow) {
             val snowing = data.current?.condition in setOf(WeatherCondition.SNOW, WeatherCondition.SLEET)
             val text = when {
-                timing.minutesUntilEnd != null && snowing -> "${timing.minutesUntilEnd} 分钟后雪会停"
-                timing.minutesUntilEnd != null -> rainTimingLabel(timing)!!
+                !precipNow -> {
+                    val phase = samplesAt(data.rainMinutes, nowMillis, data.rainMeta?.intervalMinutes ?: 1)
+                        .maxByOrNull { it.precip }?.phase
+                    val kind = if (phase == PrecipitationPhase.SNOW) "降雪" else "降水"
+                    "短时预报提示当前有$kind" + (timing.minutesUntilEnd?.let { "，${if ((data.rainMeta?.intervalMinutes ?: 1) > 1) "预计约" else "预计"} $it 分钟后结束" } ?: "")
+                }
+                timing.minutesUntilEnd != null && snowing -> "预计 ${timing.minutesUntilEnd} 分钟后雪会停"
+                timing.minutesUntilEnd != null -> rainTimingLabel(timing, data.rainMeta?.intervalMinutes ?: 1)!!
                 snowing -> "正在下雪"
                 api != null && !isDryNowcast(api) -> api
-                else -> rainTimingLabel(timing)!!
+                else -> rainTimingLabel(timing, data.rainMeta?.intervalMinutes ?: 1)!!
             }
             return HeroBriefing(text, BriefingKind.PRECIPITATION, BriefingEmote.RAIN)
         }
         if (timing.minutesUntilStart != null) {
             return HeroBriefing(
-                text = rainTimingLabel(timing)!!,
+                text = rainTimingLabel(timing, data.rainMeta?.intervalMinutes ?: 1)!!,
                 kind = BriefingKind.PRECIPITATION,
                 emote = BriefingEmote.RAIN,
             )
+        }
+        if (data.rainMinutes.any { it.timeMillis > nowMillis && it.precip >= WET_THRESHOLD }) {
+            return HeroBriefing("短时预报时段内有降水，开始时间暂不确定", BriefingKind.PRECIPITATION, BriefingEmote.RAIN)
         }
         if (api != null && looksLikeIncomingRain(api)) {
             return HeroBriefing(api, BriefingKind.PRECIPITATION, BriefingEmote.RAIN)
@@ -295,6 +304,13 @@ object Nowcast {
         val cutoff = nowMillis + if (intervalMinutes > 1) 0L else NOW_WINDOW_MS
         val firstWet = minutes.firstOrNull { it.timeMillis > cutoff && it.precip >= wet }
             ?: return null
+        val step = intervalMinutes.coerceAtLeast(1).toLong() * MINUTE_MS
+        var previous = minutes.lastOrNull { it.timeMillis <= nowMillis && nowMillis - it.timeMillis < step }
+            ?: return null
+        for (point in minutes.filter { it.timeMillis > previous.timeMillis && it.timeMillis <= firstWet.timeMillis }) {
+            if (point.timeMillis - previous.timeMillis > step) return null
+            previous = point
+        }
         val mins = ((firstWet.timeMillis - nowMillis + 30_000L) / MINUTE_MS).toInt().coerceAtLeast(1)
         return mins
     }
@@ -303,24 +319,24 @@ object Nowcast {
         minutes: List<MinutePrecip>,
         nowMillis: Long,
         wet: Float,
+        intervalMinutes: Int,
     ): Int? {
+        val step = intervalMinutes.coerceAtLeast(1).toLong() * MINUTE_MS
         val after = minutes.filter { it.timeMillis >= nowMillis }
         if (after.isEmpty()) return null
+        var previous = minutes.lastOrNull { it.timeMillis < nowMillis }
         var dryStart: MinutePrecip? = null
         for (p in after) {
+            // An unknown interval cannot establish the exact transition to dry weather.
+            if (previous != null && p.timeMillis - previous.timeMillis > step) return null
             if (p.precip < wet) {
                 if (dryStart == null) dryStart = p
-                if (p.timeMillis - dryStart.timeMillis >= STOP_DRY_CONFIRM_MS) {
-                    return ((dryStart!!.timeMillis - nowMillis + 30_000L) / MINUTE_MS).toInt()
-                        .coerceAtLeast(1)
+                val covered = p.timeMillis + step - dryStart.timeMillis
+                if (covered >= STOP_DRY_CONFIRM_MS) {
+                    return ((dryStart.timeMillis - nowMillis + 30_000L) / MINUTE_MS).toInt().coerceAtLeast(1)
                 }
-            } else {
-                dryStart = null
-            }
-        }
-        if (dryStart != null && after.last().precip < wet) {
-            return ((dryStart!!.timeMillis - nowMillis + 30_000L) / MINUTE_MS).toInt()
-                .coerceAtLeast(1)
+            } else dryStart = null
+            previous = p
         }
         return null
     }
@@ -542,6 +558,10 @@ object Nowcast {
         }
 
         val aqi = data.aqi?.value
+        if (data.aqi?.estimated == true && aqi != null && aqi >= 101) {
+            return HeroBriefing("空气质量模型估算提示污染，出门前可再核对监测数据。",
+                BriefingKind.AIR_QUALITY, BriefingEmote.CLOUDY)
+        }
         when {
             aqi != null && aqi >= 201 -> return HeroBriefing(
                 pickLine(listOf(

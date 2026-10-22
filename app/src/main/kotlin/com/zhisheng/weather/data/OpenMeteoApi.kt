@@ -209,10 +209,8 @@ object OpenMeteoApi {
         fun collect(root: JsonObject, names: List<String>, tier1Vars: Boolean) {
             val offset = root.primInt("utc_offset_seconds") ?: 0
             val h = root["hourly"] as? JsonObject ?: return
-            val epochs = h.arrOf("time").strings().mapNotNull { t ->
-                t?.let { localHourToEpoch(it, offset) }
-            }
-            if (epochs.isEmpty()) return
+            val epochs = h.arrOf("time").epochs(offset)
+            if (epochs.none { it > 0L }) return
             for (name in names) {
                 fun col(base: String) = h.arrOf("${base}_$name").doubles()
                 val temp = col("temperature_2m")
@@ -253,11 +251,9 @@ object OpenMeteoApi {
             timeZoneOffsetSeconds = offset,
             latitude = root.primDouble("latitude"),
             longitude = root.primDouble("longitude"),
-            hourlyTimeMillis = hourly?.arrOf("time").strings().mapNotNull { t ->
-                t?.let { localHourToEpoch(it, offset) }
-            },
+            hourlyTimeMillis = hourly?.arrOf("time").epochs(offset),
             uvIndex = hourly?.arrOf("uv_index").doubles(),
-            dailyTime = daily?.arrOf("time").strings().mapNotNull { it },
+            dailyTime = daily?.arrOf("time").strings().map { it.orEmpty() },
             dailyHigh = daily?.arrOf("temperature_2m_max").doubles(),
             dailyLow = daily?.arrOf("temperature_2m_min").doubles(),
             dailyWeatherCode = daily?.arrOf("weather_code").ints(),
@@ -271,9 +267,7 @@ object OpenMeteoApi {
             dailyUvMax = daily?.arrOf("uv_index_max").doubles(),
             dailyHumidityMean = daily?.arrOf("relative_humidity_2m_mean").doubles(),
             dailyCloudMean = daily?.arrOf("cloud_cover_mean").doubles(),
-            minutely15TimeMillis = minutely?.arrOf("time").strings().mapNotNull { t ->
-                t?.let { localHourToEpoch(it, offset) }
-            },
+            minutely15TimeMillis = minutely?.arrOf("time").epochs(offset),
             minutely15PrecipMm = minutely?.arrOf("precipitation").doubles(),
         )
     }
@@ -290,9 +284,7 @@ object OpenMeteoApi {
             currentNo2 = current?.primDouble("nitrogen_dioxide"),
             currentSo2 = current?.primDouble("sulphur_dioxide"),
             currentO3 = current?.primDouble("ozone"),
-            hourlyTimeMillis = hourly?.arrOf("time").strings().mapNotNull { t ->
-                t?.let { localHourToEpoch(it, offset) }
-            },
+            hourlyTimeMillis = hourly?.arrOf("time").epochs(offset),
             hourlyPm25 = hourly?.arrOf("pm2_5").doubles(),
             hourlyPm10 = hourly?.arrOf("pm10").doubles(),
             hourlyCo = hourly?.arrOf("carbon_monoxide").doubles().map { it?.div(1000.0) },
@@ -309,6 +301,12 @@ object OpenMeteoApi {
         this?.map { (it as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toInt() } ?: emptyList()
     private fun JsonArray?.strings(): List<String?> =
         this?.map { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+    // Time and measurement columns share the provider's index. Deleting one bad time
+    // would silently assign that row's concentration/temperature/rain to the next valid time.
+    // A zero sentinel retains the gap; all conversions discard non-positive timestamps.
+    private fun JsonArray?.epochs(offsetSeconds: Int): List<Long> = strings().map { stamp ->
+        stamp?.let { localHourToEpoch(it, offsetSeconds) }?.takeIf { it > 0L } ?: 0L
+    }
     private fun JsonObject.primString(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.primDouble(key: String): Double? = primString(key)?.toDoubleOrNull()
     private fun JsonObject.primInt(key: String): Int? = primString(key)?.toDoubleOrNull()?.toInt()
@@ -387,7 +385,7 @@ data class OpenMeteoHourly(
 
 // —— 枳生天气源数据类型 ——
 
-/** 单个数值模式的中国区逐时序列；各列与 timeMillis 等长，缺列为空表（消费端按 getOrNull 取）。 */
+/** Columns retain their original row indices; timeMillis=0 marks an invalid time and must be skipped. */
 internal data class OmModelSeries(
     val model: String,
     val timeMillis: List<Long>,
@@ -461,6 +459,7 @@ internal data class OmAirQuality(
 /** 单个 OM 模型 → 一路融合输入（逐时 + 由"当前小时桶"合成的实况票）。 */
 internal fun omModelToWeatherData(series: OmModelSeries, nowMillis: Long): WeatherData {
     val hourly = series.timeMillis.mapIndexedNotNull { i, t ->
+        if (t <= 0L) return@mapIndexedNotNull null
         HourlyWeather(
             timeMillis = t,
             temperature = series.temperature.getOrNull(i),

@@ -10,6 +10,8 @@ import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 import kotlin.coroutines.resume
 
 internal val domesticWeatherClient = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS)
@@ -17,28 +19,48 @@ internal val domesticWeatherClient = OkHttpClient.Builder().connectTimeout(6, Ti
     .followRedirects(false).followSslRedirects(false).build()
 
 /** Cancellation closes the socket; HTTP errors and oversized payloads never become weather. No credentials are logged. */
-internal suspend fun weatherAwaitText(client: OkHttpClient, request: Request): String? = suspendCancellableCoroutine { continuation ->
+internal suspend fun weatherAwaitText(client: OkHttpClient, request: Request): String? =
+    weatherAwaitTextWithStatus(client, request).text
+
+internal enum class DomesticWeatherTransportFailure { TLS_IDENTITY, TLS_CERTIFICATE, NETWORK }
+internal data class DomesticWeatherHttpResponse(
+    val text: String?, val status: Int?, val failure: DomesticWeatherTransportFailure? = null,
+)
+
+/**
+ * Like [weatherAwaitText] but preserves the HTTP status code so callers can
+ * distinguish an expired AppCode (401), a wrong token (403), quota exhaustion
+ * (429) or a gateway timeout from a plain network failure.
+ */
+internal suspend fun weatherAwaitTextWithStatus(client: OkHttpClient, request: Request): DomesticWeatherHttpResponse = suspendCancellableCoroutine { continuation ->
     val call = client.newCall(request)
     continuation.invokeOnCancellation { call.cancel() }
     call.enqueue(object : Callback {
-        override fun onFailure(call: Call, e: IOException) { if (continuation.isActive) continuation.resume(null) }
+        override fun onFailure(call: Call, e: IOException) {
+            val failure = when (e) {
+                is SSLPeerUnverifiedException -> DomesticWeatherTransportFailure.TLS_IDENTITY
+                is SSLHandshakeException -> DomesticWeatherTransportFailure.TLS_CERTIFICATE
+                else -> DomesticWeatherTransportFailure.NETWORK
+            }
+            if (continuation.isActive) continuation.resume(DomesticWeatherHttpResponse(null, null, failure))
+        }
         override fun onResponse(call: Call, response: Response) {
-            val text = response.use { res ->
-                if (!res.isSuccessful) null else runCatching {
+            response.use { res ->
+                val text = if (!res.isSuccessful) null else runCatching {
                     val body = res.body ?: return@runCatching null
                     if (body.contentLength() > 2_000_000L) return@runCatching null
                     val source = body.source()
                     source.request(2_000_001L)
                     if (source.buffer.size > 2_000_000L) null else source.readUtf8()
                 }.getOrNull()
+                if (continuation.isActive) continuation.resume(DomesticWeatherHttpResponse(text, res.code))
             }
-            if (continuation.isActive) continuation.resume(text)
         }
     })
 }
 
 private val domesticJson = Json { ignoreUnknownKeys = true }
-internal suspend fun weatherAwaitJson(request: Request): JsonObject? = weatherAwaitText(domesticWeatherClient, request)
+internal suspend fun weatherAwaitJson(request: Request, client: OkHttpClient = domesticWeatherClient): JsonObject? = weatherAwaitText(client, request)
     ?.let { runCatching { domesticJson.parseToJsonElement(it) as? JsonObject }.getOrNull() }
 
 /** Free city website channels and explicit personal subscriptions, with no shared account or backend. */
@@ -72,11 +94,32 @@ internal object DomesticWeatherSource {
         return moji(city, SecretStore.currentMoji())
     }
 
-    internal suspend fun moji(city: City, creds: MojiRuntimeCreds, verifyOnly: Boolean = false): WeatherData {
+    internal suspend fun moji(city: City, creds: MojiRuntimeCreds, verifyOnly: Boolean = false,
+        client: OkHttpClient = domesticWeatherClient): WeatherData {
         val request = mojiRequest(city, creds) ?: return WeatherData(error = "墨迹配置不完整，请填写所订阅坐标产品的 HTTPS 地址与凭据")
-        val now = weatherAwaitJson(request)
-        if (now == null || now.domesticText("code") != "0") return WeatherData(error = "墨迹请求失败，请核对 AppCode、对应 Token、订阅额度与 HTTPS 地址")
-        val daily = if (verifyOnly || creds.dailyEndpoint.isBlank()) null else mojiRequest(city, creds, true)?.let { weatherAwaitJson(it) }
+        val nowResponse = weatherAwaitTextWithStatus(client, request)
+        val now = nowResponse.text?.let { runCatching { domesticJson.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+        if (now == null) {
+            if (nowResponse.failure in setOf(DomesticWeatherTransportFailure.TLS_IDENTITY, DomesticWeatherTransportFailure.TLS_CERTIFICATE)) {
+                return WeatherData(error = "墨迹 HTTPS 证书校验未通过：请核对所购产品的 HTTPS 域名，不能只把 http 改成 https")
+            }
+            val status = nowResponse.status
+            return WeatherData(error = when (status) {
+                401 -> "墨迹认证失败（HTTP 401）：AppCode 无效或已过期，请在阿里云控制台核对"
+                403 -> "墨迹权限被拒（HTTP 403）：Token 与接口不匹配，或该接口未订阅"
+                404 -> "墨迹接口不存在（HTTP 404）：请核对 HTTPS 地址路径是否与所购产品一致"
+                429 -> "墨迹额度已用完（HTTP 429）：请检查阿里云市场订阅余量"
+                502, 503, 504 -> "墨迹网关暂不可用（HTTP $status）：请稍后重试"
+                null -> "墨迹请求超时或无响应：请检查网络连接"
+                200 -> "墨迹返回内容无法解析（HTTP 200）：请核对接口地址或稍后重试"
+                else -> "墨迹请求失败（HTTP $status）：请核对 AppCode、Token 与 HTTPS 地址"
+            })
+        }
+        if (now.domesticText("code") != "0") {
+            val mojiMsg = now.domesticText("msg") ?: now.domesticText("message")
+            return WeatherData(error = "墨迹返回错误：" + (mojiMsg ?: ("code=" + now.domesticText("code"))))
+        }
+        val daily = if (verifyOnly || creds.dailyEndpoint.isBlank()) null else mojiRequest(city, creds, true)?.let { weatherAwaitJson(it, client) }
         return parseMojiWeather(now, daily, city, System.currentTimeMillis())
     }
 

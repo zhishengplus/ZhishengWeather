@@ -8,10 +8,11 @@ import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
 import android.os.Build
+import android.os.CancellationSignal
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import com.zhisheng.weather.model.City
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -36,7 +37,7 @@ object LocationSource {
     }
 
     sealed interface Result {
-        data class Ok(val city: City, val streetStatus: StreetStatus, val accuracyMeters: Float?, val fixAgeSeconds: Long, val configurationRevision: Long = 0) : Result
+        data class Ok(val city: City, val streetStatus: StreetStatus, val accuracyMeters: Float?, val fixAgeSeconds: Long, val configurationRevision: Long = 0, val usingRecentApproximateFix: Boolean = false) : Result
         data class Failed(val message: String) : Result
     }
 
@@ -70,30 +71,36 @@ object LocationSource {
 
     // Native coordinates become usable before the bounded address lookup starts.
     suspend fun locate(context: Context, onCoordinatesReady: suspend (Result.Ok) -> Boolean = { true }): Result {
+        if (!hasPermission(context)) { ServiceDiagnostics.noteLocation("permission_denied"); return Result.Failed("未授予位置权限") }
+        if (!locationEnabledOnDevice(context)) { ServiceDiagnostics.noteLocation("provider_disabled"); return Result.Failed("系统定位服务未开启") }
+        // First-run consent/precision writes can overlap city initialization.
+        // Wait for them instead of making the first explicit tap fail immediately.
+        val startVersion = reminderDeliveryGate.awaitContextVersion()
         if (!hasPermission(context)) return Result.Failed("未授予位置权限")
         if (!locationEnabledOnDevice(context)) return Result.Failed("系统定位服务未开启")
         val placeRevision = PlaceConfigurationRevision.current()
-        val startVersion = reminderDeliveryGate.contextVersion() ?: return Result.Failed("定位设置正在变化，请重试")
         val preciseRequested = SettingsRepository.preciseLocationEnabled.first()
         val preciseGranted = preciseRequested && hasPrecisePermission(context)
-        val loc = withTimeoutOrNull(if (preciseGranted) 21_000L else 13_000L) {
-            currentLocation(context, preferGps = preciseGranted)
-        } ?: return Result.Failed("定位超时，请到空旷处重试或手动搜索城市")
+        val loc = currentLocation(context, preferGps = preciseGranted)
+            ?: run { ServiceDiagnostics.noteLocation("timeout"); return Result.Failed("暂未取得位置，请检查系统定位及网络后重试，也可手动选择城市") }
+        ServiceDiagnostics.noteLocation("success")
         if (!hasPermission(context)) return Result.Failed("位置权限已关闭，已保留原地点")
         if (reminderDeliveryGate.contextVersion() != startVersion ||
             SettingsRepository.preciseLocationEnabled.first() != preciseRequested ||
             (preciseGranted && !hasPrecisePermission(context))) return Result.Failed("定位设置或权限已变化，请重新定位")
         val granted = preciseGranted && hasPrecisePermission(context)
-        val canStreet = granted && LocationFixPolicy.canResolveStreet(loc.fix())
-        val measured = measuredLocationCity(loc.fix(), granted)
+        val currentFix = LocationFixPolicy.isCurrent(loc, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())
+        val canStreet = granted && currentFix && LocationFixPolicy.canResolveStreet(loc)
+        val measured = measuredLocationCity(loc, granted)
         fun result(city: City, resolved: Boolean) = Result.Ok(city, when {
             !preciseRequested -> StreetStatus.NOT_REQUESTED
             !granted -> StreetStatus.APPROXIMATE_PERMISSION
             !canStreet -> StreetStatus.INSUFFICIENT_ACCURACY
             resolved -> StreetStatus.RESOLVED
             else -> StreetStatus.UNAVAILABLE
-        }, loc.accuracy.takeIf { loc.hasAccuracy() },
-            (LocationFixPolicy.ageMillis(loc.fix(), System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos()) ?: 0) / 1_000, configurationRevision = placeRevision)
+        }, loc.accuracyMeters,
+            (LocationFixPolicy.ageMillis(loc, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos()) ?: 0) / 1_000,
+            configurationRevision = placeRevision, usingRecentApproximateFix = !currentFix && !granted)
         val initial = result(measured, false)
         if (!onCoordinatesReady(initial)) return initial
         val credentials = currentPlaceCredentials()
@@ -129,12 +136,15 @@ object LocationSource {
             }.orEmpty()
         }
         val providers = mutableListOf<suspend () -> List<City>>()
-        if (streets && credentials.amap.isNotBlank()) providers += {
+        if (credentials.amap.isNotBlank() && (streets || credentials.sharedPlace.enabled)) providers += {
             cached("amap:" + credentials.amap) {
                 val r = AmapApi.reverseStreetFromWgs84(credentials.amap, lat, lon, null)
                 if (!r.ok) throw PlaceServiceException(r.failure ?: amapFailure(r.infocode))
                 preciseAddressCity(r.district, r.city, r.province, r.street, null, null, lat, lon, source = "amap")
             }
+        }
+        if (credentials.sharedPlace.enabled) providers += {
+            cached("shared") { SharedPlaceApi.reverse(context, measured, streets, credentials.sharedPlace) }
         }
         providers += {
             cached("system") {
@@ -159,10 +169,11 @@ object LocationSource {
     }
 
     @Suppress("MissingPermission")
-    private suspend fun currentLocation(context: Context, preferGps: Boolean): Location? {
+    private suspend fun currentLocation(context: Context, preferGps: Boolean): LocationFix? {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
 
-        // 手动/自动复核都优先请求新位置；缓存只在新位置暂时不可得时兜底，避免换城市后仍停在旧定位。
+        // Use single-fix requests: continuous coarse updates can be throttled for
+        // ten minutes, which is incompatible with a short startup timeout.
         val builtInPriority = if (preferGps) {
             listOf(FUSED_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
         } else {
@@ -175,56 +186,52 @@ object LocationSource {
         val providers = (builtInPriority + vendorProviders)
             .distinct()
             .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
-        val cachedLocations = providers.mapNotNull { p -> runCatching { lm.getLastKnownLocation(p) }.getOrNull() }
-        val cachedFix = LocationFixPolicy.cachedFix(cachedLocations.map { it.fix() }, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())
-        val cached = cachedLocations.firstOrNull { it.fix() == cachedFix }
-        if (providers.isEmpty()) return null
-
-        // 单次定位请求（回调在主线程 Looper 上注册）
-        var bestReceived: Location? = null
-        val fresh = withTimeoutOrNull(if (preferGps) 20_000L else 12_000L) {
-            suspendCancellableCoroutine { cont ->
-                val listener = object : android.location.LocationListener {
-                    private var done = false
+        val cached = (providers + LocationManager.PASSIVE_PROVIDER).distinct().mapNotNull { provider ->
+            runCatching { lm.getLastKnownLocation(provider)?.fix() }.getOrNull()
+        }
+        val executor = ContextCompat.getMainExecutor(context)
+        val approximatePermission = !hasPrecisePermission(context)
+        // Some OEM fused providers return null without waking their GNSS engine.
+        // A second, bounded active request is cancelled with the single-fix race.
+        val activeGps = if (!approximatePermission && LocationManager.GPS_PROVIDER in providers)
+            listOf(LocationFixRequest { onResult ->
+                val listener = object : androidx.core.location.LocationListenerCompat {
                     override fun onLocationChanged(location: Location) {
-                        if (done) return
-                        if (!LocationFixPolicy.acceptsCallback(location.fix(), System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())) return
-                        val previous = bestReceived
-                        if (previous == null || !previous.hasAccuracy() ||
-                            (location.hasAccuracy() && location.accuracy < previous.accuracy)
-                        ) {
-                            bestReceived = location
-                        }
-                        // Fine mode waits for a measured <=100m fix; poorer fresh fixes remain a fallback.
-                        if (preferGps && !LocationFixPolicy.canResolveStreet(location.fix())) return
-                        done = true
-                        runCatching { lm.removeUpdates(this) }
-                        if (cont.isActive) cont.resume(location)
+                        val value = location.fix()
+                        if (LocationFixPolicy.acceptsCallback(value, System.currentTimeMillis(),
+                                android.os.SystemClock.elapsedRealtimeNanos())) onResult(value)
                     }
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) = Unit
-                    override fun onProviderEnabled(provider: String) = Unit
-                    override fun onProviderDisabled(provider: String) = Unit
                 }
-                val requested = providers.count { provider ->
-                    runCatching {
-                        lm.requestLocationUpdates(
-                            provider, 0L, 0f, listener,
-                            android.os.Looper.getMainLooper(),
-                        )
-                    }.isSuccess
+                val request = androidx.core.location.LocationRequestCompat.Builder(1_000L)
+                    .setQuality(androidx.core.location.LocationRequestCompat.QUALITY_HIGH_ACCURACY)
+                    .setDurationMillis(25_000L).build()
+                try { LocationManagerCompat.requestLocationUpdates(lm, LocationManager.GPS_PROVIDER, request, executor, listener) }
+                catch (error: Exception) { lm.removeUpdates(listener); throw error }
+                ({ lm.removeUpdates(listener) })
+            }) else emptyList()
+        android.util.Log.i("WeatherLocation", "request approximate=$approximatePermission providers=${providers.joinToString(",")}")
+        val fix = acquireLocationFix(
+            requests = providers.map { provider -> LocationFixRequest { onResult ->
+                val cancellation = CancellationSignal()
+                try {
+                    LocationManagerCompat.getCurrentLocation(lm, provider, cancellation, executor) {
+                        onResult(it?.fix())
+                    }
+                } catch (error: Exception) {
+                    cancellation.cancel()
+                    throw error
                 }
-                if (requested == 0) {
-                    if (cont.isActive) cont.resume(null)
-                    return@suspendCancellableCoroutine
-                }
-                cont.invokeOnCancellation { runCatching { lm.removeUpdates(listener) } }
-            }
-        }
-        return listOfNotNull(fresh, bestReceived, cached).firstOrNull {
-            LocationFixPolicy.acceptsCallback(it.fix(), System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())
-        }
+                ({ cancellation.cancel() })
+            } } + activeGps,
+            cached = cached,
+            approximate = approximatePermission,
+            preferStreet = preferGps,
+            nowMillis = System::currentTimeMillis,
+            elapsedNanos = android.os.SystemClock::elapsedRealtimeNanos,
+        )
+        android.util.Log.i("WeatherLocation", if (fix == null) "no usable fix" else
+            "fix provider=${fix.provider} ageMs=${LocationFixPolicy.ageMillis(fix, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())} approximate=$approximatePermission")
+        return fix
     }
 
     private fun Location.fix() = LocationFix(latitude, longitude, time, elapsedRealtimeNanos, accuracy.takeIf { hasAccuracy() }, provider = provider)

@@ -2,6 +2,8 @@ package com.zhisheng.weather.ui.components
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.unit.dp
 import kotlin.math.PI
@@ -46,6 +48,19 @@ internal fun DrawScope.drawRainStreak(head: Offset, velocity: Offset, depth: Flo
             head - smear * (1f - part / 4f), head - smear * (1f - (part + 1) / 4f),
             width, StrokeCap.Butt)
     }
+}
+
+/** A tiny refracting body with a directional sky-coloured highlight. */
+internal fun DrawScope.drawNaturalWaterBead(center: Offset, radius: Float,
+    palette: NaturalLightPalette, alpha: Float) {
+    val opacity = alpha.coerceIn(0f, 1f)
+    if (opacity < .002f) return
+    val water = lerp(palette.particle, palette.light, .24f)
+    val highlight = lerp(palette.light, Color.White, .62f)
+    drawCircle(palette.base.copy(alpha = opacity * .32f), radius, center + Offset(radius * .18f, radius * .24f))
+    drawCircle(water.copy(alpha = opacity * .72f), radius, center)
+    drawCircle(highlight.copy(alpha = opacity), radius * .36f,
+        center + Offset(-radius * .25f, -radius * .30f))
 }
 
 /** Distant fine rain and sparse foreground streaks share a consistent wind vector. */
@@ -109,5 +124,6 @@ private fun DrawScope.drawNaturalRunoff(state: NaturalLightState, palette: Natur
         drawLine(ink.copy(alpha = .40f * mask),
             Offset(cx, cy - headLen.dp.toPx()), Offset(cx, cy),
             1.3f.dp.toPx(), StrokeCap.Round)
+        drawNaturalWaterBead(Offset(cx, cy), (.60f + rainSeed(i, 39) * .35f).dp.toPx(), palette, .42f * mask)
     }
 }

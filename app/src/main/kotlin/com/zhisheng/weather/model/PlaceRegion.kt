@@ -9,7 +9,7 @@ fun City.resolvedRegionCode(): String? = countryCode?.trim()?.uppercase(java.uti
     ?.takeIf { it.matches(Regex("[A-Z]{2}")) }
     ?: locationKey.takeIf { it.startsWith("geo:local:geonames:") }
         ?.substringAfter("geonames:")?.substringBefore(':')?.takeIf { it in domesticCodes }
-    ?: "CN".takeIf { addressSource == "amap" || addressSource == "baidu" }
+    ?: "CN".takeIf { addressSource in setOf("amap", "baidu", "zhisheng-amap") }
 
 fun City.placeRegion(): PlaceRegion? = resolvedRegionCode()?.let {
     if (it in domesticCodes) PlaceRegion.DOMESTIC else PlaceRegion.OVERSEAS

@@ -15,20 +15,20 @@ class CoarsePrecipitationRegressionTest {
     )
 
     @Test fun ongoingFifteenMinuteRainIsNotReportedAsStartingLater() {
-        assertEquals("22 分钟后雨会停", Nowcast.briefing(weather(), "c", now)?.text)
-        assertEquals(WeatherCondition.RAIN, WeatherConsistency.align(weather(), now).current?.condition)
+        assertEquals("短时预报提示当前有降水，预计约 22 分钟后结束", Nowcast.briefing(weather(), "c", now)?.text)
+        assertEquals(WeatherCondition.CLEAR, WeatherConsistency.align(weather(), now).current?.condition)
     }
 
     @Test fun presentationRetainsTheCurrentlyActiveCoarseBucket() {
         val result = precipitationPresentation(weather(), now)
         assertEquals(start, result.points.first().timeMillis)
-        assertEquals("目前有降水", result.summary)
+        assertEquals("短时预报提示当前有降水", result.summary)
         assertEquals(15, result.intervalMinutes)
         assertFalse(result.dry)
     }
 
     @Test fun dryCurrentBucketDoesNotBecomeRainBecauseNextBucketIsWet() {
-        assertEquals("7 分钟后开始下雨", Nowcast.briefing(weather(wetNow = false), "c", now)?.text)
+        assertEquals("预计约 7 分钟后开始下雨", Nowcast.briefing(weather(wetNow = false), "c", now)?.text)
         assertEquals(WeatherCondition.CLEAR, WeatherConsistency.align(weather(wetNow = false), now).current?.condition)
     }
 

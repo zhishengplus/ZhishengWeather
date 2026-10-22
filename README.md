@@ -1,6 +1,8 @@
 > 无密钥源码导出版 / Key-free source export. Read SOURCE_EXPORT.md before building or publishing.
 
-> 当前公开发布：**0.1.5-beta10.5-public / 20261068**。累计更新见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。[Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk)
+> 当前公开版本：**0.1.5-beta10.8 / 20261102**，累计更新范围为 10.5 → 10.8。
+
+> 当前公开发布：**0.1.5-beta10.8 / 20261102**。累计更新见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。[Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.8/ZhishengWeather-v0.1.5-beta10.8-public.apk) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10.8/ZhishengWeather-v0.1.5-beta10.8-public.apk)
 
 
 ![枳生天气 · ZHISHENG WEATHER TERMINAL](assets/banner.png)
@@ -13,15 +15,15 @@
 
 <p align="center">
   <a href="https://github.com/zhishengplus/ZhishengWeather/releases">
-    <img alt="下载公共版 APK" src="https://img.shields.io/badge/下载公共版_APK_·_v0.1.3-FF6F1E?style=for-the-badge&labelColor=10151C"/>
+    <img alt="下载公共版 APK" src="https://img.shields.io/badge/下载公共版_APK_·_10.8-FF6F1E?style=for-the-badge&labelColor=10151C"/>
   </a>
 </p>
 
 <p align="center">
   <a href="https://github.com/zhishengplus/ZhishengWeather"><img alt="GitHub stars" src="https://img.shields.io/github/stars/zhishengplus/ZhishengWeather?style=flat-square&labelColor=10151C&color=FF6F1E"/></a>
   <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-31C9DB?style=flat-square"/>
-  <img alt="当前版本 0.1.3" src="https://img.shields.io/badge/当前版本-0.1.3-31C9DB?style=flat-square"/>
-  <img alt="无广告、账号和埋点" src="https://img.shields.io/badge/广告·账号·埋点-无-31C9DB?style=flat-square"/>
+  <img alt="当前公开版 10.8" src="https://img.shields.io/badge/公开版-10.8-31C9DB?style=flat-square"/>
+  <img alt="无广告、无需账号" src="https://img.shields.io/badge/广告·账号-无-31C9DB?style=flat-square"/>
   <img alt="MIT License" src="https://img.shields.io/badge/许可-MIT-31C9DB?style=flat-square"/>
 </p>
 
@@ -87,7 +89,7 @@ GitHub Releases 只发布正式公共版 APK，这也是普通用户唯一需要
 |:--|:--|:--|
 | 和风天气 | 实验室接入，或构建期写入 `local.properties` | 实况、预警、逐时逐日、分钟降水、空气质量、生活指数 |
 | 彩云天气 | 实验室填写 Token | 实况、逐时逐日、分钟降水、空气质量、预警 |
-| 小米公开天气接口 | 不需要 | 国内天气、城市搜索、昨日天气和台风辅助数据；手动选择时不混入其他来源 |
+| 小米公开天气接口 | 不需要 | 国内天气、城市搜索、昨日天气和台风辅助数据；可另设模块来源与补全优先级 |
 | Open-Meteo | 不需要 | 全球实况、逐时逐日、空气质量、15 分钟降水和缺项补充 |
 | 浙江省水利厅台风路径系统 | 不需要 | 西北太平洋台风实况路径、中心强度、风圈与多机构预报 |
 
@@ -312,6 +314,8 @@ qw.private_key=<Ed25519 私钥，单行>
 
 主要技术栈：Kotlin 2.0.21、Jetpack Compose、Material 3、ViewModel / StateFlow、Retrofit、OkHttp、kotlinx-serialization、DataStore 和 BouncyCastle。`minSdk 26`，`targetSdk 34`。代码结构与提交约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
+天气源设置支持按模块选源和可选的缺失数据补全顺序。补全按同一小时或同一当地日期匹配，保留主源已有值和零降水；来源可在详情查看。
+
 ## 权限和数据
 
 应用使用网络、安装更新和可选位置权限：
@@ -322,9 +326,11 @@ qw.private_key=<Ed25519 私钥，单行>
 | 网络状态 | 判断设备是否联网 |
 | 安装应用 | 仅在正式公共版中手动下载更新后打开系统安装页；不会静默安装 |
 | 粗略位置 | 可选；仅在开启定位并主动重新定位时申请 |
-| 精确位置 | 可选；只有主动开启街道级定位时才申请 |
+| 精确位置 | 可选；首次定位选择精确位置或主动开启街道级定位时申请 |
 
-应用没有广告 SDK、统计埋点、账号系统或自建后端。城市列表和设置保存在本机。天气请求会把所选城市坐标发送给当前数据源；使用定位时，坐标还用于反查城市名。
+应用无广告 SDK，无需注册账号。城市列表、设置和个人天气源凭据保存在本机；天气请求会把所选地点坐标发送给当前数据源。选择枳生位置服务后，前台定位坐标与精度会发送到自有服务器解析地址并保存位置记录，可在设置中关闭并删除记录；配置个人高德或百度服务时，由相应服务解析地址。
+
+基础诊断和设备版本统计默认启用，可在设置中分别关闭，已关闭的选择会保留。这两项用于排查服务兼容问题和了解版本分布，不包含精确坐标；位置服务使用独立开关。
 
 定位开启并授权后，应用回到前台会按间隔复核所在城市，不在后台持续获取位置。相关代码位于 [`app/src/main/kotlin/com/zhisheng/weather/data`](app/src/main/kotlin/com/zhisheng/weather/data)。
 

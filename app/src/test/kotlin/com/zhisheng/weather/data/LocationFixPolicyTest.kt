@@ -51,6 +51,21 @@ class LocationFixPolicyTest {
 
     @Test fun fifteenMinuteCacheCannotStandInForCurrentLocation() {
         assertNull(LocationFixPolicy.cachedFix(listOf(fix(14 * 60_000)), now, elapsed))
+        assertNull(LocationFixPolicy.cachedFix(listOf(fix(14 * 60_000)), now, elapsed, approximate = true))
+    }
+
+    @Test fun coarseCacheRefreshWindowDoesNotMasqueradeAsANewFix() {
+        val cached = fix(8 * 60_000, 2_000f)
+        assertFalse(LocationFixPolicy.acceptsCallback(cached, now, elapsed))
+        assertTrue(LocationFixPolicy.acceptsCallback(cached, now, elapsed, approximate = true))
+        assertFalse(LocationFixPolicy.isCurrent(cached, now, elapsed))
+        assertEquals(8 * 60_000L, LocationFixPolicy.ageMillis(cached, now, elapsed))
+    }
+
+    @Test fun approximateWindowStillRejectsAnotherBootAndInvalidAccuracy() {
+        assertFalse(LocationFixPolicy.acceptsCallback(fix().copy(elapsedRealtimeNanos = elapsed + 1), now, elapsed, true))
+        assertFalse(LocationFixPolicy.acceptsCallback(fix(accuracy = Float.NaN), now, elapsed, true))
+        assertFalse(LocationFixPolicy.acceptsCallback(fix(10 * 60_000 + 1), now, elapsed, true))
     }
 
     @Test fun automaticResultCannotOverrideUserCitySwitch() {

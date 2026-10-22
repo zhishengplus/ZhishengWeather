@@ -1,7 +1,6 @@
 package com.zhisheng.weather.ui.home
 
 import java.io.File
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,6 +22,6 @@ class AqiLayoutTest {
         assertTrue(home.contains("modifier = Modifier.widthIn(max = 112.dp)"))
         assertTrue(home.contains("\"首要污染物\","))
         assertTrue(home.contains("textAlign = TextAlign.End"))
-        assertFalse(home.contains("Text(\"首要污染物 \$it\""))
+        assertTrue("Large fonts move the primary pollutant onto a full-width line", home.contains("if (stackedPrimary)"))
     }
 }

@@ -1,6 +1,8 @@
 > 无密钥源码导出版 / Key-free source export. Read SOURCE_EXPORT.md before building or publishing.
 
-> 当前公开发布：**0.1.5-beta10.5-public / 20261068**。累计更新见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。[Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk)
+> Current public release: **0.1.5-beta10.8 / 20261102**, covering changes since 10.5.
+
+> 当前公开发布：**0.1.5-beta10.8 / 20261102**。累计更新见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。[Gitee 主下载](https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.8/ZhishengWeather-v0.1.5-beta10.8-public.apk) · [GitHub 备用下载](https://github.com/zhishengplus/ZhishengWeather/releases/download/v0.1.5-beta10.8/ZhishengWeather-v0.1.5-beta10.8-public.apk)
 
 
 ![Zhisheng Weather · ZHISHENG WEATHER TERMINAL](assets/banner.png)
@@ -13,15 +15,15 @@
 
 <p align="center">
   <a href="https://github.com/zhishengplus/ZhishengWeather/releases">
-    <img alt="Download the public APK" src="https://img.shields.io/badge/DOWNLOAD_PUBLIC_APK_·_v0.1.3-FF6F1E?style=for-the-badge&labelColor=10151C"/>
+    <img alt="Download the public APK" src="https://img.shields.io/badge/DOWNLOAD_PUBLIC_APK_·_10.8-FF6F1E?style=for-the-badge&labelColor=10151C"/>
   </a>
 </p>
 
 <p align="center">
   <a href="https://github.com/zhishengplus/ZhishengWeather"><img alt="GitHub stars" src="https://img.shields.io/github/stars/zhishengplus/ZhishengWeather?style=flat-square&labelColor=10151C&color=FF6F1E"/></a>
   <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-31C9DB?style=flat-square"/>
-  <img alt="Current version 0.1.3" src="https://img.shields.io/badge/current-0.1.3-31C9DB?style=flat-square"/>
-  <img alt="No ads, accounts, or tracking" src="https://img.shields.io/badge/ads_·_accounts_·_tracking-none-31C9DB?style=flat-square"/>
+  <img alt="Current public version 10.8" src="https://img.shields.io/badge/public-10.8-31C9DB?style=flat-square"/>
+  <img alt="No ads or account required" src="https://img.shields.io/badge/ads_·_accounts-none-31C9DB?style=flat-square"/>
   <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-31C9DB?style=flat-square"/>
 </p>
 
@@ -88,7 +90,7 @@ The app connects to QWeather, Caiyun, Xiaomi's public weather API, and Open-Mete
 | Xiaomi public weather API | None | Weather in China, city search, yesterday's weather, and typhoon support data; no cross-provider fill when selected manually |
 | Open-Meteo | None | Global current/hourly/daily, AQI, 15-minute precipitation, and gap filling |
 
-Auto keeps Xiaomi's public API as the authority for current conditions and precipitation. Open-Meteo only fills telemetry, hourly, or daily fields Xiaomi did not return, and replaces Xiaomi only when the entire Xiaomi request fails. QWeather and Caiyun stay out of Auto and are only used after they are unlocked in developer mode. Selecting any provider manually keeps all displayed provider data pure.
+Auto keeps Xiaomi's public API as the authority for current conditions and precipitation. Open-Meteo only fills telemetry, hourly, or daily fields Xiaomi did not return, and replaces Xiaomi only when the entire Xiaomi request fails. QWeather and Caiyun stay out of Auto and are only used after they are unlocked in developer mode. Manual provider selection keeps the chosen source in control. Module overrides and the optional fallback order can supplement missing values from other providers. Hourly and daily values are matched by the same city hour or local date; existing primary values, including zero rainfall, are preserved and contributing sources remain visible.
 
 Moon phase is calculated on-device for the selected city's date. If the provider does not return moonrise or moonset, the app calculates them from the date and coordinates without making another request.
 
@@ -319,7 +321,9 @@ The app uses network, update-install, and optional location permissions:
 | Approximate location | Optional; requested only after location is enabled and a new fix is requested |
 | Precise location | Optional; requested only when street-level positioning is explicitly enabled |
 
-There is no ad SDK, analytics, account system, or project-operated backend. Saved cities and settings stay on the device. Weather requests send the selected city's coordinates to the active provider. Location coordinates are also used to resolve a city name.
+There is no ad SDK or account requirement. Saved cities, settings, and personal provider credentials stay on the device. Weather requests send the selected place coordinates to the active provider. Choosing the Zhisheng location service sends foreground coordinates and accuracy to the project-operated server for address resolution and location history. You can disable it and delete that history in Settings. Personal Amap or Baidu configurations use the corresponding provider for address resolution.
+
+Basic diagnostics and device-version statistics are enabled by default and can be switched off separately in Settings; existing opt-outs are preserved. They help diagnose compatibility and understand version distribution and do not contain precise coordinates. Location sharing has its own setting.
 
 After location is enabled and permission is granted, the app rechecks the city at intervals when returning to the foreground. It does not collect location in the background. Relevant code is under [`app/src/main/kotlin/com/zhisheng/weather/data`](app/src/main/kotlin/com/zhisheng/weather/data).
 

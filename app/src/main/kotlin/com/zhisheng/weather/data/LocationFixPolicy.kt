@@ -12,6 +12,9 @@ internal data class LocationFix(
 
 internal object LocationFixPolicy {
     private const val MAX_AGE_MILLIS = 2 * 60_000L
+    // Android's coarse-location cache can be refreshed only once per ten minutes.
+    // Keep its real age; this allowance must never enable street-level precision.
+    private const val MAX_APPROXIMATE_AGE_MILLIS = 10 * 60_000L
 
     fun ageMillis(fix: LocationFix, nowMillis: Long, elapsedNanos: Long): Long? {
         // Monotonic time is immune to clock corrections; a future value belongs to
@@ -24,16 +27,21 @@ internal object LocationFixPolicy {
         return nowMillis - fix.wallTimeMillis
     }
 
-    fun acceptsCallback(fix: LocationFix, nowMillis: Long, elapsedNanos: Long): Boolean =
+    fun acceptsCallback(fix: LocationFix, nowMillis: Long, elapsedNanos: Long, approximate: Boolean = false): Boolean =
         fix.latitude.isFinite() && fix.latitude in -90.0..90.0 &&
             fix.longitude.isFinite() && fix.longitude in -180.0..180.0 &&
             (fix.accuracyMeters == null || (fix.accuracyMeters.isFinite() && fix.accuracyMeters in 0f..20_000f)) &&
-            ageMillis(fix, nowMillis, elapsedNanos)?.let { it <= MAX_AGE_MILLIS } == true
+            ageMillis(fix, nowMillis, elapsedNanos)?.let {
+                it <= if (approximate) MAX_APPROXIMATE_AGE_MILLIS else MAX_AGE_MILLIS
+            } == true
 
-    fun cachedFix(fixes: List<LocationFix>, nowMillis: Long, elapsedNanos: Long): LocationFix? =
-        fixes.filter { acceptsCallback(it, nowMillis, elapsedNanos) }
+    fun cachedFix(fixes: List<LocationFix>, nowMillis: Long, elapsedNanos: Long, approximate: Boolean = false): LocationFix? =
+        fixes.filter { acceptsCallback(it, nowMillis, elapsedNanos, approximate) }
             .minWithOrNull(compareBy<LocationFix> { ageMillis(it, nowMillis, elapsedNanos) }
                 .thenBy { it.accuracyMeters ?: Float.POSITIVE_INFINITY })
+
+    fun isCurrent(fix: LocationFix, nowMillis: Long, elapsedNanos: Long): Boolean =
+        ageMillis(fix, nowMillis, elapsedNanos)?.let { it <= MAX_AGE_MILLIS } == true
 
     fun canResolveStreet(fix: LocationFix): Boolean =
         fix.accuracyMeters?.let { it.isFinite() && it > 0f && it <= 100f } == true

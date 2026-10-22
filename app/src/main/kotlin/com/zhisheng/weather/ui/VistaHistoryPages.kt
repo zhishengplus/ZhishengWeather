@@ -243,8 +243,9 @@ private fun HistoryRibbon(marks: List<HistoryMark>, scale: Pair<Double, Double>,
     val plotBottom = chartBottom - labelRoom
     val stripHeight = chartBottom + 48.dp * fontScale
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val minColumn = 58.dp * fontScale
-        val columnWidth = if (minColumn * marks.size <= maxWidth) maxWidth / marks.size.coerceAtLeast(1) else minColumn
+        val minColumn = 76.dp * fontScale
+        val visibleWidth = (maxWidth - 40.dp).coerceAtLeast(minColumn)
+        val columnWidth = if (minColumn * marks.size <= visibleWidth) visibleWidth / marks.size.coerceAtLeast(1) else minColumn
         val totalWidth = columnWidth * marks.size
         val columnPx = with(LocalDensity.current) { columnWidth.toPx() }
         var pinned by remember(marks.first().key, marks.last().key) { mutableStateOf(false) }
@@ -264,7 +265,7 @@ private fun HistoryRibbon(marks: List<HistoryMark>, scale: Pair<Double, Double>,
                 }
         }
         HistoryGlassViewport(scroll, Modifier.fillMaxWidth().height(stripHeight)) {
-        Box(Modifier.fillMaxWidth().horizontalScroll(scroll).height(stripHeight).semantics {
+        Box(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 20.dp).height(stripHeight).semantics {
             contentDescription = marks.joinToString("；") { mark ->
                 listOf(mark.label, historyTemperatureDescription(mark, unit), mark.condition?.label, historyColumnWind(mark))
                     .filter { !it.isNullOrBlank() && it != WeatherCondition.UNKNOWN.label }.joinToString(" ")

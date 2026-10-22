@@ -47,8 +47,8 @@ import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import com.zhisheng.weather.ui.theme.isPhosphorVista
 import kotlinx.coroutines.launch
 
-internal const val WhatsNewVersion = "0.1.5-beta10.5"
-internal val WhatsNewVersionRange = "10.3 → 10.5"
+internal const val WhatsNewVersion = "0.1.5-beta10.8"
+internal val WhatsNewVersionRange = "10.5 → 10.8"
 internal const val WhatsNewPreferenceFile = "zhisheng_whats_new"
 internal const val WhatsNewSeenKey = "last_seen_version"
 
@@ -137,11 +137,6 @@ internal fun WhatsNewDialogContent(
                                 modifier = Modifier.semantics { heading() })
                             Spacer(Modifier.height(10.dp))
                             Text(WhatsNewVersionRange, color = p.cyan, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-                            if (!compactHeader) {
-                                Spacer(Modifier.height(6.dp))
-                                Text("本次新增、改进与问题修正。", color = p.textSecondary, fontSize = 13.sp,
-                                    lineHeight = 20.sp, fontFamily = FontFamily.SansSerif)
-                            }
                         }
                         if (!compactHeader) {
                             Spacer(Modifier.width(10.dp))
@@ -150,30 +145,11 @@ internal fun WhatsNewDialogContent(
                     }
                     }
                 }
-                if (category == ReleaseNotesCategory.ALL && !compactHeader) {
-                    Column(Modifier.padding(horizontal = 22.dp, vertical = 6.dp)) {
-                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-                            .background(p.cyan.copy(alpha = if (p.isLight) .055f else .09f))
-                            .padding(17.dp)) {
-                            Text("这次，先看看这些", color = p.textSecondary, fontSize = 12.sp,
-                                fontFamily = FontFamily.SansSerif)
-                            Spacer(Modifier.height(10.dp))
-                            Text("把日常操作补完整", color = p.text, fontSize = 17.sp, lineHeight = 25.sp,
-                                fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.SansSerif)
-                            Spacer(Modifier.height(5.dp))
-                            Text("组件编辑更清楚，预报按日期查看。\n提醒、回看和诊断补齐操作与状态。", color = p.textSecondary,
-                                fontSize = 13.sp, lineHeight = 21.sp, fontFamily = FontFamily.SansSerif)
-                            Spacer(Modifier.height(12.dp))
-                            HorizontalDivider(color = p.cyan.copy(alpha = .13f))
-                            Spacer(Modifier.height(12.dp))
-                            Text("字号与空间一起适配 · 缺失数据如实说明", color = p.cyan, fontSize = 12.sp,
-                                lineHeight = 19.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.SansSerif)
-                        }
-                    }
-                }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                val contentCategories = ReleaseNotesCategory.entries.filter { it != ReleaseNotesCategory.ALL && releaseNotesFor(it).isNotEmpty() }
+                val tabs = if (contentCategories.size > 1) ReleaseNotesCategory.entries.filter { it == ReleaseNotesCategory.ALL || releaseNotesFor(it).isNotEmpty() } else listOf(ReleaseNotesCategory.ALL)
+                if (tabs.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                     .padding(horizontal = 22.dp, vertical = if (shortWindow) 10.dp else 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ReleaseNotesCategory.entries.forEach { item ->
+                    tabs.forEach { item ->
                         val active = category == item
                         Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp))
                                 .background(if (active) p.text else p.cardBorder.copy(alpha = .22f))

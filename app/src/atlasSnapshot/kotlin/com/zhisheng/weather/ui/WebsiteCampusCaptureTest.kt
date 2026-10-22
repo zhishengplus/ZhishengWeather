@@ -73,7 +73,7 @@ class WebsiteCampusCaptureTest {
                     LocalWeatherPreviewTime provides data.updateTime,
                     LocalSolarSkyPreview provides SolarSkyState(altitude, 265f, false)) {
                     ZhishengWeatherTheme(isLight = light, interfaceStyle = style, softGlow = false) {
-                        if (landscape) LandscapeWeatherCoreScreen(HomeUiState(selectedCity = city, weather = data, prefs = prefs), {}, {}, {})
+                        if (landscape) LandscapeWeatherCoreScreen(HomeUiState(selectedCity = city, weather = data, prefs = prefs), {}, {})
                         else SimulatedWeatherSurface(data, city, prefs, night = night,
                             referenceTimeMillis = data.updateTime, livingSkyOverride = true,
                             header = { TopBar(city.displayName, false, {}, {}, {}) })
@@ -199,7 +199,7 @@ class WebsiteCampusCaptureTest {
         }
         for (section in listOf(0, 2)) screen("campus-settings-$section") {
             CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides owner) {
-                SettingsScreen({}, false, {}, {}, false, null, {}, "XIAOMI", emptyList(), tsinghua.displayName, false, {}, {}, null, initialSection = section)
+                SettingsScreen({}, {}, false, null, {}, "XIAOMI", emptyList(), tsinghua.displayName, false, {}, {}, null, initialSection = section)
             }
         }
     }

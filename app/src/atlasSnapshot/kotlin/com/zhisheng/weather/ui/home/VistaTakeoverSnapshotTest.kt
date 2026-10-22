@@ -192,7 +192,7 @@ class VistaTakeoverSnapshotTest(private val light: Boolean, private val width: I
         org.junit.Assume.assumeTrue(width >= 768)
         render(style = style, inspection = true) {
             com.zhisheng.weather.ui.StandbyBurnInFrame(offset = { androidx.compose.ui.unit.IntOffset(6, 4) }) {
-                com.zhisheng.weather.ui.LandscapeStandbyScreen(HomeUiState(selectedCity = city, weather = weather), standbyStyle, {}, {}, {})
+                com.zhisheng.weather.ui.LandscapeStandbyScreen(HomeUiState(selectedCity = city, weather = weather), standbyStyle, {}, {})
             }
         }
     }
@@ -252,7 +252,7 @@ class VistaTakeoverSnapshotTest(private val light: Boolean, private val width: I
         }
         render(style = style) {
             androidx.compose.runtime.CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides owner) {
-                com.zhisheng.weather.ui.SettingsScreen({}, false, {}, {}, false, null, {}, "XIAOMI", emptyList(), "金昌市", false, {}, {}, null, initialSection = section)
+                com.zhisheng.weather.ui.SettingsScreen({}, {}, false, null, {}, "XIAOMI", emptyList(), "金昌市", false, {}, {}, null, initialSection = section)
             }
         }
     }
@@ -278,7 +278,7 @@ class VistaTakeoverSnapshotTest(private val light: Boolean, private val width: I
     }
     @Test fun beta8ClassicLandscape() = render(style = InterfaceStyle.CLASSIC_TERMINAL) {
         Box(Modifier.fillMaxWidth().height(340.dp)) {
-            LandscapeWeatherCoreScreen(HomeUiState(selectedCity = city, weather = weather), {}, {}, {})
+            LandscapeWeatherCoreScreen(HomeUiState(selectedCity = city, weather = weather), {}, {})
         }
     }
     @androidx.compose.runtime.Composable private fun feedbackDetailsContent() {
@@ -453,7 +453,7 @@ class VistaTakeoverSnapshotTest(private val light: Boolean, private val width: I
     }
     @Test fun landscape() = render {
         Box(Modifier.fillMaxWidth().height(340.dp)) {
-            LandscapeWeatherCoreScreen(HomeUiState(selectedCity = city, weather = weather), {}, {}, {})
+            LandscapeWeatherCoreScreen(HomeUiState(selectedCity = city, weather = weather), {}, {})
         }
     }
 }

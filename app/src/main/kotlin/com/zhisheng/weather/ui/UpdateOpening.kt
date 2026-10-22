@@ -471,7 +471,7 @@ internal fun UpdateOpeningStage(spec: UpdateOpeningSpec, time: () -> Float, modi
                 (spec.sectionCount * easeOutCubic(openingSegment(time(), 3350f, 4050f))).roundToInt() } }
             val notes by remember(spec) { derivedStateOf {
                 (spec.noteCount * easeOutCubic(openingSegment(time(), 3350f, 4050f))).roundToInt() } }
-            Text("$sections 个方面 · $notes 项更新", color = colors.textSoft, fontSize = fixed(13f),
+            Text(if (spec.sectionCount > 1) "$sections 个方面 · $notes 项更新" else "$notes 项更新", color = colors.textSoft, fontSize = fixed(13f),
                 letterSpacing = fixed(1f), fontFamily = serif,
                 style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                 modifier = Modifier.graphicsLayer { alpha = easeOutCubic(openingSegment(time(), 3300f, 3650f)) })

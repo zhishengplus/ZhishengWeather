@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
@@ -29,7 +30,7 @@ import kotlin.math.ceil
 @Composable
 internal fun Modifier.glassScrollHeader(
     backdrop: GraphicsLayer,
-    backdropOrigin: Offset,
+    backdropOrigin: () -> Offset,
     underlay: GraphicsLayer? = null,
     underlayOrigin: Offset = Offset.Zero,
     strength: () -> Float = { 1f },
@@ -38,7 +39,12 @@ internal fun Modifier.glassScrollHeader(
     val sample = rememberGraphicsLayer()
     val clearBackdrop = rememberGraphicsLayer()
     var headerOrigin by remember { mutableStateOf(Offset.Zero) }
-    return onGloballyPositioned { headerOrigin = it.positionInRoot() }
+    val pageCoordinates = LocalSurfacePageCoordinates.current
+    // Retain the blurred header. A sibling indicator can follow the finger
+    // without recording this blur again on every frame.
+    val retained = remember { Modifier.graphicsLayer() }
+    return onGloballyPositioned { headerOrigin = pageCoordinates?.positionOf(it) ?: it.positionInRoot() }
+        .then(retained)
         .drawWithCache {
             val padding = ceil(15.dp.toPx() * 3f).toInt()
             val sampleSize = IntSize(ceil(size.width).toInt() + padding * 2,
@@ -70,7 +76,7 @@ internal fun Modifier.glassScrollHeader(
             onDrawWithContent {
                 val amount = strength().coerceIn(0f, 1f)
                 if (blur != null && amount > 0f) {
-                    val relative = headerOrigin - backdropOrigin
+                    val relative = headerOrigin - backdropOrigin()
                     sample.record(size = sampleSize) {
                         if (underlay != null) {
                             val underlayRelative = headerOrigin - underlayOrigin

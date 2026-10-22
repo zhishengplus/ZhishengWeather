@@ -39,6 +39,10 @@ internal object WidgetSkyBitmap {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
 
+    @Synchronized fun clearMemoryCache() {
+        cache.evictAll()
+    }
+
     @Synchronized fun of(sky: WidgetSky): Bitmap {
         val p = sky.palette
         val key = listOf(p.top.toArgb(), p.middle.toArgb(), p.base.toArgb(), p.cloud.toArgb(),

@@ -48,6 +48,12 @@ data class RainviewerRuntimeCreds(val apiKey: String = "") {
     val ready: Boolean get() = apiKey.isNotBlank()
 }
 
+internal data class SharedPlaceConfiguration(val consentVersion: Int = 0,
+    val installationId: String = "", val installationToken: String = "") {
+    val enabled: Boolean get() = consentVersion == 2 && installationId.isNotBlank() && installationToken.isNotBlank()
+    override fun toString() = "SharedPlaceConfiguration(redacted)"
+}
+
 data class QwResolved(
     val host: String,
     val projectId: String,
@@ -74,6 +80,9 @@ object SecretStore {
     private val KEY_QW_API = stringPreferencesKey("qw_api_key")
     private val KEY_CAIYUN = stringPreferencesKey("caiyun_token")
     private val KEY_AMAP = stringPreferencesKey("amap_web_service_key")
+    private val KEY_PLACE_CONSENT = stringPreferencesKey("shared_place_consent")
+    private val KEY_PLACE_INSTALLATION = stringPreferencesKey("shared_place_installation")
+    private val KEY_PLACE_TOKEN = stringPreferencesKey("shared_place_installation_token")
     private val KEY_BAIDU = stringPreferencesKey("baidu_web_service_ak")
     private val KEY_RAINVIEWER = stringPreferencesKey("rainviewer_api_key")
     private val KEY_SENIVERSE = stringPreferencesKey("seniverse_api_key")
@@ -88,6 +97,8 @@ object SecretStore {
     @Volatile var caiyunRuntime: CaiyunRuntimeCreds = CaiyunRuntimeCreds()
         private set
     @Volatile var amapRuntime: AmapRuntimeCreds = AmapRuntimeCreds()
+        private set
+    @Volatile internal var sharedPlaceRuntime = SharedPlaceConfiguration()
         private set
     @Volatile var baiduRuntime: BaiduRuntimeCreds = BaiduRuntimeCreds()
         private set
@@ -109,7 +120,7 @@ object SecretStore {
     private fun <T> updateRuntime(next: T, current: () -> T, apply: (T) -> Unit) {
         reminderDeliveryGate.updateSettings {
             if (current() != next) reminderDeliveryGate.changeContextNow {
-                if (next is AmapRuntimeCreds || next is BaiduRuntimeCreds) PlaceConfigurationRevision.changed()
+                if (next is AmapRuntimeCreds || next is BaiduRuntimeCreds || next is SharedPlaceConfiguration) PlaceConfigurationRevision.changed()
                 apply(next)
             }
         }
@@ -138,6 +149,7 @@ object SecretStore {
                 )
                 updateRuntime(CaiyunRuntimeCreds(prefs[KEY_CAIYUN].orEmpty().trim()), { caiyunRuntime }) { caiyunRuntime = it }
                 updateRuntime(AmapRuntimeCreds(prefs[KEY_AMAP].orEmpty().trim()), { amapRuntime }) { amapRuntime = it }
+                updateRuntime(sharedPlaceFrom(prefs), { sharedPlaceRuntime }) { sharedPlaceRuntime = it }
                 updateRuntime(BaiduRuntimeCreds(prefs[KEY_BAIDU].orEmpty().trim()), { baiduRuntime }) { baiduRuntime = it }
                 updateRuntime(RainviewerRuntimeCreds(prefs[KEY_RAINVIEWER].orEmpty().trim()), { rainviewerRuntime }) { rainviewerRuntime = it }
                 updateRuntime(SeniverseRuntimeCreds(prefs[KEY_SENIVERSE].orEmpty().trim()), { seniverseRuntime }) { seniverseRuntime = it }
@@ -174,6 +186,35 @@ object SecretStore {
         store.data.map { AmapRuntimeCreds(it[KEY_AMAP].orEmpty().trim()) }.distinctUntilChanged()
     }
 
+    private fun sharedPlaceFrom(prefs: Preferences) = SharedPlaceConfiguration(
+        prefs[KEY_PLACE_CONSENT]?.toIntOrNull() ?: 0, prefs[KEY_PLACE_INSTALLATION].orEmpty(), prefs[KEY_PLACE_TOKEN].orEmpty())
+    internal val sharedPlaceFlow: Flow<SharedPlaceConfiguration> by lazy {
+        store.data.map(::sharedPlaceFrom).distinctUntilChanged()
+    }
+    internal suspend fun setSharedPlaceConsent(enabled: Boolean) {
+        var next = SharedPlaceConfiguration()
+        editSecretContext({ prefs ->
+            val old = sharedPlaceFrom(prefs)
+            next = if (!enabled) old.copy(consentVersion = 0) else SharedPlaceConfiguration(2,
+                old.installationId.ifBlank { java.util.UUID.randomUUID().toString() },
+                old.installationToken.ifBlank { ByteArray(32).also(java.security.SecureRandom()::nextBytes)
+                    .joinToString("") { "%02x".format(it) } })
+            prefs[KEY_PLACE_CONSENT] = next.consentVersion.toString()
+            prefs[KEY_PLACE_INSTALLATION] = next.installationId
+            prefs[KEY_PLACE_TOKEN] = next.installationToken
+        }) { updateRuntime(next, { sharedPlaceRuntime }) { sharedPlaceRuntime = it } }
+    }
+    internal suspend fun forgetDeletedSharedPlaceIdentity(expected: SharedPlaceConfiguration) {
+        var next = SharedPlaceConfiguration()
+        editSecretContext({ prefs ->
+            val current = sharedPlaceFrom(prefs)
+            if (!current.enabled && current.installationId == expected.installationId && current.installationToken == expected.installationToken) {
+                prefs.remove(KEY_PLACE_INSTALLATION); prefs.remove(KEY_PLACE_TOKEN); prefs.remove(KEY_PLACE_CONSENT)
+            }
+            next = sharedPlaceFrom(prefs)
+        }) { updateRuntime(next, { sharedPlaceRuntime }) { sharedPlaceRuntime = it } }
+    }
+
     val baiduRuntimeFlow: Flow<BaiduRuntimeCreds> by lazy {
         store.data.map { BaiduRuntimeCreds(it[KEY_BAIDU].orEmpty().trim()) }.distinctUntilChanged()
     }
@@ -199,8 +240,7 @@ object SecretStore {
         updateRuntime(loaded, { seniverseRuntime }) { seniverseRuntime = it }
     }
     suspend fun saveMoji(candidate: MojiRuntimeCreds) {
-        val next = MojiRuntimeCreds(candidate.appCode.trim(), candidate.currentEndpoint.trim(), candidate.currentToken.trim(),
-            candidate.dailyEndpoint.trim(), candidate.dailyToken.trim())
+        val next = normalizedMojiCredentials(candidate)
         editSecretContext({
             it[KEY_MOJI_APP] = next.appCode; it[KEY_MOJI_NOW_URL] = next.currentEndpoint; it[KEY_MOJI_NOW_TOKEN] = next.currentToken
             it[KEY_MOJI_DAY_URL] = next.dailyEndpoint; it[KEY_MOJI_DAY_TOKEN] = next.dailyToken

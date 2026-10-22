@@ -42,7 +42,7 @@ class NowcastTest {
         val timing = Nowcast.rainTiming(minutes, t0)
         assertFalse(timing.rainingNow)
         assertEquals(35, timing.minutesUntilStart)
-        assertEquals("35 分钟后开始下雨", Nowcast.rainTimingLabel(timing))
+        assertEquals("预计 35 分钟后开始下雨", Nowcast.rainTimingLabel(timing))
     }
 
     @Test
@@ -61,7 +61,7 @@ class NowcastTest {
             rainNowcast = "距离最近的降雨约在38公里以外~",
             rainMinutes = Nowcast.minuteSeries(values, t0),
         )
-        assertEquals("10 分钟后开始下雨", Nowcast.briefingLine(data, "c", t0))
+        assertEquals("预计 10 分钟后开始下雨", Nowcast.briefingLine(data, "c", t0))
     }
 
     @Test
@@ -75,7 +75,7 @@ class NowcastTest {
                 DailyWeather(dateMillis = t0 + 86_400_000L, high = 20.0, low = 12.0),
             ),
         )
-        assertEquals("10 分钟后开始下雨", Nowcast.briefingLine(data, "c", t0))
+        assertEquals("预计 10 分钟后开始下雨", Nowcast.briefingLine(data, "c", t0))
     }
 
     @Test
@@ -311,7 +311,7 @@ class NowcastTest {
         val timing = Nowcast.rainTiming(Nowcast.minuteSeries(values, t0), t0)
         assertTrue(timing.rainingNow)
         assertEquals(23, timing.minutesUntilEnd)
-        assertEquals("23 分钟后雨会停", Nowcast.rainTimingLabel(timing))
+        assertEquals("预计 23 分钟后雨会停", Nowcast.rainTimingLabel(timing))
     }
 
     @Test
@@ -322,7 +322,7 @@ class NowcastTest {
             rainNowcast = "半小时后雨渐停",
             rainMinutes = Nowcast.minuteSeries(values, t0),
         )
-        assertEquals("29 分钟后雨会停", Nowcast.briefingLine(data, "c", t0))
+        assertEquals("预计 29 分钟后雨会停", Nowcast.briefingLine(data, "c", t0))
     }
 
     @Test
@@ -364,5 +364,41 @@ class NowcastTest {
                 precipNow = false,
             ),
         )
+    }
+
+    @Test fun gapsAndShortDryTailCannotEstablishAStopTime() {
+        val gap = listOf(MinutePrecip(t0, .5f), MinutePrecip(t0 + 10 * 60_000, 0f), MinutePrecip(t0 + 30 * 60_000, 0f))
+        assertNull(Nowcast.rainTiming(gap, t0).minutesUntilEnd)
+        assertNull(Nowcast.rainTiming(listOf(MinutePrecip(t0, .5f), MinutePrecip(t0 + 60_000, 0f)), t0).minutesUntilEnd)
+        val contiguous = Nowcast.minuteSeries(List(3) { .5f } + List(8) { 0f }, t0)
+        assertEquals(3, Nowcast.rainTiming(contiguous, t0).minutesUntilEnd)
+    }
+    @Test fun nativeBucketsConfirmOnlyKnownContinuousDryCoverage() {
+        val complete = listOf(MinutePrecip(t0, .5f), MinutePrecip(t0 + 15 * 60_000, 0f))
+        assertEquals(15, Nowcast.rainTiming(complete, t0, intervalMinutes = 15).minutesUntilEnd)
+        val missing = listOf(MinutePrecip(t0, .5f), MinutePrecip(t0 + 30 * 60_000, 0f))
+        assertNull(Nowcast.rainTiming(missing, t0, intervalMinutes = 15).minutesUntilEnd)
+    }
+
+    @Test fun coarseForecastTimingKeepsItsApproximatePrecision() {
+        val futureRain = RainTiming(false, 30)
+        assertEquals("预计约 30 分钟后开始下雨", Nowcast.rainTimingLabel(futureRain, 15))
+        assertEquals("预计 30 分钟后开始下雨", Nowcast.rainTimingLabel(futureRain))
+    }
+
+    @Test fun missingWindowCannotEstablishTheFirstRainTransition() {
+        val points = listOf(MinutePrecip(t0, 0f), MinutePrecip(t0 + 30 * 60_000, .5f))
+        assertNull(Nowcast.rainTiming(points, t0).minutesUntilStart)
+        assertEquals("短时预报时段内有降水，开始时间暂不确定", Nowcast.briefingLine(WeatherData(rainMinutes = points), "c", t0))
+        val complete = Nowcast.minuteSeries(List(30) { 0f } + List(5) { .5f }, t0)
+        assertEquals(30, Nowcast.rainTiming(complete, t0).minutesUntilStart)
+    }
+
+    @Test fun airBriefingKeepsModelEstimateQualified() {
+        val data = WeatherData(current = CurrentWeather(temperature = 20.0, condition = WeatherCondition.CLOUDY),
+            aqi = AqiInfo(value = 120, estimated = true))
+        val briefing = Nowcast.briefing(data, "c", t0)!!
+        assertEquals(BriefingKind.AIR_QUALITY, briefing.kind)
+        assertTrue(briefing.text.contains("模型估算"))
     }
 }

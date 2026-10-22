@@ -1,6 +1,7 @@
 package com.zhisheng.weather.data
 
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ensureActive
 
 /** Shared delivery boundary for settings changes and notification side effects. */
@@ -8,12 +9,25 @@ internal class ReminderDeliveryGate {
     private val guard = Any()
     private var contextGeneration = 0L
     private var pendingContextChanges = 0
+    private var contextSettled = CompletableDeferred(Unit)
     fun contextVersion(): Long? = synchronized(guard) { contextGeneration.takeIf { pendingContextChanges == 0 } }
+
+    /** A newly requested fix waits for settings being persisted by its own setup flow. */
+    suspend fun awaitContextVersion(): Long {
+        while (true) {
+            val settled = synchronized(guard) {
+                if (pendingContextChanges == 0) return contextGeneration
+                contextSettled
+            }
+            settled.await()
+        }
+    }
 
     fun updateSettings(action: () -> Unit) = synchronized(guard) { action() }
 
     suspend fun <T> changeContext(action: suspend () -> T): T {
         synchronized(guard) {
+            if (pendingContextChanges == 0) contextSettled = CompletableDeferred()
             contextGeneration++
             pendingContextChanges++
         }
@@ -24,6 +38,7 @@ internal class ReminderDeliveryGate {
             synchronized(guard) {
                 contextGeneration++
                 pendingContextChanges--
+                if (pendingContextChanges == 0) contextSettled.complete(Unit)
             }
         }
     }

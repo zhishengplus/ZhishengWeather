@@ -6,6 +6,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.zhisheng.weather.model.HourlyWeather
+import java.time.Instant
 
 /**
  * Open-Meteo 多模式 / 补充包 / 空气质量的 JsonObject 解析测试。
@@ -14,6 +16,58 @@ import org.junit.Test
 class OpenMeteoMultiModelTest {
 
     private fun obj(text: String): JsonObject = Json.parseToJsonElement(text) as JsonObject
+
+    @Test
+    fun invalidAirTimestampsDoNotShiftLaterConcentrations() {
+        val air = OpenMeteoApi.parseAirQuality(obj("""{"utc_offset_seconds":28800,"hourly":{
+            "time":["2026-10-13T10:00",null,"invalid","2026-10-13T13:00"],
+            "pm2_5":[18,500,999,61],"pm10":[0,0,0,0],"carbon_monoxide":[0,0,0,0],
+            "nitrogen_dioxide":[0,0,0,0],"sulphur_dioxide":[0,0,0,0],"ozone":[0,0,0,0]}}
+        """))
+        val lastTime = Instant.parse("2026-10-13T05:00:00Z").toEpochMilli()
+        assertEquals(listOf(0L, 0L), air.hourlyTimeMillis.subList(1, 3))
+        assertEquals(4, air.hourlyTimeMillis.size)
+        assertEquals(101, FusionEngine.gbAqiAt(air, lastTime)?.first)
+        assertNull(FusionEngine.gbAqiAt(air, 0L))
+    }
+
+    @Test
+    fun invalidSupplementTimesKeepRainUvAndDailyRowsAligned() {
+        val now = Instant.parse("2026-10-13T02:00:00Z").toEpochMilli()
+        val supplements = OpenMeteoApi.parseSupplements(obj("""{"utc_offset_seconds":28800,
+          "hourly":{"time":["2026-10-13T10:00","invalid","2026-10-13T11:00"],"uv_index":[1,99,3]},
+          "daily":{"time":["2026-10-13",null,"2026-10-14"],"temperature_2m_max":[20,99,25]},
+          "minutely_15":{"time":["2026-10-13T10:15","invalid","2026-10-13T10:45"],"precipitation":[0.25,99,0.5]}}
+        """))
+        assertEquals(0L, supplements.hourlyTimeMillis[1])
+        assertEquals(0L, supplements.minutely15TimeMillis[1])
+        val rain = FusionEngine.omMinutelyToMinutes(supplements, now)
+        assertEquals(listOf(now, now + 30 * 60_000L), rain.map { it.timeMillis })
+        assertEquals(listOf(1f, 2f), rain.map { it.precip })
+        val filled = FusionEngine.fillHourlyCompleteness(listOf(HourlyWeather(0L),
+            HourlyWeather(now + 3_600_000L)), supplements)
+        assertNull(filled.first().uvIndex)
+        assertEquals(3, filled.last().uvIndex)
+        assertEquals(listOf("2026-10-13", "", "2026-10-14"), supplements.dailyTime)
+        val daily = requireNotNull(omSupplementsToWeatherData(supplements, now)).daily
+        assertEquals(listOf(20.0, 25.0), daily.map { it.high })
+        assertTrue(daily.all { it.dateMillis > 0L })
+    }
+
+    @Test
+    fun invalidModelTimesNeverShiftTemperaturesOrBecomeHourlyWeather() {
+        val root = obj("""{"utc_offset_seconds":28800,"hourly":{
+            "time":["2026-10-13T10:00","invalid","2026-10-13T12:00"],
+            "temperature_2m_ecmwf_ifs025":[20,99,25]}}
+        """)
+        val model = OpenMeteoApi.parseMultiModel(root, obj("{}")).models.single()
+        assertEquals(0L, model.timeMillis[1])
+        val weather = omModelToWeatherData(model, Instant.parse("2026-10-13T02:00:00Z").toEpochMilli())
+        assertEquals(listOf(20.0, 25.0), weather.hourly.map { it.temperature })
+        assertTrue(weather.hourly.all { it.timeMillis > 0L })
+        val invalidOnly = obj("""{"hourly":{"time":[null,"invalid"],"temperature_2m_ecmwf_ifs025":[99,99]}}""")
+        assertTrue(OpenMeteoApi.parseMultiModel(invalidOnly, obj("{}")).models.isEmpty())
+    }
 
     @Test
     fun multiModelParsesSuffixedKeysAndToleratesMissingPrecipProb() {

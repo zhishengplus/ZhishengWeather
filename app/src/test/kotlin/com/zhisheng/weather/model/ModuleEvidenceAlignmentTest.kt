@@ -41,42 +41,46 @@ class ModuleEvidenceAlignmentTest {
         assertEquals(data.rainNowcast, WeatherConsistency.align(data, now).rainNowcast)
     }
 
-    @Test fun sameSourceStillSynchronizesRainCurrentAndExistingForecast() {
-        val data = WeatherData(current = clear, hourly = listOf(forecast), rainMinutes = wet,
-            moduleEvidence = evidence("XIAOMI", "XIAOMI", "XIAOMI"))
-        val result = WeatherConsistency.align(data, now)
-        assertEquals(WeatherCondition.RAIN, result.current!!.condition)
-        assertEquals(WeatherCondition.RAIN, result.hourly.single().condition)
-        assertEquals(20.0, result.hourly.single().temperature!!, 0.0)
+    @Test fun sameSourceAlsoPreservesObservationsAndForecasts() {
+        val raw = WeatherData(current = clear, hourly = listOf(forecast), rainMinutes = wet,
+            rainNowcast = "未来两小时无降水", moduleEvidence = evidence("XIAOMI", "XIAOMI", "XIAOMI"))
+        val result = WeatherConsistency.align(raw, now)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.hourly, result.hourly)
+        assertEquals(raw.rainNowcast, result.rainNowcast)
+        assertEquals(raw.moduleEvidence, result.moduleEvidence)
     }
 
-    @Test fun sameSourceStillAddsCurrentToAnExistingFutureSeriesAndReconcilesDryText() {
-        val data = WeatherData(current = clear, hourly = listOf(forecast.copy(timeMillis = now + 3_600_000)),
-            rainMinutes = wet, rainNowcast = "未来两小时无降水",
-            moduleEvidence = evidence("XIAOMI", "XIAOMI", "XIAOMI"))
-        val result = WeatherConsistency.align(data, now)
-        assertEquals(2, result.hourly.size)
-        assertEquals(now, result.hourly.first().timeMillis)
-        assertNull(result.rainNowcast)
+    @Test fun sameSourceFutureOnlySeriesIsNotAugmented() {
+        val raw = WeatherData(current = clear, hourly = listOf(forecast.copy(timeMillis = now + 3_600_000)), rainMinutes = wet,
+            rainNowcast = "未来两小时无降水", moduleEvidence = evidence("XIAOMI", "XIAOMI", "XIAOMI"))
+        val result = WeatherConsistency.align(raw, now)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.hourly, result.hourly)
+        assertEquals(raw.rainNowcast, result.rainNowcast)
+        assertEquals(raw.moduleEvidence, result.moduleEvidence)
     }
 
-    @Test fun absentOrUnknownEvidencePreservesHistoricalAlignment() {
-        val legacy = WeatherData(current = clear, hourly = listOf(forecast.copy(timeMillis = now + 3_600_000)),
+    @Test fun missingOrUnknownEvidenceDoesNotPermitSourceRewriting() {
+        val raw = WeatherData(current = clear, hourly = listOf(forecast.copy(timeMillis = now + 3_600_000)),
             rainMinutes = wet, rainNowcast = "未来两小时无降水")
         listOf(emptyMap(), evidence("未知"), mapOf("current" to WeatherModuleEvidence("XIAOMI"))).forEach { metadata ->
-            val result = WeatherConsistency.align(legacy.copy(moduleEvidence = metadata), now)
-            assertEquals(WeatherCondition.RAIN, result.current!!.condition)
-            assertEquals(2, result.hourly.size)
-            assertEquals(20.0, result.hourly.first().temperature!!, 0.0)
-            assertNull(result.rainNowcast)
+            val input = raw.copy(moduleEvidence = metadata)
+            val result = WeatherConsistency.align(input, now)
+            assertEquals(input.current, result.current)
+            assertEquals(input.hourly, result.hourly)
+            assertEquals(input.rainNowcast, result.rainNowcast)
+            assertEquals(metadata, result.moduleEvidence)
         }
     }
 
-    @Test fun reorderedLabelsOfSameFusionSourcesStillAlign() {
-        val data = WeatherData(current = clear, hourly = listOf(forecast), rainMinutes = wet,
-            moduleEvidence = evidence("XIAOMI + OPEN-METEO", "OPEN-METEO + XIAOMI", "OPEN-METEO + XIAOMI"))
-        val result = WeatherConsistency.align(data, now)
-        assertEquals(WeatherCondition.RAIN, result.current!!.condition)
-        assertEquals(20.0, result.hourly.single().temperature!!, 0.0)
+    @Test fun fusionSourceOrderDoesNotChangeSourceValues() {
+        val raw = WeatherData(current = clear, hourly = listOf(forecast), rainMinutes = wet,
+            rainNowcast = "未来两小时无降水", moduleEvidence = evidence("XIAOMI + OPEN-METEO", "OPEN-METEO + XIAOMI", "OPEN-METEO + XIAOMI"))
+        val result = WeatherConsistency.align(raw, now)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.hourly, result.hourly)
+        assertEquals(raw.rainNowcast, result.rainNowcast)
+        assertEquals(raw.moduleEvidence, result.moduleEvidence)
     }
 }

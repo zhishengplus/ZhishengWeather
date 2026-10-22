@@ -8,13 +8,20 @@ import org.junit.Test
 class PortraitColdStartRegressionTest {
     private val root = File(requireNotNull(System.getProperty("user.dir")))
 
-    @Test fun disabledLandscapeCannotBeTemporarilyEnabledDuringPreferenceLoading() {
+    @Test fun systemRotationPolicyAppliesFromColdStartWithoutPreferenceOrSensorOverrides() {
         val activity = File(root, "src/main/kotlin/com/zhisheng/weather/MainActivity.kt").readText()
-        val manifest = File(root, "src/main/AndroidManifest.xml").readText()
-        assertTrue(manifest.contains("android:screenOrientation=\"portrait\""))
+        val document = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            .newDocumentBuilder().parse(File(root, "src/main/AndroidManifest.xml"))
+        val activities = document.getElementsByTagName("activity")
+        val main = (0 until activities.length).map { activities.item(it) as org.w3c.dom.Element }
+            .single { it.getAttribute("android:name") == ".MainActivity" }
+        assertTrue(main.getAttribute("android:screenOrientation") == "fullUser")
+        assertTrue(main.getAttribute("android:configChanges").split('|').containsAll(listOf("orientation", "screenSize")))
         assertTrue(activity.contains("landscapeStandby.collectAsState(initial = false)"))
         assertFalse(activity.contains("landscapeStandby.collectAsState(initial = true)"))
-        assertTrue(activity.indexOf("requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT") < activity.indexOf("setContent {"))
+        assertFalse(activity.contains("requestedOrientation"))
+        assertFalse(activity.contains("OrientationEventListener"))
+        assertFalse(activity.contains("StandbyTiltGate"))
     }
 
     @Test fun taskRestoreDoesNotReplaySearchShortcut() {

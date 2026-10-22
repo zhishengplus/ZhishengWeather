@@ -39,10 +39,12 @@ object WeatherRepository {
         val fingerprint: String,
         val available: Set<SourcePref>,
         val credentialsEmpty: Boolean,
+        val priority: List<SourcePref>,
     )
 
     private suspend fun configuration(primary: SourcePref): Configuration {
         val policy = SettingsRepository.moduleSources.first()
+        val priority = SettingsRepository.sourcePriority.first()
         val developer = SettingsRepository.developerMode.first()
         val qw = SecretStore.currentQw()
         val cy = SecretStore.currentCaiyun()
@@ -62,8 +64,9 @@ object WeatherRepository {
             if (seniverse.ready) available += SourcePref.SENIVERSE
             if (moji.ready) available += SourcePref.MOJI
         }
-        return Configuration(policy, weatherConfigurationFingerprint(primary, policy, developer, credentials),
-            available, credentials.all(String::isBlank))
+        return Configuration(policy, weatherConfigurationFingerprint(primary, policy, developer,
+            if (priority.isEmpty()) credentials else credentials + ("priority-fields-v2:" + priority.joinToString(",") { it.key })),
+            available, credentials.all(String::isBlank), priority)
     }
 
     /** Configuration-aware replacement for SourcePref.matches at cache read sites. */
@@ -105,7 +108,21 @@ object WeatherRepository {
                 }
             }
         }
-        markSuccessfulFetch(result.copy(configurationFingerprint = config.fingerprint, sourceDiagnostics = diagnostics), System.currentTimeMillis())
+        // Opt-in fallback fills missing blocks and aligned fields; existing values win.
+        val fallbackSources = config.priority.filter { it != pref && it in config.available }
+        for (source in fallbackSources) {
+            if (!weatherNeedsSupplement(result)) break
+            val remaining = (startedAt + 22_000 - System.currentTimeMillis()).coerceIn(0, 6_000)
+            if (remaining <= 0) break
+            val donor = donors[source] ?: try {
+                kotlinx.coroutines.withTimeoutOrNull(remaining) {
+                    stampModules(fetchPrimaryWeather(city, source, includeHistory = false), city)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { null }
+            if (donor != null) result = fillMissingWeather(result, donor)
+        }
+        markSuccessfulFetch(result.copy(configurationFingerprint = config.fingerprint, sourceDiagnostics = result.sourceDiagnostics + diagnostics), System.currentTimeMillis())
         } finally { batch?.close() }
     }
 
@@ -374,7 +391,7 @@ object WeatherRepository {
     /**
      * 逐时完整性兜底：融合、单源直通与降级自动出口都可能缺整列逐时字段。
      * 紫外线：OM best_match 逐时序列回填；仍缺的时段按当日 UV 峰值 × 日出日落太阳弧线推导（夜间为 0）。
-     * 空气：OM 小时浓度走国标 HJ633 公式逐桶回填（部分缺失也补，不只整列空）。
+     * 空气：仅六项浓度齐全且时戳相符时按 HJ633—2026 公式回填，并标为模型估算。
      * 体感：融合同款本地公式（风冷/酷热指数）；阵风：缺阵风降级为风速（与融合引擎一致）。
      * 月相/月升月落：MoonCalc 本地天文补齐——非融合路径缺它，日月宽卡会只剩太阳一张。
      */
@@ -416,7 +433,8 @@ object WeatherRepository {
         if (omAir != null) {
             result = result.copy(hourly = result.hourly.map { h ->
                 if (h.aqi != null) h
-                else h.copy(aqi = FusionEngine.gbAqiAt(omAir, h.timeMillis)?.first)
+                else FusionEngine.gbAqiAt(omAir, h.timeMillis)?.first
+                    ?.let { h.copy(aqi = it, aqiEstimated = true) } ?: h
             })
         }
         result = result.copy(hourly = result.hourly.map { h ->
@@ -651,15 +669,7 @@ object WeatherRepository {
                 }?.let { addAll(it) }
             }.map { dd -> MoonCalc.enrich(dd, city.latitude, city.longitude) }
 
-            val minuteList = m?.minutely?.takeIf { m.code == "200" }?.mapNotNull { mi ->
-                val t = parseTimeMillis(mi.fxTime)
-                if (t == 0L) null else MinutePrecip(
-                    t,
-                    // 和风 minutely.precip 是 5 分钟累计毫米，统一换算成 mm/h。
-                    Nowcast.accumulatedMmToRate(mi.precip?.toFloatOrNull() ?: 0f, 5),
-                    if (mi.type.equals("snow", true)) PrecipitationPhase.SNOW else PrecipitationPhase.RAIN,
-                )
-            } ?: emptyList()
+            val minuteList = qweatherMinuteSeries(m)
 
             WeatherData(
                 current = CurrentWeather(
@@ -1427,6 +1437,17 @@ object WeatherRepository {
                 .trim()
         }
     }
+
+    internal fun qweatherMinuteSeries(response: QwMinutely?): List<MinutePrecip> =
+        response?.minutely?.takeIf { response.code == "200" }?.mapNotNull { sample ->
+            val time = parseTimeMillis(sample.fxTime).takeIf { it > 0L } ?: return@mapNotNull null
+            val mm = sample.precip?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
+                ?: return@mapNotNull null
+            // QWeather's five-minute accumulated millimetres become mm/h, with gaps left intact.
+            val rate = (mm * 12.0).toFloat().takeIf(Float::isFinite) ?: return@mapNotNull null
+            MinutePrecip(time, rate,
+                if (sample.type.equals("snow", true)) PrecipitationPhase.SNOW else PrecipitationPhase.RAIN)
+        }.orEmpty()
 
     private fun xiaomiMinuteSeries(precip: XiaomiMinutelyPrecip?): List<MinutePrecip> {
         val values = precip?.value?.map { it.toFloat() }.orEmpty()

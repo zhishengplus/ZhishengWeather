@@ -117,11 +117,12 @@ internal fun replaceModule(base: WeatherData, donor: WeatherData, module: Weathe
 
 internal fun weatherConfigurationFingerprint(primary: SourcePref, policy: ModuleSourcePolicy, developer: Boolean, credentials: List<String>): String {
     // Length-prefix each field to avoid ambiguous boundaries; only the digest leaves this function.
-    val values = listOf("module-v1", primary.key, policy.encode(), developer.toString()) + credentials
+    // 10.6 changes observation/forecast alignment and AQI provenance. Older processed weather
+    // must be fetched again; this changes only weather snapshots, never cities or preferences.
+    val values = listOf("module-v2-accuracy10.6", primary.key, policy.encode(), developer.toString()) + credentials
     val bytes = values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
     return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }
 
 internal fun cacheMatchesConfiguration(data: WeatherData, primary: SourcePref, policy: ModuleSourcePolicy, fingerprint: String, credentialsEmpty: Boolean): Boolean =
-    if (data.configurationFingerprint != null) data.configurationFingerprint == fingerprint
-    else policy.followsPrimary && credentialsEmpty && primary.matches(data)
+    data.configurationFingerprint != null && data.configurationFingerprint == fingerprint

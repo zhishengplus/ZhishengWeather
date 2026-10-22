@@ -67,11 +67,13 @@ class WeatherAuditRegressionTest {
     @Test fun backfilledAqiUsesActualForecastTimestampsInHalfHourTimezones() {
         val air = OpenMeteoApi.parseAirQuality(obj("""
             {"utc_offset_seconds":19800,"hourly":{
-            "time":["2026-09-30T11:00","2026-09-30T12:00"],"pm2_5":[35,75]}}
+            "time":["2026-09-30T11:00","2026-09-30T12:00"],"pm2_5":[35,75],
+            "pm10":[0,0],"ozone":[0,0],"nitrogen_dioxide":[0,0],"sulphur_dioxide":[0,0],"carbon_monoxide":[0,0]}}
         """))
         val data = WeatherData(hourly = listOf(HourlyWeather(epoch("2026-09-30T06:30:00Z"))),
             utcOffsetSeconds = 19800)
-        assertEquals(100, backfill(data, air).hourly.single().aqi)
+        assertEquals(114, backfill(data, air).hourly.single().aqi)
+        assertTrue(backfill(data, air).hourly.single().aqiEstimated)
     }
 
     private fun backfill(data: WeatherData, air: OmAirQuality?): WeatherData {
@@ -84,22 +86,23 @@ class WeatherAuditRegressionTest {
 
     @Test fun hourlyAqiPrefersTheExactHourInsteadOfTheFirstNearbyRow() {
         val air = airWithHourlyPm25()
-        assertEquals(100, FusionEngine.gbAqiAt(air, epoch("2026-09-30T03:00:00Z"))?.first)
+        assertEquals(114, FusionEngine.gbAqiAt(air, epoch("2026-09-30T03:00:00Z"))?.first)
         assertEquals(50, FusionEngine.gbAqiAt(air, epoch("2026-09-30T02:00:00Z"))?.first)
     }
 
-    @Test fun hourlyAqiUsesNearestActualTimestampAndRejectsDistantRows() {
+    @Test fun hourlyAqiNeverRelabelsNearbyInstantaneousConcentrationsAsTheTargetHour() {
         val bucket = epoch("2026-09-30T03:00:00Z")
         val air = airWithHourlyPm25().copy(hourlyTimeMillis = listOf(bucket - 3_600_000L, bucket + 20 * 60_000L))
-        assertEquals(100, FusionEngine.gbAqiAt(air, bucket)?.first)
+        assertNull(FusionEngine.gbAqiAt(air, bucket))
         assertNull(FusionEngine.gbAqiAt(air.copy(hourlyTimeMillis = listOf(bucket - 2 * 3_600_000L)), bucket))
     }
 
     @Test fun carbonMonoxideIsConvertedToMilligramsBeforeAqiAndDisplay() {
         val air = OpenMeteoApi.parseAirQuality(obj("""
             {"utc_offset_seconds":28800,
-             "current":{"pm2_5":35,"carbon_monoxide":352},
-             "hourly":{"time":["2026-09-30T11:00"],"pm2_5":[35],"carbon_monoxide":[352]}}
+             "current":{"pm2_5":35,"carbon_monoxide":352,"pm10":0,"ozone":0,"nitrogen_dioxide":0,"sulphur_dioxide":0},
+             "hourly":{"time":["2026-09-30T11:00"],"pm2_5":[35],"carbon_monoxide":[352],
+              "pm10":[0],"ozone":[0],"nitrogen_dioxide":[0],"sulphur_dioxide":[0]}}
         """.trimIndent()))
         assertEquals(0.352, requireNotNull(air.currentCo), 0.000001)
         assertEquals(0.352, requireNotNull(air.hourlyCo.single()), 0.000001)
@@ -133,6 +136,7 @@ class WeatherAuditRegressionTest {
 
     private fun airWithHourlyPm25() = OpenMeteoApi.parseAirQuality(obj("""
         {"utc_offset_seconds":28800,"hourly":{
-          "time":["2026-09-30T10:00","2026-09-30T11:00"],"pm2_5":[35,75]}}
+          "time":["2026-09-30T10:00","2026-09-30T11:00"],"pm2_5":[35,75],
+          "pm10":[0,0],"ozone":[0,0],"nitrogen_dioxide":[0,0],"sulphur_dioxide":[0,0],"carbon_monoxide":[0,0]}}
     """.trimIndent()))
 }

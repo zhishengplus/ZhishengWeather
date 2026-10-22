@@ -79,7 +79,24 @@ class WeatherModulePolicyTest {
         assertFalse(cacheMatchesConfiguration(data, SourcePref.XIAOMI, policy, "changed", false))
         assertFalse(cacheMatchesConfiguration(primary, SourcePref.XIAOMI, policy, "request-snapshot", true))
         assertFalse(cacheMatchesConfiguration(primary, SourcePref.XIAOMI, ModuleSourcePolicy(), "request-snapshot", false))
-        assertTrue(cacheMatchesConfiguration(primary, SourcePref.XIAOMI, ModuleSourcePolicy(), "request-snapshot", true))
+        assertFalse(cacheMatchesConfiguration(primary, SourcePref.XIAOMI, ModuleSourcePolicy(), "request-snapshot", true))
+    }
+
+    @Test fun accuracy10_6InvalidatesOldProcessedWeatherWithoutChangingRoutingPreferences() {
+        val policy = ModuleSourcePolicy()
+        val values = listOf("module-v1", SourcePref.XIAOMI.key, policy.encode(), false.toString())
+        val oldBytes = values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
+        val oldFingerprint = java.security.MessageDigest.getInstance("SHA-256").digest(oldBytes)
+            .joinToString("") { "%02x".format(it) }
+        val currentFingerprint = weatherConfigurationFingerprint(SourcePref.XIAOMI, policy, false, emptyList())
+        assertNotEquals(oldFingerprint, currentFingerprint)
+        val old = primary.copy(configurationFingerprint = oldFingerprint)
+        assertFalse(cacheMatchesConfiguration(old, SourcePref.XIAOMI, policy, currentFingerprint, true))
+        assertFalse(cacheMatchesConfiguration(primary, SourcePref.XIAOMI, policy, currentFingerprint, true))
+        assertTrue(cacheMatchesConfiguration(primary.copy(configurationFingerprint = currentFingerprint),
+            SourcePref.XIAOMI, policy, currentFingerprint, true))
+        assertEquals("provider-original", city.locationKey)
+        assertTrue(policy.followsPrimary)
     }
 
     @Test fun oldCachedModelStillDecodesWithNewFieldsAbsent() {

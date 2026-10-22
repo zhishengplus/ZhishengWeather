@@ -78,6 +78,8 @@ internal data class SearchUiState(
     val results: List<City> = emptyList(), val searching: Boolean = false,
     val onlineAttempted: Boolean = false, val failure: PlaceFailure? = null,
     val indexUnavailable: Boolean = false, val region: PlaceRegion = PlaceRegion.DOMESTIC,
+    val province: String = "", val municipality: String = "",
+    val provinces: List<String> = emptyList(), val municipalities: List<String> = emptyList(),
 )
 
 @Composable
@@ -88,6 +90,7 @@ fun SearchScreen(onCityPicked: (City) -> Unit, onBack: () -> Unit) {
         localSearch = { CityRepository.searchLocal(it) },
         onlineSearch = { term, precise -> CityRepository.searchOnline(term, precise) },
         regionalSearch = { term, precise, region -> CityRepository.searchOnline(term, precise, region) },
+        areaSearch = { term, precise, region, areas -> CityRepository.searchOnline(term, precise, region, areas) },
         amapEnhanced = developerMode && amap.ready)
 }
 
@@ -97,7 +100,8 @@ internal fun LiveSearchScreen(onCityPicked: (City) -> Unit, onBack: () -> Unit,
     onlineSearch: suspend (String, Boolean) -> com.zhisheng.weather.data.PlaceSearchOutcome,
     ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
     regionalSearch: (suspend (String, Boolean, PlaceRegion) -> com.zhisheng.weather.data.PlaceSearchOutcome)? = null,
-    amapEnhanced: Boolean = false) {
+    amapEnhanced: Boolean = false,
+    areaSearch: (suspend (String, Boolean, PlaceRegion, List<String>) -> com.zhisheng.weather.data.PlaceSearchOutcome)? = null) {
     var region by rememberSaveable { mutableStateOf(PlaceRegion.DOMESTIC) }
     var query by rememberSaveable { mutableStateOf("") }
     var precise by rememberSaveable { mutableStateOf(false) }
@@ -105,26 +109,42 @@ internal fun LiveSearchScreen(onCityPicked: (City) -> Unit, onBack: () -> Unit,
     var retry by remember { mutableStateOf(0) }
     var generation by remember { mutableStateOf(0L) }
     var state by remember { mutableStateOf(SearchUiState()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var province by rememberSaveable { mutableStateOf("") }
+    var municipality by rememberSaveable { mutableStateOf("") }
+    var provinces by remember { mutableStateOf(emptyList<String>()) }
+    var municipalities by remember { mutableStateOf(emptyList<String>()) }
+    androidx.compose.runtime.LaunchedEffect(province) {
+        provinces = LocalPlaces.areas(context)
+        municipalities = if (province.isBlank()) emptyList() else LocalPlaces.areas(context, province)
+    }
     val requestRegion = region
     val requestQuery = query
     val requestPrecise = precise
     val requestSubmitted = submitted
     val requestGeneration = generation
+    val requestArea = listOf(province, municipality).filter(String::isNotBlank).distinct()
     androidx.compose.runtime.LaunchedEffect(requestQuery, requestPrecise, requestSubmitted, retry, requestGeneration, requestRegion) {
         if (generation != requestGeneration) return@LaunchedEffect
         fun publish(value: SearchUiState) { if (generation == requestGeneration) state = value }
         val term = requestQuery.trim()
         publish(SearchUiState(requestQuery, requestPrecise, region = requestRegion))
-        if (term.isEmpty()) return@LaunchedEffect
+        if (term.isEmpty() && requestArea.isEmpty()) return@LaunchedEffect
+        val scopedTerm = (requestArea + term).filter(String::isNotBlank).joinToString(" ")
+        fun scoped(values: List<City>) = values.filter { com.zhisheng.weather.data.cityMatchesSearchArea(it, requestArea) }
         delay(100)
-        val local = withContext(ioDispatcher) { filterPlaceRegion(localSearch(term), requestRegion) }
+        val local = withContext(ioDispatcher) { scoped(filterPlaceRegion(localSearch(scopedTerm), requestRegion)) }
         if (generation != requestGeneration) return@LaunchedEffect
         publish(state.copy(results = local, indexUnavailable = LocalPlaces.unavailable))
         if (requestSubmitted != term) return@LaunchedEffect
         publish(state.copy(searching = true, onlineAttempted = true))
         try {
-            val online = withContext(ioDispatcher) { regionalSearch?.invoke(term, requestPrecise, requestRegion) ?: onlineSearch(term, requestPrecise) }
-            publish(state.copy(results = filterPlaceRegion(mergePlaceSearchResults(local, online.cities), requestRegion), failure = online.failure))
+            val onlineTerm = if (requestPrecise) scopedTerm else term.ifBlank { requestArea.lastOrNull().orEmpty() }
+            val online = withContext(ioDispatcher) {
+                areaSearch?.invoke(onlineTerm, requestPrecise, requestRegion, requestArea)
+                    ?: regionalSearch?.invoke(onlineTerm, requestPrecise, requestRegion) ?: onlineSearch(onlineTerm, requestPrecise)
+            }
+            publish(state.copy(results = scoped(filterPlaceRegion(mergePlaceSearchResults(local, online.cities), requestRegion)), failure = online.failure))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -135,12 +155,14 @@ internal fun LiveSearchScreen(onCityPicked: (City) -> Unit, onBack: () -> Unit,
     }
     // Controlled input must echo the edit in the same composition, independently
     // of debounced lookup effects. Delaying this value can reorder fast IME edits.
-    SearchScreenContent(state.copy(query = query, preciseAddress = precise, region = region),
+    SearchScreenContent(state.copy(query = query, preciseAddress = precise, region = region,
+        province = province, municipality = municipality, provinces = provinces, municipalities = municipalities),
         onQueryChanged = { query = it.take(120); submitted = null; generation++; state = SearchUiState(query, precise, region = region) },
         onScopeChanged = { precise = it; submitted = null; generation++; state = SearchUiState(query, precise, region = region) },
         onSearch = { submitted = query.trim(); retry++; generation++ },
         onCityPicked = onCityPicked, onBack = onBack,
-        onRegionChanged = { region = it; submitted = null; generation++; state = SearchUiState(query, precise, region = region) },
+        onRegionChanged = { region = it; province = ""; municipality = ""; submitted = null; generation++; state = SearchUiState(query, precise, region = region) },
+        onAreaChanged = { first, second -> province = first; municipality = second; submitted = null; generation++ },
         amapEnhanced = amapEnhanced)
 }
 
@@ -150,6 +172,7 @@ internal fun SearchScreenContent(state: SearchUiState, onQueryChanged: (String) 
     onScopeChanged: (Boolean) -> Unit, onSearch: () -> Unit,
     onCityPicked: (City) -> Unit, onBack: () -> Unit,
     onRegionChanged: (PlaceRegion) -> Unit = {},
+    onAreaChanged: (String, String) -> Unit = { _, _ -> },
     amapEnhanced: Boolean = false) {
     val chrome = LocalZhishengChrome.current
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
@@ -188,6 +211,7 @@ internal fun SearchScreenContent(state: SearchUiState, onQueryChanged: (String) 
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 item(key = "search-scope-controls") {
                     Column {
+                        SearchPlaceTools(state, onAreaChanged, onCityPicked)
                         Row(Modifier.fillMaxWidth().selectableGroup().padding(bottom = 6.dp)) {
                             SearchScopeButton("国内", state.region == PlaceRegion.DOMESTIC, Modifier.weight(1f)) { onRegionChanged(PlaceRegion.DOMESTIC) }
                             SearchScopeButton("海外", state.region == PlaceRegion.OVERSEAS, Modifier.weight(1f)) { onRegionChanged(PlaceRegion.OVERSEAS) }

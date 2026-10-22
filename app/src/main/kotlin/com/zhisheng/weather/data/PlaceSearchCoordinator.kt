@@ -11,6 +11,14 @@ internal class PlaceServiceException(val failure: PlaceFailure, val retryAfterMi
     IOException("Place service: ${failure.name}")
 internal data class PlaceSearchOutcome(val cities: List<City>, val failure: PlaceFailure? = null)
 
+internal fun cityMatchesSearchArea(city: City, areas: List<String>): Boolean {
+    fun normalized(value: String): String = value.trim().removeSuffix("特别行政区")
+        .removeSuffix("壮族自治区").removeSuffix("回族自治区").removeSuffix("维吾尔自治区")
+        .removeSuffix("自治区").removeSuffix("省").removeSuffix("市")
+    val parts = (city.affiliation.split('·', ',', '，', ' ') + city.name).map(::normalized)
+    return areas.all { area -> normalized(area) in parts }
+}
+
 /** One budget for the entire chain. Cancellation is never a reason to try another provider. */
 internal suspend fun coordinatePlaceSearch(
     providers: List<suspend () -> List<City>>,
@@ -45,8 +53,28 @@ internal suspend fun coordinatePlaceSearch(
     return PlaceSearchOutcome(emptyList(), if (sawEmpty) null else failure)
 }
 
-internal fun mergePlaceSearchResults(local: List<City>, online: List<City>): List<City> =
-    (local + online).distinctBy(City::locationKey).take(60)
+internal fun mergePlaceSearchResults(local: List<City>, online: List<City>): List<City> {
+    val result = mutableListOf<City>()
+    fun administrative(city: City) = city.coordinateKind == com.zhisheng.weather.model.CoordinateKind.ADMINISTRATIVE ||
+        (!city.isPreciseLocation && city.street.isNullOrBlank())
+    fun name(city: City) = city.name.trim().removeSuffix("市")
+    fun region(city: City) = city.affiliation.split('·', ',', '，').map(String::trim)
+        .filter { it.isNotEmpty() && it != "中国" && it.removeSuffix("市") != name(city) }.joinToString("·")
+    for (city in local + online) {
+        if (result.any { previous -> previous.locationKey == city.locationKey ||
+            (administrative(previous) && administrative(city) && name(previous) == name(city) &&
+                (previous.countryCode == null || city.countryCode == null || previous.countryCode == city.countryCode) &&
+                region(previous) == region(city) &&
+                (city.coordinateKind == com.zhisheng.weather.model.CoordinateKind.ADMINISTRATIVE &&
+                    previous.coordinateKind == com.zhisheng.weather.model.CoordinateKind.ADMINISTRATIVE ||
+                    (name(city) in setOf("北京", "上海", "天津", "重庆") &&
+                        distanceKm(previous.latitude, previous.longitude, city.latitude, city.longitude) <= 100.0) ||
+                    distanceKm(previous.latitude, previous.longitude, city.latitude, city.longitude) <= 5.0)) }) continue
+        result += city
+        if (result.size >= 60) break
+    }
+    return result
+}
 
 internal fun amapFailure(code: String?): PlaceFailure = when (code) {
     "10001", "10002", "10005", "10006", "10007", "10008", "10009", "10012", "10013" -> PlaceFailure.AUTH
@@ -62,7 +90,8 @@ internal fun baiduFailure(code: Int?): PlaceFailure = when (code) {
 }
 
 /** Equality is used only in memory; credentials never appear in toString or telemetry. */
-internal data class PlaceCredentials(val amap: String = "", val baidu: String = "", val qweatherEnabled: Boolean = false, val revision: Long = 0) {
+internal data class PlaceCredentials(val amap: String = "", val baidu: String = "", val qweatherEnabled: Boolean = false, val revision: Long = 0,
+    val sharedPlace: SharedPlaceConfiguration = SharedPlaceConfiguration()) {
     override fun toString() = "PlaceCredentials(redacted)"
 }
 
@@ -78,10 +107,11 @@ internal suspend fun currentPlaceCredentials(): PlaceCredentials {
         val context = reminderDeliveryGate.contextVersion() ?: throw PlaceServiceException(PlaceFailure.CONFIG_CHANGED)
         val revision = PlaceConfigurationRevision.current()
         val enabled = SettingsRepository.developerMode.first()
-        val snapshot = if (!enabled) PlaceCredentials(revision = revision) else PlaceCredentials(
+        val shared = SecretStore.sharedPlaceFlow.first()
+        val snapshot = if (!enabled) PlaceCredentials(revision = revision, sharedPlace = shared) else PlaceCredentials(
             SecretStore.currentAmap().webServiceKey,
             SecretStore.currentBaidu().webServiceAk,
-            SettingsRepository.qweatherUnlocked(), revision)
+            SettingsRepository.qweatherUnlocked(), revision, shared)
         if (reminderDeliveryGate.contextVersion() == context && PlaceConfigurationRevision.current() == revision) return snapshot
     }
     throw PlaceServiceException(PlaceFailure.CONFIG_CHANGED)

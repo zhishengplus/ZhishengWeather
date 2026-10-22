@@ -735,7 +735,7 @@ private fun DomesticProviderStep(state: ProviderSetupUiState, model: ProviderSet
             ClipboardPasteButton(if (moji) "粘贴 AppCode" else "粘贴 API 私钥", model::setApiKey)
             if (moji) {
                 TerminalField("实况 HTTPS 请求地址", state.mojiCurrentEndpoint, model::setMojiCurrentEndpoint,
-                    helper = "复制坐标版 condition 或 briefcondition 的完整 HTTPS 地址，不带参数", error = state.fieldErrors[ProviderField.MOJI_NOW_URL], enabled = !state.testing)
+                    helper = "复制坐标版 condition 或 briefcondition 地址，不带参数；支持识别墨迹旧地址", error = state.fieldErrors[ProviderField.MOJI_NOW_URL], enabled = !state.testing)
                 TerminalField("实况接口 Token", state.mojiCurrentToken, model::setMojiCurrentToken,
                     helper = "复制该接口调用示例中的 Token", error = state.fieldErrors[ProviderField.MOJI_NOW_TOKEN], sensitive = true, enabled = !state.testing)
                 TerminalField("日预报 HTTPS 请求地址（可选）", state.mojiDailyEndpoint, model::setMojiDailyEndpoint,

@@ -1,9 +1,8 @@
 package com.zhisheng.weather.model
 
-import kotlin.math.abs
 
-// 把同一份 WeatherData 里互相打架的信号收成一套「现在」。
-// 实况、逐时第一格、短时降水文案必须能同时成立，不能上头下雨、下面写没雨。
+// Validate source values without rewriting observations with forecasts.
+// Presentation keeps current observations, hourly forecasts and nowcasts distinct.
 object WeatherConsistency {
     // Keep the preceding real hourly forecast at the exact-hour boundary.
     const val PAST_HOUR_GRACE_MS = 60 * 60_000L
@@ -24,14 +23,7 @@ object WeatherConsistency {
         nowMillis: Long = System.currentTimeMillis(),
     ): WeatherData {
         val sane = sanitize(data, nowMillis)
-        if (sane.error != null) return dropPastHourly(sane, nowMillis)
-        var d = dropPastHourly(sane, nowMillis)
-        if (d.current == null) return d
-        d = ensureCurrentHour(d, nowMillis)
-        d = syncCurrentWithNowcast(d, nowMillis)
-        d = overlayCurrentOntoNowHour(d, nowMillis)
-        d = reconcileNowcastText(d, nowMillis)
-        return d
+        return dropPastHourly(sane, nowMillis)
     }
 
     /**
@@ -195,108 +187,6 @@ object WeatherConsistency {
     fun upcomingHourStartIndex(hourly: List<HourlyWeather>, nowMillis: Long): Int {
         val current = currentHourIndex(hourly, nowMillis)
         return if (current >= 0) current + 1 else 0
-    }
-
-    internal fun ensureCurrentHour(data: WeatherData, nowMillis: Long): WeatherData {
-        // A current observation is not an hourly forecast. Limited sources and expired
-        // hourly series must remain empty; only align a provider's existing series.
-        if (data.hourly.isEmpty()) return data
-        if (clearlyDifferentModuleSources(data, "current", "forecast")) return data
-        val cur = data.current ?: return data
-        if (currentHourIndex(data.hourly, nowMillis) >= 0) return data
-        val nowHour = HourlyWeather(
-            timeMillis = nowMillis,
-            temperature = cur.temperature,
-            condition = cur.condition,
-            windSpeed = cur.windSpeed,
-            profile = cur.profile,
-        )
-        return data.copy(hourly = listOf(nowHour) + data.hourly)
-    }
-
-    internal fun syncCurrentWithNowcast(data: WeatherData, nowMillis: Long): WeatherData {
-        if (clearlyDifferentModuleSources(data, "current", "minutely")) return data
-        val cur = data.current ?: return data
-        val intervalMinutes = data.rainMeta?.intervalMinutes ?: 1
-        val seriesWet = Nowcast.seriesWetAt(data.rainMinutes, nowMillis, intervalMinutes = intervalMinutes)
-        if (cur.condition?.isPrecipitation == true || !seriesWet) return data
-        val nearby = Nowcast.samplesAt(data.rainMinutes, nowMillis, intervalMinutes)
-        val intensity = nearby.maxOfOrNull { it.precip } ?: 0f
-        val phase = nearby.maxByOrNull { it.precip }?.phase ?: cur.profile?.phase ?: PrecipitationPhase.RAIN
-        val upgraded = when (phase) {
-            PrecipitationPhase.SNOW -> WeatherCondition.SNOW
-            PrecipitationPhase.MIXED -> WeatherCondition.SLEET
-            PrecipitationPhase.FREEZING_RAIN -> WeatherCondition.FREEZING_RAIN
-            PrecipitationPhase.FREEZING_DRIZZLE -> WeatherCondition.FREEZING_DRIZZLE
-            PrecipitationPhase.HAIL -> WeatherCondition.HAIL
-            else -> if (intensity >= 0.25f) WeatherCondition.RAIN else WeatherCondition.DRIZZLE
-        }
-        val profile = WeatherProfile(
-            condition = upgraded,
-            intensity = when {
-                intensity >= 7.6f -> WeatherIntensity.HEAVY
-                intensity >= 2.5f -> WeatherIntensity.MODERATE
-                else -> WeatherIntensity.LIGHT
-            },
-            phase = phase,
-            source = "NOWCAST",
-        )
-        return data.copy(
-            current = cur.copy(
-                condition = upgraded,
-                weatherText = upgraded.label,
-                profile = profile,
-                precipMm = cur.precipMm?.takeIf { it > 0.05 } ?: intensity.toDouble(),
-            ),
-        )
-    }
-
-    internal fun overlayCurrentOntoNowHour(data: WeatherData, nowMillis: Long): WeatherData {
-        if (clearlyDifferentModuleSources(data, "current", "forecast")) return data
-        val cur = data.current ?: return data
-        val idx = currentHourIndex(data.hourly, nowMillis)
-        if (idx < 0) return data
-        val hour = data.hourly[idx]
-        if (hour.condition == cur.condition && hour.temperature == cur.temperature) return data
-        val patched = hour.copy(
-            condition = cur.condition ?: hour.condition,
-            temperature = cur.temperature ?: hour.temperature,
-            windSpeed = cur.windSpeed ?: hour.windSpeed,
-            profile = cur.profile ?: hour.profile,
-        )
-        val hours = data.hourly.toMutableList()
-        hours[idx] = patched
-        return data.copy(hourly = hours)
-    }
-
-    internal fun reconcileNowcastText(data: WeatherData, nowMillis: Long): WeatherData {
-        if (clearlyDifferentModuleSources(data, "current", "minutely")) return data
-        val api = data.rainNowcast?.trim().orEmpty()
-        if (api.isEmpty()) return data
-        val precipNow = data.current.let { cur ->
-            cur != null && (cur.condition?.isPrecipitation == true || (cur.precipMm ?: 0.0) > 0.05)
-        }
-        val timing = Nowcast.rainTiming(data.rainMinutes, nowMillis, currentPrecip = precipNow,
-            intervalMinutes = data.rainMeta?.intervalMinutes ?: 1)
-        if (timing.hasRain && Nowcast.isDryNowcast(api)) {
-            return data.copy(rainNowcast = null)
-        }
-        return data
-    }
-
-    /** A module selection must keep its returned measurements and provenance together.
-     * Legacy snapshots and same-source fusion keep the existing alignment behavior. */
-    private fun clearlyDifferentModuleSources(data: WeatherData, first: String, second: String): Boolean {
-        fun sources(module: String): Set<String>? {
-            val raw = data.moduleEvidence[module]?.source ?: return null
-            val parts = raw.split('+').map { it.trim().uppercase(java.util.Locale.ROOT) }.toSet()
-            return parts.takeIf { it.isNotEmpty() && it.none { source ->
-                source.isBlank() || source in setOf("未知", "UNKNOWN", "NONE", "NULL")
-            } }
-        }
-        val left = sources(first) ?: return false
-        val right = sources(second) ?: return false
-        return left != right
     }
 
     private fun Double?.inRange(min: Double, max: Double): Double? =

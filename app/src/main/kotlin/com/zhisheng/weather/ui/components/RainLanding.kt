@@ -7,81 +7,119 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import com.zhisheng.weather.data.AmbienceLevel
+import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.ui.theme.LocalZhishengChrome
 
-internal val LocalRainLanding = staticCompositionLocalOf<MutableState<Rect?>?> { null }
+internal data class RainLandingSurface(val cityKey: String?, val weather: WeatherData?, val bounds: Rect)
 
-/** The actual first module supplies its edge, including reordering and scroll displacement. */
+/** Each retained city owns its edge and removes only its own registration. */
+internal class RainLandingRegistry {
+    private val surfaces = mutableStateMapOf<Any, RainLandingSurface>()
+    fun update(owner: Any, cityKey: String?, weather: WeatherData?, bounds: Rect) {
+        surfaces[owner] = RainLandingSurface(cityKey, weather, bounds)
+    }
+    fun updateWeather(owner: Any, cityKey: String?, weather: WeatherData?) {
+        surfaces[owner]?.let { surfaces[owner] = it.copy(cityKey = cityKey, weather = weather) }
+    }
+    fun remove(owner: Any) { surfaces.remove(owner) }
+    fun snapshot(): List<RainLandingSurface> = surfaces.values.toList()
+}
+
+internal val LocalRainLanding = staticCompositionLocalOf<RainLandingRegistry?> { null }
+
+/** Real module bounds follow both page translation and vertical scrolling. */
 @Composable
-internal fun RainLandingTarget(enabled: Boolean, content: @Composable () -> Unit) {
+internal fun RainLandingTarget(enabled: Boolean, cityKey: String? = null, weather: WeatherData? = null,
+    content: @Composable () -> Unit) {
     val landing = LocalRainLanding.current
     if (!enabled || landing == null) { content(); return }
-    DisposableEffect(landing) { onDispose { landing.value = null } }
+    val owner = remember { Any() }
+    DisposableEffect(landing, owner) { onDispose { landing.remove(owner) } }
+    SideEffect { landing.updateWeather(owner, cityKey, weather) }
     Box(Modifier.onGloballyPositioned { coordinates ->
         val origin = coordinates.positionInRoot()
-        landing.value = Rect(origin.x, origin.y,
-            origin.x + coordinates.size.width, origin.y + coordinates.size.height)
+        landing.update(owner, cityKey, weather, Rect(origin.x, origin.y,
+            origin.x + coordinates.size.width, origin.y + coordinates.size.height))
     }) { content() }
 }
 
 @Composable
 internal fun RainLandingOverlay(state: NaturalLightState, palette: NaturalLightPalette,
-    level: AmbienceLevel, clock: State<Double>, landing: State<Rect?>,
-    root: () -> Offset, parallax: () -> Float) {
-    if (level == AmbienceLevel.OFF || state.weather !in setOf(NaturalWeather.RAIN, NaturalWeather.STORM)) return
+    level: AmbienceLevel, clock: State<Double>, landing: RainLandingRegistry,
+    root: () -> Offset, parallax: () -> Float, skyFrame: () -> NaturalSkyFrame? = { null }) {
+    if (level == AmbienceLevel.OFF) return
     val inset = LocalZhishengChrome.current.pagePadding
     val preview = LocalNaturalPreviewPhase.current
+    val quality = LocalSkyRenderQuality.current
+    val budget = LocalSkyRenderBudget.current ?: quality
+    val pagingFraction = LocalSkyPagingFraction.current
+    val pagingActive = LocalSkyPagingActive.current
+    val heldPhase = remember { doubleArrayOf(0.0) }
     val gain = when (level) { AmbienceLevel.SUBTLE -> .48f; AmbienceLevel.VIVID -> .76f; else -> 1f }
     Box(Modifier.fillMaxSize().drawBehind {
-        val card = landing.value
-        val edge = card?.let { it.top - root().y } ?: minOf(size.height, 720.dp.toPx())
-        if (edge < 140.dp.toPx()) return@drawBehind
-        val visibility = gain * (1f - smoothNatural(parallax() / density / 440f))
+        val frame = skyFrame()
+        val visibleState = frame?.state ?: state
+        val visiblePalette = frame?.palette ?: palette
+        val rainWeight = frame?.let { it.weatherWeights[NaturalWeather.RAIN.ordinal] +
+            it.weatherWeights[NaturalWeather.STORM.ordinal] + it.weatherWeights[NaturalWeather.MIXED.ordinal] }
+            ?: if (state.weather in setOf(NaturalWeather.RAIN, NaturalWeather.STORM, NaturalWeather.MIXED)) 1f else 0f
+        val origin = root()
+        val margin = inset.toPx() + 20.dp.toPx()
+        val planes = visibleRainLandingPlanes(landing.snapshot().map { surface ->
+            RainLandingPlane(surface.cityKey, surface.weather?.current?.condition,
+                surface.bounds.left - origin.x + margin, surface.bounds.right - origin.x - margin,
+                surface.bounds.top - origin.y)
+        }, size.width, size.height, 140.dp.toPx())
+        if (rainWeight < .001f && planes.isEmpty()) return@drawBehind
+        val visibility = gain * skyPagingParticleScale(pagingFraction(), pagingActive())
         if (visibility < .01f) return@drawBehind
-        val left = (card?.left ?: root().x) - root().x + inset.toPx() + 20.dp.toPx()
-        val right = (card?.right ?: (root().x + size.width)) - root().x - inset.toPx() - 20.dp.toPx()
-        if (right <= left) return@drawBehind
-        val phase = preview ?: clock.value
-        if (state.freezing && card != null) drawNaturalFrostEdge(palette, phase, visibility,
-            Offset(left, edge), Offset(right, edge), inward = Offset(0f, -1f))
-        val count = ((46 + state.intensity * 60) * (.65f + gain * .35f) * if (state.drizzle) .65f else 1f).toInt()
-        val top = maxOf(100.dp.toPx(), edge - 510.dp.toPx())
-        repeat(count) { i ->
-            val flight = rainFlight(phase, i, state.intensity, state.drizzle)
-            val x = flight.x * size.width
-            val depth = flight.depth
-            val alpha = visibility * (.12f + depth * depth * .40f)
-            val fallFraction = 1f - .10f / flight.seconds
-            val slope = .025f + state.wind * .09f
-            val pathHeight = edge - top + 36.dp.toPx()
-            if (flight.progress < fallFraction) {
-                val y = top - 36.dp.toPx() + pathHeight * flight.progress / fallFraction
-                val head = Offset(x + (edge - y) * slope, y)
-                // Fade over the large temperature and textual reading zones, retain rain at the edges.
-                val reading = if (head.x < size.width * .54f && y < edge - 160.dp.toPx()) .40f else 1f
-                val fadeIn = smoothNatural((y - top) / 40.dp.toPx())
-                clipRect(top = top, bottom = minOf(edge, size.height)) {
-                    val speed = pathHeight / (flight.seconds * fallFraction)
-                    drawRainStreak(head, Offset(-slope * speed, speed), depth, palette, alpha * reading * fadeIn, state.drizzle)
-                }
-            } else if (!state.freezing && card != null && depth > .70f && x in left..right && edge < size.height) {
-                val seconds = (flight.progress - fallFraction) * flight.seconds
-                val fade = (1f - seconds / .10f).coerceIn(0f, 1f)
-                // Brief ballistic beads at the actual contact point, no expanding rings.
-                repeat(3) { bead ->
-                    val seed = rainSeed(i, 60 + bead)
-                    val vx = (seed - .5f) * 100f
-                    val vy = 35f + rainSeed(i, 70 + bead) * 50f
-                    val dx = vx * seconds
-                    val dy = -vy * seconds + 420f * seconds * seconds
-                    if (dy < 0f) drawCircle(palette.particle.copy(alpha = alpha * fade),
-                        (.35f + seed * .38f).dp.toPx(), Offset(x + dx.dp.toPx(), edge + dy.dp.toPx()))
+        val retreat = 1f - smoothNatural(parallax() / density / 440f)
+        val phase = preview ?: if (quality == SkyRenderQuality.STATIC) heldPhase[0] else {
+            clock.value.also { heldPhase[0] = it }
+        }
+        planes.filter { it.freezing }.forEach { plane ->
+            drawNaturalFrostEdge(visiblePalette, phase, visibility,
+                Offset(plane.left, plane.top), Offset(plane.right, plane.top), inward = Offset(0f, -1f))
+        }
+        val count = rainLandingParticleBudget(visibleState.intensity, visibleState.drizzle, gain, budget.particleScale)
+        clipRect {
+            repeat(count) drops@{ i ->
+                val flight = rainFlight(phase, i, visibleState.intensity, visibleState.drizzle)
+                val x = flight.x * size.width
+                val plane = rainLandingContact(planes, x)
+                // No real wet card means rain leaves the view without a fabricated collision floor.
+                val edge = plane?.top ?: size.height + 36.dp.toPx()
+                val top = maxOf(100.dp.toPx(), edge - 510.dp.toPx())
+                val depth = flight.depth
+                val weight = if (plane != null) 1f else rainWeight * retreat
+                val alpha = visibility * weight * (.12f + depth * depth * .40f)
+                if (alpha < .002f) return@drops
+                val fallFraction = (1f - RAIN_SPLASH_SECONDS / flight.seconds).coerceAtLeast(.1f)
+                val slope = .025f + visibleState.wind * .09f
+                val pathHeight = edge - top + 36.dp.toPx()
+                if (flight.progress < fallFraction) {
+                    val y = top - 36.dp.toPx() + pathHeight * flight.progress / fallFraction
+                    val head = Offset(x + (edge - y) * slope, y)
+                    val reading = if (head.x < size.width * .54f && y < edge - 160.dp.toPx()) .40f else 1f
+                    val fadeIn = smoothNatural((y - top) / 40.dp.toPx())
+                    clipRect(top = top, bottom = minOf(edge, size.height)) {
+                        val speed = pathHeight / (flight.seconds * fallFraction)
+                        drawRainStreak(head, Offset(-slope * speed, speed), depth, visiblePalette,
+                            alpha * reading * fadeIn, visibleState.drizzle)
+                    }
+                } else if (plane != null && !plane.freezing && depth > .70f) {
+                    val seconds = (flight.progress - fallFraction) * flight.seconds
+                    repeat(if (visibleState.drizzle) 2 else 3) beads@{ bead ->
+                        val drop = rainSplashBead(i, bead, seconds, visibleState.wind) ?: return@beads
+                        val center = Offset(x + drop.xDp.dp.toPx(), edge + drop.yDp.dp.toPx())
+                        if (center.x >= plane.left && center.x < plane.right)
+                            drawNaturalWaterBead(center, drop.radiusDp.dp.toPx(), visiblePalette, alpha * drop.opacity)
+                    }
                 }
             }
         }

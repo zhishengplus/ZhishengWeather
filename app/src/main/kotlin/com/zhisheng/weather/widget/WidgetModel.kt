@@ -1,6 +1,7 @@
 package com.zhisheng.weather.widget
 
 import android.content.Context
+import com.zhisheng.weather.data.shouldReplaceWeatherCache
 import com.zhisheng.weather.model.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -157,7 +158,7 @@ object WidgetStore {
     }.getOrNull()
     @Synchronized fun publish(c: Context, city: City, weather: WeatherData) {
         if (weather.current == null || weather.error != null || weather.fetchedAt == null) return
-        if ((snapshot(c, city.locationKey)?.weather?.fetchedAt ?: 0L) > weather.fetchedAt) return
+        if (!shouldReplaceWeatherCache(snapshot(c, city.locationKey)?.weather, weather, System.currentTimeMillis())) return
         weatherPrefs(c).edit().putString("snapshot_${city.locationKey}", json.encodeToString(WidgetSnapshot.serializer(), WidgetSnapshot(city, weather))).apply()
     }
     fun notification(c: Context): NotificationSettings = runCatching {

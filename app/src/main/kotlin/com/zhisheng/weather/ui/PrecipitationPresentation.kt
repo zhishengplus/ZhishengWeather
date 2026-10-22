@@ -38,7 +38,8 @@ internal fun PrecipitationPresentation.hasDrySkyWindow(): Boolean {
 // Presentation only: preserve actual timestamps and never turn a missing series into dry weather.
 internal fun precipitationPresentation(data: WeatherData, nowMillis: Long): PrecipitationPresentation {
     val valid = data.rainMinutes.filter { it.precip.isFinite() && it.precip >= 0f }
-    val nativeInterval = data.rainMeta?.intervalMinutes?.takeIf { it > 0 } ?: 1
+    val declaredInterval = data.rainMeta?.intervalMinutes?.takeIf { it in 1..180 }
+    val nativeInterval = declaredInterval ?: 1
     val activeTimes = Nowcast.samplesAt(valid, nowMillis, nativeInterval).map { it.timeMillis }.toSet()
     val minutePoints = valid.filter { it.timeMillis >= nowMillis - Nowcast.NOW_WINDOW_MS || it.timeMillis in activeTimes }
         .groupBy { it.timeMillis }.values.map { samples -> samples.maxBy { it.precip } }
@@ -60,20 +61,25 @@ internal fun precipitationPresentation(data: WeatherData, nowMillis: Long): Prec
     val measuredInterval = steps.singleOrNull()?.takeIf { it > 0 && it % Nowcast.MINUTE_MS == 0L }
         ?.div(Nowcast.MINUTE_MS)?.toInt()
     // Some providers expand native 15-minute buckets to minute points. Keep the native precision.
-    val interval = measuredInterval?.let { measured ->
-        if (hourlyFallback) measured else
-            data.rainMeta?.intervalMinutes?.takeIf { it >= measured && it % measured == 0 } ?: measured
-    } ?: if (!hourlyFallback && points.size == 1) nativeInterval else null
+    val interval = if (hourlyFallback) measuredInterval ?: 60 else
+        declaredInterval ?: measuredInterval ?: nativeInterval.takeIf { points.size == 1 }
+    // A removed provider sample is an unknown interval, not a new, coarser sampling rate.
+    // Metadata wins over observed spacing; unlabelled legacy samples retain their measured spacing.
+    val step = (interval ?: nativeInterval).toLong() * Nowcast.MINUTE_MS
+    val hasGap = points.zipWithNext().any { (a, b) -> b.timeMillis - a.timeMillis !in 1..step }
+    val coversNow = points.any { it.timeMillis <= nowMillis && nowMillis - it.timeMillis < step } ||
+        points.firstOrNull()?.timeMillis?.let { it in nowMillis..(nowMillis + Nowcast.MINUTE_MS) } == true
     val wet = points.any { it.precip >= Nowcast.WET_THRESHOLD }
-    val dry = points.size >= 2 && points.last().timeMillis > nowMillis && !wet && !currentPrecip
+    val dry = points.size >= 2 && points.last().timeMillis > nowMillis && !wet && !currentPrecip && !hasGap && coversNow
     val timing = Nowcast.rainTiming(points, nowMillis, currentPrecip = currentPrecip,
         intervalMinutes = if (hourlyFallback) 60 else nativeInterval)
     val summary = when {
         currentPrecip -> "当前有降水"
-        wet && timing.rainingNow -> "目前有降水"
+        wet && timing.rainingNow -> "短时预报提示当前有降水"
         wet && measuredInterval != null && measuredInterval <= 5 && timing.minutesUntilStart != null ->
-            "预计 ${timing.minutesUntilStart} 分钟后有降水"
+            "${if (nativeInterval > 1) "预计约" else "预计"} ${timing.minutesUntilStart} 分钟后有降水"
         wet -> "预报时段内有降水"
+        points.isNotEmpty() && (hasGap || !coversNow) -> "预报数据有缺口，已返回时刻暂无降水"
         dry -> "预报时段内暂无降水"
         points.isNotEmpty() -> "该时刻暂无降水"
         valid.isNotEmpty() -> "短时预报已过期"

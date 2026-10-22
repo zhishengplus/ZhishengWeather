@@ -26,7 +26,8 @@ import kotlin.math.sin
 import androidx.compose.ui.geometry.Offset
 
 internal const val VISTA_GLOW_CYCLE_SECONDS = 72.0
-internal val LocalVistaGlowPhase = staticCompositionLocalOf<State<Double>> { mutableStateOf(0.0) }
+// City activation replaces its clock facade. Invalidate the clock readers only, not all page text.
+internal val LocalVistaGlowPhase = compositionLocalOf<State<Double>> { mutableStateOf(0.0) }
 internal val LocalVistaGlowLevel = staticCompositionLocalOf { com.zhisheng.weather.data.SoftGlowLevel.SUBTLE }
 
 /** Periodic with matching velocity at the seam. All surfaces sample this same field. */

@@ -26,7 +26,7 @@ import com.zhisheng.weather.ui.theme.*
 @Composable
 internal fun VistaLandscapeWeatherCore(
     state: HomeUiState, now: Long, night: Boolean, clock: String, seconds: String, date: String,
-    onRefresh: () -> Unit, onPortrait: () -> Unit, onSettings: () -> Unit,
+    onRefresh: () -> Unit, onSettings: () -> Unit,
 ) {
     val data = state.weather
     val current = data?.current
@@ -46,7 +46,6 @@ internal fun VistaLandscapeWeatherCore(
                     IconButton(onRefresh, Modifier.size(48.dp)) {
                         PhosphorIcon(R.drawable.ph_arrow_clockwise, if (state.loading) "正在更新天气" else "刷新天气", Modifier.size(22.dp), ZhishengTextSecondary)
                     }
-                    StandbyPortraitButton(onPortrait)
                     IconButton(onSettings, Modifier.size(48.dp)) {
                         PhosphorIcon(R.drawable.ph_gear, "设置", Modifier.size(22.dp), ZhishengTextSecondary)
                     }
@@ -62,12 +61,12 @@ internal fun VistaLandscapeWeatherCore(
                                 }
                             }
                             WeatherIcon(data?.let { phaseAwareCondition(current?.condition, it, now) } ?: current?.condition,
-                                Modifier.weatherSharedBounds("current-condition").size(72.dp))
+                                Modifier.cityScopedSharedBounds("current-condition", state.selectedCity?.locationKey ?: "").size(72.dp))
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Row(verticalAlignment = Alignment.Top) {
                                 Text(Fmt.temp(current?.temperature, state.tempUnit) ?: "—",
-                                    Modifier.weatherSharedBounds("current-temperature"), fontSize = 68.sp,
+                                    Modifier.cityScopedSharedBounds("current-temperature", state.selectedCity?.locationKey ?: ""), fontSize = 68.sp,
                                     lineHeight = 72.sp, fontWeight = FontWeight.Light, color = ZhishengText)
                                 Text("°", color = ZhishengTextSecondary, fontSize = 28.sp)
                             }
@@ -84,7 +83,8 @@ internal fun VistaLandscapeWeatherCore(
                             Fmt.temp(current?.feelsLike, state.tempUnit)?.let { LandscapeFact(R.drawable.ph_thermometer, "体感 $it°") }
                             Fmt.wind(current?.windSpeed, state.prefs.windUnit)?.let { LandscapeFact(R.drawable.ph_wind, it) }
                             current?.windDirectionDeg?.let { LandscapeFact(R.drawable.ph_compass, "风向 ${it.toInt()}°") }
-                            data?.aqi?.value?.let { LandscapeFact(R.drawable.ph_leaf, "空气质量 $it") }
+                            data?.aqi?.value?.let { LandscapeFact(R.drawable.ph_leaf,
+                                "空气质量 ${Fmt.aqiValueLabel(it, data.aqi?.estimated == true)}") }
                             current?.humidity?.let { LandscapeFact(R.drawable.ph_drop, "湿度 ${it.toInt()}%") }
                         }
                         data?.alerts.orEmpty().forEach { alert ->

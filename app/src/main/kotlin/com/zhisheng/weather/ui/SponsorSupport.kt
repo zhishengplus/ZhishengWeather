@@ -95,6 +95,9 @@ private val sponsorRanking = listOf(
     "ayida999",
     "关",
     "AiFuL",
+    "施工单位狗人力",
+    "意难平",
+    "钟福燕",
     "∮",
     "ScottZzz",
     "*年",
@@ -244,6 +247,7 @@ fun SponsorDialog(onClose: () -> Unit) {
 }
 @Composable
 fun SponsorBoardDialog(onClose: () -> Unit) {
+    val sponsorBoard = rememberCommunityDirectory().sponsors
     val reducedMotion = rememberReducedMotion()
     val transition = if (reducedMotion) null else rememberInfiniteTransition(label = "sponsor-board")
     val entrance = remember { Animatable(if (reducedMotion) 1f else 0f) }
@@ -293,7 +297,7 @@ fun SponsorBoardDialog(onClose: () -> Unit) {
                             letterSpacing = 1.4.sp,
                         )
                         Text(
-                            "赞助榜单 · ${SponsorBoard.size} 位",
+                            "赞助榜单 · ${sponsorBoard.size} 位",
                             style = MaterialTheme.typography.titleLarge,
                             color = ZhishengText,
                             fontWeight = FontWeight.Bold,
@@ -314,14 +318,14 @@ fun SponsorBoardDialog(onClose: () -> Unit) {
                 LazyColumn(
                     modifier = Modifier.weight(1f, fill = false).fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 ) {
-                    itemsIndexed(SponsorBoard) { index, name ->
+                    itemsIndexed(sponsorBoard) { index, name ->
                         SponsorBoardRow(
                             rank = index + 1,
                             name = name,
                             reducedMotion = reducedMotion,
                             transition = transition,
                         )
-                        if (index != SponsorBoard.lastIndex) {
+                        if (index != sponsorBoard.lastIndex) {
                             HorizontalDivider(
                                 thickness = 1.dp,
                                 color = ZhishengCardBorder.copy(alpha = 0.6f),

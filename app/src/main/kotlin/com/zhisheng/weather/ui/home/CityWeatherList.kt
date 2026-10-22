@@ -40,6 +40,7 @@ internal fun CityWeatherList(ui: HomeUiState, modifier: Modifier, onAdd: () -> U
     val weather = remember { mutableStateMapOf<String, CachedWeather>() }
     val located by CityRepository.locatedCityKey.collectAsState(initial = null)
     val modules by SettingsRepository.moduleSources.collectAsState(initial = ModuleSourcePolicy())
+    val priority by SettingsRepository.sourcePriority.collectAsState(initial = emptyList())
     var editing by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
     val visibleCityKeys by remember(list) {
@@ -49,7 +50,7 @@ internal fun CityWeatherList(ui: HomeUiState, modifier: Modifier, onAdd: () -> U
     }
     val clock = if (LocalVistaSoftGlow.current) LocalVistaGlowPhase.current
         else rememberVistaGlowPhase(active && ui.prefs.ambience != AmbienceLevel.OFF)
-    LaunchedEffect(active, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) }, ui.weather, ui.sourcePref, modules) {
+    LaunchedEffect(active, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) }, ui.weather, ui.sourcePref, modules, priority) {
         if (!active) return@LaunchedEffect
         val now = System.currentTimeMillis()
         suspend fun usable(city: City, entry: CachedWeather?, at: Long): CachedWeather? =

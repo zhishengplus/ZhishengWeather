@@ -475,6 +475,9 @@ private fun RadarInstrumentPage(
     }
 
     val mapView = remember {
+        // Load the native map engine only when a map is actually opened, not
+        // for every weather/widget process start while radar is disabled.
+        org.maplibre.android.MapLibre.getInstance(context.applicationContext)
         MapView(context).apply {
             onCreate(null)
             // 全帧以极低透明度参与渲染，地图空闲后才开始播放，避免第一轮逐帧白等。

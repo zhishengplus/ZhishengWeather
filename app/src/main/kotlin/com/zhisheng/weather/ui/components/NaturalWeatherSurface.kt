@@ -1,7 +1,5 @@
 package com.zhisheng.weather.ui.components
 
-import android.animation.ValueAnimator
-import android.os.PowerManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -12,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.graphics.Brush
@@ -25,7 +22,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
 import com.zhisheng.weather.data.AmbienceLevel
@@ -37,11 +33,13 @@ import com.zhisheng.weather.ui.theme.*
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.flow.collectLatest
 
 internal val LocalNaturalLight = staticCompositionLocalOf<NaturalLightPalette?> { null }
 internal val LocalNaturalPreviewPhase = staticCompositionLocalOf<Double?> { null }
 internal val LocalSolarSkyPreview = staticCompositionLocalOf<SolarSkyState?> { null }
 internal val LocalImmersiveSky = staticCompositionLocalOf { false }
+private val LocalSkyShaderFailed = compositionLocalOf<MutableState<Boolean>?> { null }
 internal data class HomeBackdrop(val layer: GraphicsLayer, val origin: Offset, val owner: android.view.View)
 internal val LocalHomeBackdrop = compositionLocalOf<HomeBackdrop?> { null }
 
@@ -51,6 +49,8 @@ internal fun NaturalWeatherSurface(
     weather: WeatherData?, level: AmbienceLevel, night: Boolean,
     modifier: Modifier = Modifier, active: Boolean = true, parallax: () -> Float = { 0f },
     city: City? = null, livingSkyOverride: Boolean? = null,
+    pagingTransition: SkyPagingTransition? = null,
+    pagingFraction: () -> Float = { 0f }, pagingActive: () -> Boolean = { false },
     content: @Composable BoxScope.() -> Unit,
 ) {
     if (!isPhosphorVista) {
@@ -75,84 +75,176 @@ internal fun NaturalWeatherSurface(
     val solar = if (livingSky && level != AmbienceLevel.OFF) LocalSolarSkyPreview.current ?: calculatedSolar else null
     val state = naturalLightState(weather, night, minutes, now, solar)
     val colors = naturalLightPalette(state, LocalZhishengPalette.current.isLight)
-    val existingClock = LocalVistaGlowPhase.current
-    val ownClock = if (!LocalVistaSoftGlow.current) rememberVistaGlowPhase(active && level != AmbienceLevel.OFF) else existingClock
-    // Covered pages keep their last frame without invalidating hidden cards and hero artwork.
-    val clock = remember(active, ownClock) {
-        if (active) ownClock else mutableStateOf(androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { ownClock.value })
+    val capabilities = rememberSkyRenderCapabilities()
+    val shaderFailed = remember { mutableStateOf(false) }
+    val quality = skyRenderQuality(capabilities.copy(shaderAvailable = !shaderFailed.value), active, level != AmbienceLevel.OFF)
+    val budget = rememberSkyRenderBudget(quality, capabilities.copy(shaderAvailable = !shaderFailed.value))
+    val light = LocalZhishengPalette.current.isLight
+    val pagingFrames = remember(pagingTransition, livingSky, level, light, now / 60_000L) {
+        pagingTransition?.let { endpoints ->
+            fun frame(endpoint: SkyCityFrame): NaturalSkyFrame {
+                val localMinutes = endpoint.weather.utcOffsetSeconds?.let { Math.floorMod(now / 60_000L + it / 60L, 1440L).toInt() }
+                    ?: minutes
+                val localSolar = if (livingSky && level != AmbienceLevel.OFF)
+                    solarSkyState(endpoint.city?.latitude, endpoint.city?.longitude, now) else null
+                val localState = naturalLightState(endpoint.weather, endpoint.night, localMinutes, now, localSolar)
+                return NaturalSkyFrame(localState, naturalLightPalette(localState, light), identity = endpoint.city?.locationKey)
+            }
+            frame(endpoints.from) to frame(endpoints.to)
+        }
     }
-    val landing = remember { mutableStateOf<Rect?>(null) }
+    val existingClock = LocalVistaGlowPhase.current
+    val ownClock = if (!LocalVistaSoftGlow.current) rememberVistaGlowPhase(quality != SkyRenderQuality.STATIC) else existingClock
+    val phaseMemory = remember(ownClock) { SkyPhaseClock(androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { ownClock.value }) }
+    val clockRunning by rememberUpdatedState(active && quality != SkyRenderQuality.STATIC)
+    SideEffect { if (!clockRunning) phaseMemory.pause() }
+    // Keep the same cloud/particle phase on pause and resume, even if the app's shared clock moves.
+    val clock = remember(ownClock, phaseMemory) {
+        object : State<Double> {
+            override val value: Double get() = phaseMemory.sample(
+                if (clockRunning) ownClock.value else 0.0, clockRunning)
+        }
+    }
+    val landing = remember { RainLandingRegistry() }
+    val visibleFrame = remember { arrayOfNulls<NaturalSkyFrame>(1) }
     var rootOrigin by remember { mutableStateOf(Offset.Zero) }
     val backdropLayer = rememberGraphicsLayer()
     CompositionLocalProvider(LocalRainLanding provides landing, LocalNaturalLight provides colors, LocalVistaGlowPhase provides clock,
-        LocalImmersiveSky provides (android.os.Build.VERSION.SDK_INT >= 33 && level != AmbienceLevel.OFF && !LocalInspectionMode.current),
+        LocalImmersiveSky provides (android.os.Build.VERSION.SDK_INT >= 33 && !shaderFailed.value && level != AmbienceLevel.OFF && !LocalInspectionMode.current),
+        LocalSkyRenderQuality provides quality, LocalSkyRenderBudget provides budget,
+        LocalSkyPagingFraction provides pagingFraction, LocalSkyPagingActive provides pagingActive,
+        LocalSkyRenderCapabilities provides capabilities,
+        LocalSkyShaderFailed provides shaderFailed,
+        LocalWeatherGlassEnvironment provides WeatherGlassEnvironment(
+            frame = { visibleFrame[0] ?: NaturalSkyFrame(state, colors) }, phase = clock, active = active,
+            quality = quality, budget = budget, level = level, paging = pagingActive),
         LocalHomeBackdrop provides HomeBackdrop(backdropLayer, rootOrigin, androidx.compose.ui.platform.LocalView.current)) {
         Box(modifier.onGloballyPositioned { rootOrigin = it.positionInRoot() }) {
             NaturalWeatherBackdrop(state, colors, level, active, parallax,
+                pagingFrames = pagingFrames, pagingFraction = pagingFraction, pagingActive = pagingActive,
+                identity = city?.locationKey,
+                onFrame = { visibleFrame[0] = it },
                 modifier = Modifier.drawWithContent {
                     backdropLayer.record { this@drawWithContent.drawContent() }
                     drawLayer(backdropLayer)
                 })
             Box(Modifier.fillMaxSize().graphicsLayer(), content = content)
-            RainLandingOverlay(state, colors, level, clock, landing, { rootOrigin }, parallax)
+            RainLandingOverlay(state, colors, level, clock, landing, { rootOrigin }, parallax, skyFrame = { visibleFrame[0] })
         }
     }
 }
 
-private data class NaturalFrame(val state: NaturalLightState, val palette: NaturalLightPalette)
-private fun NaturalFrame.mix(other: NaturalFrame, f: Float) = NaturalFrame(
-    (if (f < 0.5f) state else other.state).copy(
-        daylight = state.daylight + (other.state.daylight - state.daylight) * f,
-        twilight = state.twilight + (other.state.twilight - state.twilight) * f,
-        cloud = state.cloud + (other.state.cloud - state.cloud) * f,
-        intensity = state.intensity + (other.state.intensity - state.intensity) * f,
-        wind = state.wind + (other.state.wind - state.wind) * f,
-        solar = if (state.solar != null && other.state.solar != null) state.solar.mix(other.state.solar, f)
-            else if (f < .5f) state.solar else other.state.solar), palette.mix(other.palette, f))
+private typealias NaturalFrame = NaturalSkyFrame
+
+/** Draw memory is deliberately not Snapshot state: sampling never requests another frame. */
+private class SkyDisplayMemory {
+    var frame: NaturalFrame? = null
+    var paging = false
+    var expectedEndpoint: NaturalFrame? = null
+    var dragAnchor: NaturalFrame? = null
+    var dragAnchorKey: String? = null
+}
 
 @Composable
 internal fun NaturalWeatherBackdrop(
     state: NaturalLightState, colors: NaturalLightPalette, level: AmbienceLevel,
     active: Boolean = true, parallax: () -> Float = { 0f }, modifier: Modifier = Modifier,
+    pagingFrames: Pair<NaturalSkyFrame, NaturalSkyFrame>? = null,
+    pagingFraction: () -> Float = { 0f }, pagingActive: () -> Boolean = { false },
+    onFrame: (NaturalSkyFrame) -> Unit = {},
+    identity: String? = null,
 ) {
     val light = LocalZhishengPalette.current.isLight
     val clock = LocalVistaGlowPhase.current
     val previewPhase = LocalNaturalPreviewPhase.current
     val foregroundRain = LocalRainLanding.current != null
     val preview = LocalInspectionMode.current
-    val sky = remember(preview) {
-        if (!preview && android.os.Build.VERSION.SDK_INT >= 33) runCatching { ImmersiveSky() }
-            .onFailure { android.util.Log.w("ImmersiveSky", "Sky shader unavailable; using compatible atmosphere", it) }.getOrNull() else null
+    val capabilities = LocalSkyRenderCapabilities.current ?: rememberSkyRenderCapabilities()
+    val shaderFailed = LocalSkyShaderFailed.current ?: remember { mutableStateOf(false) }
+    val failureHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val sky = remember(preview, capabilities.apiLevel >= 33) {
+        if (!preview && !shaderFailed.value && capabilities.apiLevel >= 33 && android.os.Build.VERSION.SDK_INT >= 33) runCatching {
+            ImmersiveSky { failureHandler.post { shaderFailed.value = true } }
+        }.onFailure {
+            failureHandler.post { shaderFailed.value = true }
+            android.util.Log.w("ImmersiveSky", "Sky shader unavailable; using compatible atmosphere", it)
+        }.getOrNull() else null
     }
-    val context = LocalContext.current
-    val power = remember(context) { context.getSystemService(PowerManager::class.java) }
-    val target = NaturalFrame(state, colors)
+    val quality = skyRenderQuality(capabilities.copy(shaderAvailable = sky != null && !shaderFailed.value), active, level != AmbienceLevel.OFF)
+    val budget = LocalSkyRenderBudget.current ?: rememberSkyRenderBudget(quality,
+        capabilities.copy(shaderAvailable = sky != null && !shaderFailed.value))
+    val rainVeil = remember(preview, capabilities.apiLevel >= 33) {
+        if (!preview && capabilities.apiLevel >= 33 && android.os.Build.VERSION.SDK_INT >= 33)
+            runCatching { RainVeil() }.onFailure {
+                android.util.Log.w("RainVeil", "Distant rain shader unavailable; retaining original Canvas weather", it)
+            }.getOrNull() else null
+    }
+    val target = NaturalFrame(state, colors, identity = identity)
     var from by remember { mutableStateOf(target) }
     var to by remember { mutableStateOf(target) }
     val transition = remember { Animatable(1f) }
-    LaunchedEffect(target, active) {
-        // A covered home retains its visible frame; city selection starts blending on reveal.
-        if (!active) return@LaunchedEffect
-        if (target != to) {
-            from = from.mix(to, transition.value)
-            to = target
-            transition.snapTo(0f)
+    val displayed = remember { SkyDisplayMemory() }
+    val currentTarget by rememberUpdatedState(target)
+    val currentPaging by rememberUpdatedState(pagingActive)
+    LaunchedEffect(active, quality) {
+        snapshotFlow { currentTarget to currentPaging() }.collectLatest { (next, paging) ->
+            if (!active || paging) return@collectLatest
+            if (quality == SkyRenderQuality.STATIC && next == to && displayed.frame != null) {
+                // Pausing midway through a weather blend keeps exactly that image. A subsequent
+                // explicit weather update can replace it once; resuming continues toward its target.
+                from = displayed.frame!!
+                to = displayed.frame!!
+                transition.snapTo(1f)
+                return@collectLatest
+            }
+            // Pager settlement can precede selected-city delivery. Retain its exact last sky meanwhile.
+            val waitingForSelection = displayed.paging && displayed.expectedEndpoint?.identity?.let { it != next.identity } == true
+            val destination = if (waitingForSelection) displayed.frame ?: next else next
+            if (destination != to || displayed.paging) {
+                from = displayed.frame ?: from.mix(to, transition.value)
+                to = destination
+                transition.snapTo(0f)
+            }
+            if (!waitingForSelection) { displayed.paging = false; displayed.expectedEndpoint = null }
+            if (preview || quality == SkyRenderQuality.STATIC) transition.snapTo(1f)
+            else if (transition.value < 1f) transition.animateTo(1f, tween(1200))
         }
-        if (preview || level == AmbienceLevel.OFF || !ValueAnimator.areAnimatorsEnabled() || power?.isPowerSaveMode == true) transition.snapTo(1f)
-        else if (transition.value < 1f) transition.animateTo(1f, tween(1200))
     }
     val levelGain = when (level) { AmbienceLevel.OFF -> 0f; AmbienceLevel.SUBTLE -> 0.52f; AmbienceLevel.VIVID -> 0.76f; AmbienceLevel.INTENSE -> 1f }
-    val heldPhase = remember { doubleArrayOf(0.0) }
+    val heldPhase = remember { doubleArrayOf(Double.NaN) }
     val skyLayer = rememberGraphicsLayer()
+    val rainLayer = rememberGraphicsLayer()
     Box(modifier.fillMaxSize().graphicsLayer().drawWithCache {
         val cloudBrush = Brush.radialGradient(listOf(Color.White, Color.White.copy(alpha = 0.38f), Color.Transparent),
             center = Offset.Zero, radius = 1f)
         val glowBrush = Brush.radialGradient(listOf(Color.White, Color.Transparent), center = Offset.Zero, radius = 1f)
         onDrawBehind {
-            val blend = transition.value
-            val frame = if (blend >= 1f) to else from.mix(to, blend)
+            val paging = pagingActive()
+            val fraction = pagingFraction().takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+            if (paging && !displayed.paging) {
+                displayed.dragAnchor = displayed.frame
+                displayed.dragAnchorKey = target.identity
+            }
+            fun endpoint(frame: NaturalFrame): NaturalFrame =
+                if (displayed.dragAnchorKey != null && frame.identity == displayed.dragAnchorKey)
+                    displayed.dragAnchor?.copy(identity = frame.identity) ?: frame else frame
+            val blend = if (paging && pagingFrames != null) fraction else transition.value
+            val source = if (paging && pagingFrames != null) endpoint(pagingFrames.first) else from
+            val destination = if (paging && pagingFrames != null) endpoint(pagingFrames.second) else to
+            val frame = if (!active || (paging && pagingFrames == null)) displayed.frame ?: source.mix(destination, blend)
+                else source.mix(destination, blend)
+            displayed.frame = frame
+            onFrame(frame)
+            if (paging) {
+                displayed.paging = true
+                displayed.expectedEndpoint = if (pagingFrames == null) null else when {
+                    fraction < .001f -> pagingFrames.first
+                    fraction > .999f -> pagingFrames.second
+                    else -> null
+                }
+            }
             val phase = previewPhase ?: if (preview) 0.173 else {
-                if (active && level != AmbienceLevel.OFF) heldPhase[0] = clock.value
+                if (heldPhase[0].isNaN() || (active && quality != SkyRenderQuality.STATIC && level != AmbienceLevel.OFF)) heldPhase[0] = clock.value
                 heldPhase[0]
             }
             // The shared phase is periodic. Rain/snow cycles use integer periods so there is no seam jump.
@@ -167,21 +259,31 @@ internal fun NaturalWeatherBackdrop(
                 1f to frame.palette.base, endY = depth))
             val gain = levelGain * retreat
             if (gain > 0.001f) {
-                if (sky != null && android.os.Build.VERSION.SDK_INT >= 33) {
+                var skyRendered = false
+                if (sky != null && !shaderFailed.value && android.os.Build.VERSION.SDK_INT >= 33) {
                     translate(top = -scroll.coerceAtMost(440f).dp.toPx() * .12f) {
                         val opacity = minOf(.92f, gain * 1.4f) / minOf(.92f, levelGain * 1.4f)
-                        sky.drawCached(this, skyLayer, frame.state, frame.palette, phase, levelGain, opacity, light, minOf(size.height, 1120.dp.toPx()),
-                            from.state.weather, to.state.weather, blend)
+                        skyRendered = sky.drawCached(this, skyLayer, frame.state, frame.palette, phase, levelGain, opacity, light, minOf(size.height, 1120.dp.toPx()),
+                            frame.weatherWeights, budget,
+                            if (quality == SkyRenderQuality.STATIC) 0L else skyCloudFrameIntervalNanos(budget, paging))
                     }
-                } else {
-                    drawNaturalLight(frame, phase, gain, light, cloudBrush, glowBrush)
                 }
-                if (blend < 1f) drawNaturalThermal(from.state, from.palette, phase, gain * (1f - blend), glowBrush)
-                drawNaturalThermal(to.state, to.palette, phase, gain * blend, glowBrush)
-                if (blend < 1f && !(foregroundRain && from.state.weather in setOf(NaturalWeather.RAIN, NaturalWeather.STORM)))
-                    drawNaturalParticles(from, level, phase, gain * (1f - blend), scroll)
-                if (!(foregroundRain && to.state.weather in setOf(NaturalWeather.RAIN, NaturalWeather.STORM)))
-                    drawNaturalParticles(to, level, phase, gain * blend, scroll)
+                if (rainVeil != null && android.os.Build.VERSION.SDK_INT >= 33) {
+                    rainVeil.drawCached(this, rainLayer, frame, phase, gain,
+                        minOf(size.height, 1120.dp.toPx()), budget,
+                        moving = active && quality != SkyRenderQuality.STATIC && !paging)
+                }
+                drawNaturalThermal(frame.state, frame.palette, phase, gain, glowBrush)
+                val particleScale = budget.particleScale * skyPagingParticleScale(fraction, paging)
+                NaturalWeather.entries.forEach { kind ->
+                    val weight = frame.weatherWeights[kind.ordinal]
+                    if (weight > .001f) {
+                        val weatherFrame = frame.copy(state = frame.state.copy(weather = kind))
+                        if (!skyRendered) drawNaturalLight(weatherFrame, phase, gain * weight, light, cloudBrush, glowBrush)
+                        if (!(foregroundRain && kind in setOf(NaturalWeather.RAIN, NaturalWeather.STORM)))
+                            drawNaturalParticles(weatherFrame, level, phase, gain * weight, scroll, particleScale)
+                    }
+                }
             }
         }
     })
@@ -231,12 +333,12 @@ private fun DrawScope.drawNaturalLight(frame: NaturalFrame, phase: Double, gain:
     }
 }
 
-private fun DrawScope.drawNaturalParticles(frame: NaturalFrame, level: AmbienceLevel, phase: Double, gain: Float, scroll: Float) {
+private fun DrawScope.drawNaturalParticles(frame: NaturalFrame, level: AmbienceLevel, phase: Double, gain: Float, scroll: Float, particleScale: Float = 1f) {
     if (gain <= 0.001f) return
     val s = frame.state
     val w = size.width
     val h = minOf(size.height, 720.dp.toPx())
-    val count = naturalParticleBudget(s, level)
+    val count = (naturalParticleBudget(s, level) * particleScale).toInt()
     if (s.weather == NaturalWeather.RAIN || s.weather == NaturalWeather.STORM) {
         drawNaturalRain(s, frame.palette, count, phase, gain, scroll)
         return

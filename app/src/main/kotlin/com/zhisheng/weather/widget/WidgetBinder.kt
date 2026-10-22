@@ -27,7 +27,8 @@ object WidgetBinder {
     fun bind(context: Context, widgetId: Int, instance: WidgetInstance, config: WidgetConfig,
              snapshot: WidgetSnapshot?, hostWidth: Int, hostHeight: Int, now: Long = System.currentTimeMillis(), interactive: Boolean = true,
              previewBackground: Int? = null, livingSkyEnabled: Boolean = false,
-             ambienceLevel: com.zhisheng.weather.data.AmbienceLevel = com.zhisheng.weather.data.AmbienceLevel.SUBTLE): RemoteViews {
+             ambienceLevel: com.zhisheng.weather.data.AmbienceLevel = com.zhisheng.weather.data.AmbienceLevel.SUBTLE,
+             bitmapBudget: WidgetBitmapBudget? = null): RemoteViews {
         fun put(views: RemoteViews, id: Int, text: String) {
             views.setViewVisibility(id, if (text.isEmpty()) View.GONE else View.VISIBLE)
             views.setTextViewText(id, if (config.boldText) android.text.SpannableString(text).apply {
@@ -139,7 +140,11 @@ object WidgetBinder {
         }
         // GradientDrawable draws at the host's density and bounds. A dp-sized
         // bitmap was upscaled on high-density phones, blurring the card edges.
-        if (sky != null && config.opacity > 0) v.setImageViewBitmap(R.id.widget_surface, WidgetSkyBitmap.of(sky))
+        if (sky != null && config.opacity > 0) {
+            val image = WidgetSkyBitmap.of(sky)
+            bitmapBudget?.record(image, image.allocationByteCount)
+            v.setImageViewBitmap(R.id.widget_surface, image)
+        }
         else v.setImageViewResource(R.id.widget_surface, surfaceRes)
         v.setInt(R.id.widget_surface, "setImageAlpha", config.opacity.coerceIn(0, 100) * 255 / 100)
         if (android.os.Build.VERSION.SDK_INT >= 31 && kind == WidgetKind.WEEK && style == WidgetStyle.VISTA && compact && height >= 160) {
@@ -275,10 +280,17 @@ object WidgetBinder {
             fitText(context, v, R.id.widget_footer, updateText, if (kind == WidgetKind.NOW || roomyScene) 10f else 9f,
                 if (classicCurrentWeek) 76f else if (kind == WidgetKind.WEEK) (width - padding) / 2.55f else if (kind == WidgetKind.NOW) 59f else (width - padding).toFloat(), 12f)
             if (compact && kind == WidgetKind.BAND) v.setViewVisibility(R.id.widget_footer, View.GONE)
-            fitText(context, v, R.id.widget_air, "空气 ${weather?.aqi?.level ?: weather?.aqi?.value ?: "—"}", 11f, (width - padding) * .5f, 16f)
+            val airLabel = if (weather?.aqi?.estimated == true) "空气估算" else "空气"
+            val airReading = weather?.aqi?.let { air -> air.value?.let { air.level ?: it.toString() } } ?: "—"
+            fitText(context, v, R.id.widget_air, "$airLabel $airReading", 11f, (width - padding) * .5f, 16f)
+            v.setContentDescription(R.id.widget_air, weather?.aqi?.let {
+                (if (it.value == null) "空气质量指数暂无数据"
+                    else "空气${it.level ?: "未知"}，AQI ${Fmt.aqiValueLabel(it.value, it.estimated)}") +
+                    if (it.estimated) "，${Fmt.AQI_ESTIMATION_LABEL}" else ""
+            } ?: "空气质量暂无数据")
         }
         icon(context, v, R.id.widget_icon, WidgetIconSet.from(config.iconSet), weather?.let { phaseAwareCondition(current?.condition, it, now) }, p,
-            ambient = sky?.palette)
+            ambient = sky?.palette, bitmapBudget = bitmapBudget)
         val labels = intArrayOf(R.id.widget_metric_label_1, R.id.widget_metric_label_2, R.id.widget_metric_label_3,
             R.id.widget_metric_label_4, R.id.widget_metric_label_5, R.id.widget_metric_label_6)
         val sceneMetrics = config.metrics.take(6)
@@ -291,7 +303,9 @@ object WidgetBinder {
                 1 -> if (config.showAir) "air" else "humidity"
                 else -> null
             } else if (kind == WidgetKind.SCENE) sceneMetrics.getOrNull(index) else config.metrics.getOrNull(index)
-            put(v, labels[index], metricLabels[metric].orEmpty())
+            val metricLabel = if (metric == "air" && weather?.aqi?.estimated == true) "空气估算"
+                else metricLabels[metric].orEmpty()
+            put(v, labels[index], metricLabel)
             val metricText = when (metric) {
                 "feels" -> temperature(current?.feelsLike, config)
                 "humidity" -> current?.humidity?.let { "${it.roundToInt()}%" } ?: "—"
@@ -300,7 +314,7 @@ object WidgetBinder {
                     val number = air.value?.toString()
                     // Long status words make a two-cell card illegible. The full
                     // status remains in the app and in this view's accessibility text.
-                    val shortLevel = air.level?.takeIf { it.length <= 2 || number == null }
+                    val shortLevel = air.level?.takeIf { number != null && it.length <= 2 }
                     listOfNotNull(shortLevel, number).joinToString(" ").ifBlank { "—" }
                 } ?: "—"
                 "pressure" -> current?.pressure?.let { "${it.roundToInt()} hPa" } ?: "—"
@@ -311,12 +325,16 @@ object WidgetBinder {
                 else -> ""
             }
             put(v, id, metricText)
-            if (kind == WidgetKind.NOW && index == 1 && config.showAir) {
-                v.setContentDescription(id, weather?.aqi?.let { "空气${it.level ?: "未知"}，AQI ${it.value ?: "未知"}" } ?: "空气质量暂无数据")
+            if (metric == "air") {
+                v.setContentDescription(id, weather?.aqi?.let {
+                    (if (it.value == null) "空气质量指数暂无数据"
+                        else "空气${it.level ?: "未知"}，AQI ${Fmt.aqiValueLabel(it.value, it.estimated)}") +
+                        if (it.estimated) "，${Fmt.AQI_ESTIMATION_LABEL}" else ""
+                } ?: "空气质量暂无数据")
             }
             run {
                 val metricWidth = if (kind == WidgetKind.NOW) (width - padding) / 2f - 26f else (width - padding) / 3f
-                fitText(context, v, labels[index], metricLabels[metric].orEmpty(), 10f, metricWidth, 14f)
+                fitText(context, v, labels[index], metricLabel, 10f, metricWidth, 14f)
                 val metricSize = if (kind == WidgetKind.SCENE) (if (roomyScene) 14f else 11f) else if (kind == WidgetKind.NOW) 13f else 14f
                 fitText(context, v, id, metricText, metricSize, metricWidth,
                     if (kind == WidgetKind.SCENE) (if (roomyScene) 18f else 16f) else if (kind == WidgetKind.NOW) 16f else 19f, config.textScale)
@@ -370,7 +388,7 @@ object WidgetBinder {
                     cell.setTextColor(R.id.widget_cell_temp, p.ink)
                     cell.setTextColor(R.id.widget_cell_extra, p.accent)
                     icon(context, cell, R.id.widget_cell_icon, WidgetIconSet.from(config.iconSet),
-                        weather?.let { phaseAwareCondition(h.condition, it, h.timeMillis) } ?: h.condition, p, 40f)
+                        weather?.let { phaseAwareCondition(h.condition, it, h.timeMillis) } ?: h.condition, p, 40f, bitmapBudget = bitmapBudget)
                     v.addView(R.id.widget_hourly_forecast, cell)
                 }
             }
@@ -435,10 +453,10 @@ object WidgetBinder {
                 cell.setTextColor(R.id.widget_cell_extra, p.accent)
                 icon(context, cell, R.id.widget_cell_icon, WidgetIconSet.from(config.iconSet),
                     if (isHours) hour?.let { h -> weather?.let { phaseAwareCondition(h.condition, it, h.timeMillis) } ?: h.condition }
-                    else day?.condition, p, 40f)
+                    else day?.condition, p, 40f, bitmapBudget = bitmapBudget)
                 if (isRows) cell.setImageViewBitmap(R.id.widget_cell_chart, rangeBar(context,
                     (width - padding - 42 - 18 - 65 - 20).coerceAtLeast(8), if (compact) 8 else 10,
-                    day?.low, day?.high, low, high, p))
+                    day?.low, day?.high, low, high, p, bitmapBudget = bitmapBudget))
                 v.addView(R.id.widget_forecast, cell)
             }
         }
@@ -465,7 +483,7 @@ object WidgetBinder {
                 v.setViewVisibility(R.id.widget_scene_hourly_title, View.GONE)
                 v.setViewVisibility(R.id.widget_hourly_forecast, View.GONE)
             }
-            bindPrecipitation(context, v, config, weather, now, width - padding, height, p)
+            bindPrecipitation(context, v, config, weather, now, width - padding, height, p, bitmapBudget)
             // A shrunken 3-column host cannot fit the condition and the full
             // temperature range side by side. Keep current weather; the range
             // remains in the day forecast and in accessibility text.
@@ -488,8 +506,8 @@ object WidgetBinder {
     private fun time(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA))
     private fun put(v: RemoteViews, id: Int, text: String) { v.setViewVisibility(id, if (text.isEmpty()) View.GONE else View.VISIBLE); v.setTextViewText(id, text) }
     private fun icon(context: Context, v: RemoteViews, id: Int, iconSet: WidgetIconSet, condition: WeatherCondition?, p: WidgetPalette, sizeDp: Float = 64f,
-                     ambient: com.zhisheng.weather.ui.components.NaturalLightPalette? = null) {
-        WidgetIcons.bind(v, id, condition, iconSet, p.isLight, (sizeDp * context.resources.displayMetrics.density).roundToInt(), ambient)
+                     ambient: com.zhisheng.weather.ui.components.NaturalLightPalette? = null, bitmapBudget: WidgetBitmapBudget? = null) {
+        WidgetIcons.bind(v, id, condition, iconSet, p.isLight, (sizeDp * context.resources.displayMetrics.density).roundToInt(), ambient, bitmapBudget)
     }
     internal fun layoutFor(style: WidgetStyle, kind: WidgetKind): Int = when (style) {
         WidgetStyle.VISTA -> when (kind) { WidgetKind.PULSE -> R.layout.widget_vista_pulse; WidgetKind.NOW -> R.layout.widget_vista_now; WidgetKind.BAND -> R.layout.widget_vista_band; WidgetKind.WEEK -> R.layout.widget_vista_week; WidgetKind.SCENE -> R.layout.widget_vista_scene }
@@ -500,6 +518,13 @@ object WidgetBinder {
             Intent(c, FreshWidgetProvider::class.java).setAction("com.zhisheng.weather.widget.NO_OP")
                 .setData(Uri.parse("zhisheng://widget/$id/none/${widgetHit ?: "body"}")),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        if (action == "clock" || action == "alarm") {
+            systemClockLaunchCandidates(c).firstOrNull()?.let { target ->
+                // A user tap goes straight from the launcher to the clock, avoiding a transparent activity bounce.
+                return PendingIntent.getActivity(c, "clock:$id:${widgetHit.orEmpty()}".hashCode(), target,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            }
+        }
         val intent = Intent(c, WidgetLaunchActivity::class.java).setAction(action)
             .setData(Uri.parse("zhisheng://widget/$id/${style.key}/$action/${widgetHit ?: "body"}"))
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id).putExtra("widget_style", style.key).putExtra("city", city?.locationKey)
@@ -575,7 +600,7 @@ object WidgetBinder {
         views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_PX, size)
     }
     private fun bindPrecipitation(context: Context, views: RemoteViews, config: WidgetConfig, weather: WeatherData?, now: Long,
-                                  widthDp: Int, heightDp: Int, palette: WidgetPalette) {
+                                  widthDp: Int, heightDp: Int, palette: WidgetPalette, bitmapBudget: WidgetBitmapBudget?) {
         val visible = config.showPrecipitation && heightDp >= 280
         views.setViewVisibility(R.id.widget_precip_section, if (visible) View.VISIBLE else View.GONE)
         if (!visible) return
@@ -594,8 +619,11 @@ object WidgetBinder {
             "$title，${points.size}个预报采样，未来${((points.last().timeMillis - now) / 60_000).coerceAtLeast(0)}分钟；最高${points.maxOf { it.precip }}毫米每小时；不是雷达图")
         if (points.isEmpty()) return
         val density = context.resources.displayMetrics.density
-        val bitmap = Bitmap.createBitmap((widthDp * density).roundToInt().coerceIn(32, 1400),
-            (24 * density).roundToInt().coerceIn(16, 160), Bitmap.Config.ARGB_8888)
+        val widthPx = (widthDp * density).roundToInt().coerceIn(32, 1400)
+        val heightPx = (24 * density).roundToInt().coerceIn(16, 160)
+        val bitmap = Bitmap.createBitmap(bitmapBudget?.dimension(widthPx, 32, 1400) ?: widthPx,
+            bitmapBudget?.dimension(heightPx, 16, 160) ?: heightPx, Bitmap.Config.ARGB_8888)
+        bitmapBudget?.record(bitmap, bitmap.allocationByteCount)
         bitmap.density = Bitmap.DENSITY_NONE
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -609,14 +637,18 @@ object WidgetBinder {
             val left = ((point.timeMillis - now).coerceAtLeast(0) / horizon.toFloat() * bitmap.width)
             val right = ((point.timeMillis - now + interval * 60_000L).coerceAtLeast(0) / horizon.toFloat() * bitmap.width)
             val top = bitmap.height - 2f - point.precip / ceiling * (bitmap.height - 3f)
-            if (point.precip > 0) canvas.drawRect(left, top, (right - density).coerceAtLeast(left + 1), bitmap.height - 2f, paint)
+            val gap = density * (bitmapBudget?.scale ?: 1f)
+            if (point.precip > 0) canvas.drawRect(left, top, (right - gap).coerceAtLeast(left + 1), bitmap.height - 2f, paint)
         }
         views.setImageViewBitmap(R.id.widget_precip_chart, bitmap)
     }
-    private fun rangeBar(context: Context, widthDp: Int, heightDp: Int, low: Double?, high: Double?, min: Double?, max: Double?, p: WidgetPalette, current: Double? = null): Bitmap {
+    private fun rangeBar(context: Context, widthDp: Int, heightDp: Int, low: Double?, high: Double?, min: Double?, max: Double?, p: WidgetPalette, current: Double? = null, bitmapBudget: WidgetBitmapBudget? = null): Bitmap {
         val density = context.resources.displayMetrics.density
-        val bmp = Bitmap.createBitmap((widthDp * density).roundToInt().coerceIn(16, 1024),
-            (heightDp * density).roundToInt().coerceIn(8, 64), Bitmap.Config.ARGB_8888)
+        val widthPx = (widthDp * density).roundToInt().coerceIn(16, 1024)
+        val heightPx = (heightDp * density).roundToInt().coerceIn(8, 64)
+        val bmp = Bitmap.createBitmap(bitmapBudget?.dimension(widthPx, 16, 1024) ?: widthPx,
+            bitmapBudget?.dimension(heightPx, 8, 64) ?: heightPx, Bitmap.Config.ARGB_8888)
+        bitmapBudget?.record(bmp, bmp.allocationByteCount)
         bmp.density = Bitmap.DENSITY_NONE
         val c = Canvas(bmp); val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         c.scale(bmp.width / 240f, bmp.height / 20f)

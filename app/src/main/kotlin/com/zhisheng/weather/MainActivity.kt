@@ -3,15 +3,10 @@
 package com.zhisheng.weather
 
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
-import android.view.OrientationEventListener
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -32,7 +27,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +53,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.awaitCancellation
 import com.zhisheng.weather.data.UsageStatistics
+import com.zhisheng.weather.data.ServiceDiagnostics
 import com.zhisheng.weather.data.UpdateNotices
 import com.zhisheng.weather.ui.AppUpdateDialog
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -78,7 +73,6 @@ import com.zhisheng.weather.ui.isStartupIconEntry
 import com.zhisheng.weather.data.ThemeMode
 import com.zhisheng.weather.model.City
 import com.zhisheng.weather.ui.AppScreen
-import com.zhisheng.weather.ui.StandbyTiltGate
 import com.zhisheng.weather.ui.SearchScreen
 import com.zhisheng.weather.ui.WeatherViewModel
 import com.zhisheng.weather.ui.ProvideWeatherPresentationClock
@@ -94,7 +88,6 @@ import com.zhisheng.weather.ui.HistoryScreen
 import com.zhisheng.weather.ui.DailyForecastScreen
 import com.zhisheng.weather.ui.RadarScreen
 import com.zhisheng.weather.ui.TyphoonScreen
-import com.zhisheng.weather.ui.PortraitSessionNotice
 import com.zhisheng.weather.ui.UpdateOpeningHandledKey
 import com.zhisheng.weather.ui.UpdateOpeningOverlay
 import com.zhisheng.weather.ui.UpdateOpeningPreferenceFile
@@ -150,9 +143,8 @@ class MainActivity : ComponentActivity() {
             intent?.hasCategory(Intent.CATEGORY_LAUNCHER) == true, isTaskRoot,
             savedInstanceState != null,
             (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0)
-        startupPromptsSuppressed = !iconEntry
-        // 首帧与持久化设置读取期间一律竖屏。不能用 true 占位开启传感器。
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        // An installer may restore the old task, whose saved UI said notes were closed.
+        startupPromptsSuppressed = com.zhisheng.weather.ui.suppressStartupPrompts(iconEntry, intent?.action, shouldShowWhatsNew())
         if (savedInstanceState == null) dispatchShortcut(intent)
         applySplashBackground()
         enableEdgeToEdge()
@@ -203,6 +195,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }.collectAsState(initial = null)
                 var showLocationSetupAgain by rememberSaveable { mutableStateOf(false) }
+                var locateImmediately by rememberSaveable { mutableStateOf(false) }
+                var locationProviderWizard by rememberSaveable { mutableStateOf<com.zhisheng.weather.ui.ProviderWizardKind?>(null) }
                 var locationSetupDismissedForSession by rememberSaveable { mutableStateOf(false) }
                 var choosingInitialCity by rememberSaveable { mutableStateOf(false) }
                 fun markInitialLocationHandled() {
@@ -229,12 +223,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val initialWhatsNew = remember { shouldShowWhatsNew() }
-                var showWhatsNew by rememberSaveable { mutableStateOf(initialWhatsNew) }
+                var showWhatsNew by rememberSaveable(key = "notes_$WhatsNewVersion") { mutableStateOf(initialWhatsNew) }
                 val previousNotesVersion = remember {
                     getSharedPreferences(WhatsNewPreferenceFile, MODE_PRIVATE).getString(WhatsNewSeenKey, null)
                 }
                 // The opening precedes the release notes: once automatically per version, and on every manual request.
-                var autoOpeningPending by rememberSaveable {
+                var autoOpeningPending by rememberSaveable(key = "opening_${BuildConfig.VERSION_CODE}") {
                     mutableStateOf(shouldAutoPlayUpdateOpening(BuildConfig.VERSION_CODE,
                         getSharedPreferences(UpdateOpeningPreferenceFile, MODE_PRIVATE).getInt(UpdateOpeningHandledKey, 0),
                         initialWhatsNew, systemAnimationsEnabled()))
@@ -251,6 +245,14 @@ class MainActivity : ComponentActivity() {
                 var automaticUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
                 val notices = remember { UpdateNotices(this@MainActivity) }
                 val statistics = remember { UsageStatistics(this@MainActivity) }
+                val diagnosticsEnabled by SettingsRepository.serviceDiagnostics.collectAsState(initial = false)
+                LaunchedEffect(diagnosticsEnabled) {
+                    if (diagnosticsEnabled) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                        delay(15_000)
+                        ServiceDiagnostics.report(this@MainActivity)
+                        awaitCancellation()
+                    }
+                }
                 val usageEnabled by SettingsRepository.usageStatistics.collectAsState(initial = false)
                 LaunchedEffect(usageEnabled, showWhatsNew) {
                     if (usageEnabled && !showWhatsNew) {
@@ -262,8 +264,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val uiState by vm.uiState.collectAsState()
-                LaunchedEffect(initialLocationSetupRequired, uiState.selectedCity?.locationKey) {
-                    if (initialLocationSetupRequired == false && uiState.selectedCity != null) {
+                LaunchedEffect(initialLocationSetupRequired, uiState.selectedCity?.locationKey, uiState.locating) {
+                    if (initialLocationSetupRequired == false && uiState.selectedCity != null && !uiState.locating) {
                         // An explicit city from search or a widget also completes
                         // the guide, including when it superseded a GPS request.
                         showLocationSetupAgain = false
@@ -275,11 +277,10 @@ class MainActivity : ComponentActivity() {
                 val landscapeStandbyStyle by SettingsRepository.landscapeStandbyStyle.collectAsState(
                     initial = LandscapeStandbyStyle.WEATHER_CORE,
                 )
-                // 横屏页点“竖屏”后，当前 Activity 会话保持竖向；重新开启横屏待机或
-                // 下次冷启动后再恢复传感器判断，避免用户躺着时手机立刻又转回横屏。
-                var portraitSession by remember { mutableStateOf(false) }
                 val configuration = LocalConfiguration.current
-                val standbyActive = landscapeStandby && !portraitSession &&
+                // Android's fullUser policy owns rotation, including the user's rotation lock.
+                // This preference only chooses the content shown after the system rotates.
+                val standbyActive = landscapeStandby &&
                     configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
                 // 横屏只在主页展示待机时钟；从时钟进入设置后仍保持横向，
                 // 但恢复系统栏并展示完整设置，返回主页再回到待机界面。
@@ -292,63 +293,6 @@ class MainActivity : ComponentActivity() {
                             while (SystemClock.elapsedRealtime() - lastInteraction < 3_000) delay(500)
                             if (withContext(Dispatchers.IO) { notices.offer(info) }) automaticUpdate = info
                             awaitCancellation()
-                        }
-                    }
-                }
-
-                // 关闭横屏待机后立即回到竖屏并锁定；开启后方向决策收回 App——
-                // 系统 SENSOR 阈值低（约 45–60° 就翻面），"稍微一歪就横屏"。
-                // 6.1：默认锁竖屏，倾角 ≥65° 稳定 500ms 才切 SENSOR_LANDSCAPE，
-                // 回竖用更宽阈值（<40°）迟滞防抖；平放（UNKNOWN）与迟滞区间保持现状；
-                // 无传感器能力的老设备回退现行"直接交系统"行为。
-                LaunchedEffect(landscapeStandby) {
-                    if (!landscapeStandby) portraitSession = false
-                }
-                var landscapeTilt by remember { mutableStateOf(false) }
-                val tiltGate = remember {
-                    val handler = Handler(Looper.getMainLooper())
-                    var pendingEntry: Runnable? = null
-                    StandbyTiltGate(
-                        scheduleEntry = { delayMs, action ->
-                            val callback = Runnable { pendingEntry = null; action() }
-                            pendingEntry = callback
-                            handler.postDelayed(callback, delayMs)
-                        },
-                        cancelEntry = {
-                            pendingEntry?.let { handler.removeCallbacks(it) }
-                            pendingEntry = null
-                        },
-                        onLandscapeChanged = { landscapeTilt = it },
-                    )
-                }
-                val tiltListener = remember {
-                    object : OrientationEventListener(baseContext, SensorManager.SENSOR_DELAY_UI) {
-                        override fun onOrientationChanged(orientation: Int) {
-                            tiltGate.updateAngle(orientation)
-                        }
-                    }
-                }
-                DisposableEffect(landscapeStandby, portraitSession) {
-                    val sensorCapable = tiltListener.canDetectOrientation()
-                    if (landscapeStandby && !portraitSession && sensorCapable) {
-                        tiltListener.enable()
-                    } else {
-                        tiltListener.disable()
-                        tiltGate.reset()
-                        landscapeTilt = false
-                    }
-                    onDispose {
-                        tiltListener.disable()
-                        tiltGate.reset()
-                    }
-                }
-                LaunchedEffect(landscapeStandby, portraitSession, landscapeTilt) {
-                    requestedOrientation = when {
-                        !landscapeStandby || portraitSession -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        else -> if (landscapeTilt || !tiltListener.canDetectOrientation()) {
-                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                        } else {
-                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                         }
                     }
                 }
@@ -518,10 +462,6 @@ class MainActivity : ComponentActivity() {
                         uiState = uiState,
                         style = landscapeStandbyStyle,
                         onRefresh = { vm.refreshFromUser() },
-                        onExitLandscape = {
-                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            portraitSession = true
-                        },
                         onSettings = { screen = AppScreen.SETTINGS },
                     )
                 } else {
@@ -558,6 +498,7 @@ class MainActivity : ComponentActivity() {
                                 screen = AppScreen.SEARCH
                             },
                             onLocationSetupClick = {
+                                locateImmediately = true
                                 showLocationSetupAgain = true
                                 startupPromptsSuppressed = false
                             },
@@ -569,16 +510,6 @@ class MainActivity : ComponentActivity() {
                             onHourlyClick = { screen = AppScreen.HOURLY_DETAIL },
                             onTyphoonClick = { if (ReleaseFeatures.typhoon) screen = AppScreen.TYPHOON },
                         )
-                        }
-                        AnimatedVisibility(
-                            visible = portraitSession && screen == AppScreen.HOME,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .navigationBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            label = "portrait-session-notice",
-                        ) {
-                            PortraitSessionNotice(onRestore = { portraitSession = false })
                         }
                         val overlayVisible = screen != AppScreen.HOME
                         var overlayScreen by remember { mutableStateOf(AppScreen.SETTINGS) }
@@ -609,8 +540,6 @@ class MainActivity : ComponentActivity() {
                                     AppScreen.SETTINGS -> Box(Modifier.fillMaxSize()) {
                                     SettingsScreen(
                                         onBack = { screen = AppScreen.HOME },
-                                        landscapePortraitLocked = portraitSession,
-                                        onRestoreLandscapeAuto = { portraitSession = false },
                                         onLocate = { vm.locateCurrentCity() },
                                         locating = uiState.locating,
                                         locateMessage = uiState.locateMessage,
@@ -716,13 +645,23 @@ class MainActivity : ComponentActivity() {
                     viewModel = vm,
                     activity = this@MainActivity,
                     visible = ((initialLocationSetupRequired == true && !locationSetupDismissedForSession) ||
-                        showLocationSetupAgain) && screen == AppScreen.HOME && hostResumed &&
-                        (!startupPromptsSuppressed || showLocationSetupAgain) && !standbyVisible && openingSpec == null,
+                        showLocationSetupAgain) && screen == AppScreen.HOME &&
+                        (!startupPromptsSuppressed || showLocationSetupAgain) && !standbyVisible && openingSpec == null &&
+                        !showWhatsNew && !autoOpeningPending && locationProviderWizard == null,
+                    startImmediately = locateImmediately,
+                    firstRun = initialLocationSetupRequired == true,
+                    onConfigureProvider = { kind -> locationProviderWizard = kind },
                     onLocated = {
                         showLocationSetupAgain = false
+                        locateImmediately = false
                         locationSetupDismissedForSession = true
                     },
                     onChooseCity = {
+                        scope.launch {
+                            SettingsRepository.setLocationEnabled(false)
+                            com.zhisheng.weather.data.SecretStore.setSharedPlaceConsent(false)
+                        }
+                        locateImmediately = false
                         showLocationSetupAgain = false
                         locationSetupDismissedForSession = true
                         choosingInitialCity = true
@@ -730,13 +669,26 @@ class MainActivity : ComponentActivity() {
                         markInitialLocationHandled()
                     },
                     onDismiss = {
+                        locateImmediately = false
                         showLocationSetupAgain = false
                         locationSetupDismissedForSession = true
                         markInitialLocationHandled()
                     },
                 )
+                locationProviderWizard?.let { kind ->
+                    com.zhisheng.weather.ui.ProviderWizard(kind) {
+                        locationProviderWizard = null
+                        val ready = if (kind == com.zhisheng.weather.ui.ProviderWizardKind.AMAP)
+                            com.zhisheng.weather.data.SecretStore.amapRuntime.ready else com.zhisheng.weather.data.SecretStore.baiduRuntime.ready
+                        if (ready) scope.launch {
+                            SettingsRepository.setDeveloperMode(true)
+                            SettingsRepository.setLocationEnabled(true)
+                            locateImmediately = true
+                        }
+                    }
+                }
                 LaunchedEffect(autoOpeningPending, showWhatsNew, hostResumed, startupPromptsSuppressed, locationSetupHoldsStartup) {
-                    if (autoOpeningPending && showWhatsNew && hostResumed && !startupPromptsSuppressed && !locationSetupHoldsStartup) {
+                    if (autoOpeningPending && showWhatsNew && hostResumed && !startupPromptsSuppressed) {
                         withContext(Dispatchers.IO) {
                             getSharedPreferences(UpdateOpeningPreferenceFile, MODE_PRIVATE).edit()
                                 .putInt(UpdateOpeningHandledKey, BuildConfig.VERSION_CODE).commit()
@@ -765,7 +717,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onClose = { automaticUpdate = null })
                 }
-                if (showWhatsNew && hostResumed && !startupPromptsSuppressed && !openingHoldsNotes && !locationSetupHoldsStartup) {
+                if (showWhatsNew && hostResumed && !startupPromptsSuppressed && !openingHoldsNotes) {
                     WhatsNewDialog(
                         onClose = {
                             markWhatsNewSeen()
@@ -777,6 +729,12 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
+                com.zhisheng.weather.ui.AnnouncementHost(
+                    lifecycle = lifecycle,
+                    canPresent = hostResumed && screen == AppScreen.HOME && !standbyVisible &&
+                        !startupPromptsSuppressed && openingSpec == null && !autoOpeningPending &&
+                        !showWhatsNew && !showInterfaceStyleChoice && !locationSetupHoldsStartup && automaticUpdate == null,
+                )
                 if (ReleaseFeatures.classicTheme && showInterfaceStyleChoice && !showWhatsNew && !standbyVisible && hostResumed && !startupPromptsSuppressed && openingSpec == null && !locationSetupHoldsStartup) {
                     InterfaceStyleChoiceDialog(
                         currentStyle = interfaceStyle,
@@ -797,9 +755,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        startupPromptsSuppressed = !isStartupIconEntry(intent.action,
+        val iconEntry = isStartupIconEntry(intent.action,
             intent.hasCategory(Intent.CATEGORY_LAUNCHER), isTaskRoot, false,
             intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0)
+        startupPromptsSuppressed = com.zhisheng.weather.ui.suppressStartupPrompts(iconEntry, intent.action, shouldShowWhatsNew())
         setIntent(intent)
         dispatchShortcut(intent)
     }
@@ -882,4 +841,3 @@ class MainActivity : ComponentActivity() {
         const val KEY_SPLASH_LIGHT = "light"
     }
 }
-// 6.1 横屏灵敏度参数：进入阈值比系统 SENSOR 高、回竖阈值更低形成迟滞，平放不触发

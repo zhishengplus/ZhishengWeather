@@ -71,6 +71,37 @@ class PrecipitationPresentationTest {
         assertFalse(p.dry)
         assertTrue(p.summary.contains("当前"))
     }
+    @Test fun anActualMissingNativeBucketNeverBecomesADryCardOrHidesTheGap() {
+        for (interval in listOf(1, 5, 15)) {
+            val zero = (0 until 120 / interval).map { MinutePrecip(now + it * interval * 60_000L, 0f) }
+            val data = WeatherData(rainMinutes = zero, rainMeta = RainMeta("TEST", interval, now))
+            assertTrue(precipitationPresentation(data, now).dry)
+            assertTrue(precipitationPresentation(data, now).hasDrySkyWindow())
+            val missing = precipitationPresentation(data.copy(rainMinutes = zero.filterIndexed { index, _ -> index != 3 }), now)
+            assertFalse(missing.dry)
+            assertFalse(missing.hasDrySkyWindow())
+            assertEquals(interval, missing.intervalMinutes)
+            assertEquals("预报数据有缺口，已返回时刻暂无降水", missing.summary)
+            assertEquals(zero.size - 1, missing.points.size)
+        }
+    }
+    @Test fun missingEveryOtherBucketCannotRedefineTheDeclaredNativeInterval() {
+        val zero = (0 until 120).map { MinutePrecip(now + it * 60_000L, 0f) }
+        val partial = precipitationPresentation(WeatherData(rainMinutes = zero.filterIndexed { index, _ -> index % 2 == 0 },
+            rainMeta = RainMeta("XIAOMI", 1, now)), now)
+        assertEquals(1, partial.intervalMinutes)
+        assertFalse(partial.dry)
+        assertFalse(partial.hasDrySkyWindow())
+        assertTrue(partial.summary.contains("缺口"))
+    }
+    @Test fun futureOnlyDryBucketsDoNotClaimTheMissingCurrentIntervalIsDry() {
+        val data = WeatherData(rainMinutes = (1..8).map { MinutePrecip(now + it * 15 * 60_000L, 0f) },
+            rainMeta = RainMeta("OPEN-METEO", 15, now))
+        val partial = precipitationPresentation(data, now)
+        assertFalse(partial.dry)
+        assertFalse(partial.hasDrySkyWindow())
+        assertTrue(partial.summary.contains("缺口"))
+    }
     @Test fun densifiedSeriesDoesNotClaimNativeMinutePrecision() {
         val p = precipitationPresentation(WeatherData(rainMeta = RainMeta("OPEN-METEO", 15),
             rainMinutes = listOf(MinutePrecip(now, 0f), MinutePrecip(now + 60_000, 0f))), now)
@@ -113,5 +144,12 @@ class PrecipitationPresentationTest {
         val result = precipitationPresentation(WeatherData(rainMinutes = listOf(MinutePrecip(now, Float.NaN), MinutePrecip(now, 1f), MinutePrecip(now, 1f), MinutePrecip(now + 60_000, -1f))), now)
         assertEquals(1, result.points.size)
         assertEquals(1f, result.points.single().precip)
+    }
+
+    @Test fun wetModelDoesNotClaimObservedRain() {
+        val input = WeatherData(current = CurrentWeather(condition = WeatherCondition.CLEAR),
+            rainMinutes = listOf(MinutePrecip(now, .5f), MinutePrecip(now + 60_000, .5f)))
+        assertEquals("短时预报提示当前有降水", precipitationPresentation(input, now).summary)
+        assertEquals(WeatherCondition.CLEAR, input.current!!.condition)
     }
 }

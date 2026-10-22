@@ -4,6 +4,7 @@ import com.zhisheng.weather.model.*
 import kotlinx.serialization.json.*
 import okhttp3.Request
 import okhttp3.FormBody
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.time.*
 import java.time.format.DateTimeFormatter
@@ -19,18 +20,38 @@ data class MojiRuntimeCreds(
             (dailyToken.isNotBlank() && validMojiEndpoint(dailyEndpoint, true)))
 }
 
-/** Copy the HTTPS coordinate endpoint from the user's purchased product; never guess an HTTP-to-HTTPS host. */
-internal fun validMojiEndpoint(raw: String, daily: Boolean): Boolean {
-    val url = raw.trim().toHttpUrlOrNull() ?: return false
-    // Marketplace assigns the HTTPS gateway per subscribed product. Copy it from
-    // that product's example; never synthesize a gateway from its HTTP hostname.
-    val trustedHost = url.host.endsWith(".data.moji.com") || url.host.endsWith(".market.alicloudapi.com")
+// Verified 2026-10-20: aliv8's public CNAME points to this Alibaba API group.
+// The legacy name presents *.alicloudapi.com's certificate, which cannot verify
+// aliv8.data.moji.com. Only this confirmed alias is translated; TLS stays strict.
+private val mojiHttpsGateways = mapOf(
+    "aliv8.data.moji.com" to "7b975b4aa6684075a85d760b6c1c99cf-cn-beijing.alicloudapi.com",
+)
+
+internal fun normalizedMojiEndpoint(raw: String, daily: Boolean): HttpUrl? {
+    val url = raw.trim().toHttpUrlOrNull() ?: return null
     val paths = if (daily) setOf("forecast3days", "briefforecast3days", "forecast6days", "forecast15days")
         else setOf("condition", "briefcondition")
-    return trustedHost && url.scheme == "https" && url.port == 443 && url.username.isEmpty() &&
-        url.password.isEmpty() && url.query == null && url.fragment == null &&
-        url.encodedPath in paths.map { "/whapi/json/aliweather/$it" }
+    // Tolerate a trailing slash; the console example sometimes shows one.
+    val normalizedPath = url.encodedPath.trimEnd('/')
+    if (url.username.isNotEmpty() || url.password.isNotEmpty() || !url.query.isNullOrEmpty() ||
+        !url.fragment.isNullOrEmpty() || normalizedPath !in paths.map { "/whapi/json/aliweather/$it" }) return null
+    val gateway = mojiHttpsGateways[url.host]
+    if (gateway != null) {
+        if (url.port != if (url.scheme == "https") 443 else 80) return null
+        return url.newBuilder().scheme("https").host(gateway).port(443).encodedPath(normalizedPath).build()
+    }
+    val trustedHost = url.host.endsWith(".data.moji.com") || url.host.endsWith(".market.alicloudapi.com") ||
+        url.host in mojiHttpsGateways.values
+    return url.takeIf { trustedHost && it.scheme == "https" && it.port == 443 }
 }
+
+internal fun validMojiEndpoint(raw: String, daily: Boolean): Boolean = normalizedMojiEndpoint(raw, daily) != null
+
+internal fun normalizedMojiCredentials(candidate: MojiRuntimeCreds): MojiRuntimeCreds = candidate.copy(
+    appCode = candidate.appCode.trim(), currentToken = candidate.currentToken.trim(), dailyToken = candidate.dailyToken.trim(),
+    currentEndpoint = normalizedMojiEndpoint(candidate.currentEndpoint, false)?.toString() ?: candidate.currentEndpoint.trim(),
+    dailyEndpoint = normalizedMojiEndpoint(candidate.dailyEndpoint, true)?.toString() ?: candidate.dailyEndpoint.trim(),
+)
 
 internal fun seniverseRequest(city: City, key: String, kind: String): Request? {
     if (key.isBlank() || !validSearchCoordinates(city.latitude, city.longitude)) return null
@@ -45,12 +66,12 @@ internal fun seniverseRequest(city: City, key: String, kind: String): Request? {
 
 internal fun mojiRequest(city: City, creds: MojiRuntimeCreds, daily: Boolean = false): Request? {
     if (!creds.ready || !validSearchCoordinates(city.latitude, city.longitude)) return null
-    val endpoint = if (daily) creds.dailyEndpoint else creds.currentEndpoint
+    val endpoint = normalizedMojiEndpoint(if (daily) creds.dailyEndpoint else creds.currentEndpoint, daily) ?: return null
     val token = if (daily) creds.dailyToken else creds.currentToken
-    if (token.isBlank() || !validMojiEndpoint(endpoint, daily)) return null
+    if (token.isBlank()) return null
     // The Alibaba Moji coordinate protocol explicitly requires Amap/GCJ-02 coordinates.
     val point = wgs84ToGcj02(city.latitude, city.longitude)
-    return Request.Builder().url(endpoint.trim()).header("Authorization", "APPCODE ${creds.appCode.trim()}")
+    return Request.Builder().url(endpoint).header("Authorization", "APPCODE ${creds.appCode.trim()}")
         .post(FormBody.Builder().add("lat", point.latitude.toString()).add("lon", point.longitude.toString())
             .add("token", token.trim()).build()).build()
 }

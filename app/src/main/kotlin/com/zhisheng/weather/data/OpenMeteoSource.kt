@@ -185,18 +185,7 @@ object OpenMeteoSource {
             // Open-Meteo 的 15 分钟降水时间戳是“前 15 分钟累计”的区间终点。
             // 内部改存区间起点，否则整条雨带和开始时间都会被画晚约 15 分钟。
             // 请求 9 点，丢掉已经结束的当前桶后仍覆盖完整 2 小时。
-            val precip = m.minutely_15?.let { mm ->
-                mm.time?.mapIndexedNotNull { i, t ->
-                    val intervalEnd = epochOf(t) ?: return@mapIndexedNotNull null
-                    val intervalStart = intervalEnd - 15 * 60_000L
-                    if (intervalEnd <= nowMs) null
-                    // minutely_15.precipitation 是 15 分钟累计毫米；统一换成 mm/h。
-                    else MinutePrecip(intervalStart, com.zhisheng.weather.model.Nowcast.accumulatedMmToRate(
-                        mm.precipitation?.getOrNull(i)?.toFloat() ?: 0f,
-                        15,
-                    ))
-                }?.take(8)
-            } ?: emptyList()
+            val precip = minutelyToMinutes(m.minutely_15, m.utc_offset_seconds, nowMs)
 
             val aqiInfo = air?.current?.let { a ->
                 AqiInfo(
@@ -246,6 +235,24 @@ object OpenMeteoSource {
     } catch (e: Exception) {
         WeatherData(error = WeatherRepository.userFacingFetchError("公共天气源"))
     }
+
+    /** Missing precipitation is a gap, never a dry bucket; retain each provider timestamp. */
+    internal fun minutelyToMinutes(
+        series: OmMinutely15?,
+        utcOffsetSeconds: Int,
+        nowMillis: Long,
+    ): List<MinutePrecip> = series?.time.orEmpty().mapIndexedNotNull { index, stamp ->
+        val intervalEnd = runCatching {
+            java.time.LocalDateTime.parse(stamp)
+                .toInstant(java.time.ZoneOffset.ofTotalSeconds(utcOffsetSeconds)).toEpochMilli()
+        }.getOrNull() ?: return@mapIndexedNotNull null
+        val intervalStart = intervalEnd - 15 * 60_000L
+        if (intervalEnd <= nowMillis || intervalStart >= nowMillis + 120 * 60_000L) return@mapIndexedNotNull null
+        val mm = series?.precipitation?.getOrNull(index)
+            ?.takeIf { it.isFinite() && it >= 0.0 } ?: return@mapIndexedNotNull null
+        val rate = (mm * 4.0).toFloat().takeIf(Float::isFinite) ?: return@mapIndexedNotNull null
+        MinutePrecip(intervalStart, rate)
+    }.take(8)
 
     private fun fmt1(v: Double): String =
         if (v == Math.floor(v)) v.toInt().toString() else String.format(java.util.Locale.US, "%.1f", v)

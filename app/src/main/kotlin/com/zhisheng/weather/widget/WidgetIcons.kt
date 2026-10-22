@@ -23,14 +23,23 @@ internal object WidgetIcons {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
 
+    @Synchronized
+    fun clearMemoryCache() {
+        // RemoteViews / an editor may still reference these images. Never recycle.
+        cache.evictAll()
+    }
+
     fun bind(views: RemoteViews, id: Int, condition: WeatherCondition?, set: WidgetIconSet, light: Boolean, sizePx: Int = 144,
-             ambient: NaturalLightPalette? = null) {
+             ambient: NaturalLightPalette? = null, bitmapBudget: WidgetBitmapBudget? = null) {
         if (condition == null || condition == WeatherCondition.UNKNOWN) {
             views.setImageViewResource(id, R.drawable.ph_cloud)
         } else if (set == WidgetIconSet.CLASSIC) {
             views.setImageViewResource(id, classicConditionIconRes(condition) ?: R.drawable.ph_cloud)
         } else {
-            views.setImageViewBitmap(id, bitmap(condition, light, sizePx, ambient))
+            val pixels = bitmapBudget?.dimension(sizePx, 16, 512) ?: sizePx
+            val image = bitmap(condition, light, pixels, ambient)
+            bitmapBudget?.record(image, image.allocationByteCount)
+            views.setImageViewBitmap(id, image)
         }
         views.setContentDescription(id, condition?.label ?: "暂无天气")
     }

@@ -1,8 +1,8 @@
 {
-  "versionCode": 20261068,
-  "versionName": "0.1.5-beta10.5-public",
-  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.5-public/ZhishengWeather-v0.1.5-beta10.5-public.apk",
-  "sha256": "A6858E9300CC5AFE41E59E12532D6F0E779EE7012B757963F4ECEF201B4EB28C",
-  "notes": "10.3 → 10.5 累计更新\n\n• 新增国内天气来源，支持按模块选源与来源比较。\n• 小组件内容、字号、透明护字、预览及点击操作完善。\n• 无雨时可玩云间小鸟，随机云柱、渐进难度、每10根换景与奖励，振翅震动可关闭。\n• 逐时预报、过去7天与往年同日回看完善，缺失数据如实保留。\n• 新增早晚天气与短时降水提醒，支持精确到分钟的时间滑选。\n• 免Key定位、基础搜索、国内海外搜索与首次地点选择完善。\n• 诊断隐私、天气氛围及应用图标优化。",
-  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.5-public"
+  "versionCode": 20261102,
+  "versionName": "0.1.5-beta10.8",
+  "apkUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.5-beta10.8/ZhishengWeather-v0.1.5-beta10.8-public.apk",
+  "sha256": "55FF237C887B3C834A87809BBD9D40EC8B144DCAEB4D7D340499375F7DE76060",
+  "notes": "10.5 → 10.8 累计更新\n\n- 城市切换：支持左右滑动，优先显示缓存，减少连续切换时的空白和重复刷新。\n- 定位与地点：重做首次使用引导，提供多种定位方式；新增省市筛选和经纬度添加，改进定位兼容与首次定位过渡。\n- 天气源补全：新增补全优先级，按相同小时和当地日期补充缺失字段，保留主源已有数据及实际来源。\n- 桌面小组件：增加清华大学预览，修正部分刷新与时钟跳转问题。\n- 天气显示：完善缺失数据处理，修正天气回看边缘显示和深浅主题同步。\n- 使用体验：修正更新说明时机、重复定位提示和诊断复制反馈等已知问题。",
+  "pageUrl": "https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.5-beta10.8"
 }

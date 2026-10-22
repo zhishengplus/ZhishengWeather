@@ -30,7 +30,7 @@ import kotlin.math.sin
  * （中央气象台票 ×1.5，平票取更严重者）；实况偏差订正（0-6h 温度，指数衰减）；
  * 官方锚（|融合-央台|>3°C 且央台在场时向它拉 0.5）；逐日按 cityDate 分桶并按
  * 参与源并集长度输出；月相/月升落经 MoonCalc 本地补齐；露点（Magnus）、体感、
- * 平均温、AQI（国标 GB HJ 633-2012）等按完全体契约本地兜底，保证字段不空。
+ * 平均温等本地补充；AQI 使用 HJ 633—2026 分段公式估算并明确模型口径，缺项留空。
  */
 object FusionEngine {
 
@@ -271,6 +271,8 @@ object FusionEngine {
                 temp += (nmcTemp - temp) * OFFICIAL_ANCHOR_PULL
             }
             val humidity = med { it.humidity }
+            val suppliedAqi = med { it.aqi?.toDouble() }?.roundToInt()?.takeIf { it in 0..1000 }
+            val estimatedAqi = if (suppliedAqi == null) gbAqiAt(input.omAir, bucket)?.first else null
             // profile 优先复用参与源自带的（含强度/相态语义），缺时按现象构造
             val profile = list.firstNotNullOfOrNull { (_, h) ->
                 h.profile?.takeIf { it.condition == condition }
@@ -281,8 +283,9 @@ object FusionEngine {
                 condition = condition,
                 windSpeed = wind?.speedKmh,
                 precipProb = med { it.precipProb?.toDouble() }?.roundToInt()?.takeIf { it in 0..100 },
-                aqi = med { it.aqi?.toDouble() }?.roundToInt()?.takeIf { it in 0..1000 }
-                    ?: gbAqiAt(input.omAir, bucket)?.first,
+                aqi = suppliedAqi ?: estimatedAqi,
+                aqiEstimated = if (suppliedAqi != null) list.any { (_, hour) -> hour.aqi != null && hour.aqiEstimated }
+                    else estimatedAqi != null,
                 profile = profile,
                 feelsLike = med { it.feelsLike } ?: localFeelsLike(temp, humidity, wind?.speedKmh),
                 windDirectionDeg = wind?.dirDeg,
@@ -306,6 +309,7 @@ object FusionEngine {
         if (om == null || om.uvIndex.isEmpty()) return hourly
         val uvByHour = HashMap<Long, Double>()
         om.hourlyTimeMillis.forEachIndexed { i, t ->
+            if (t <= 0L) return@forEachIndexed
             om.uvIndex.getOrNull(i)?.let { uvByHour[hourBucket(t, om.timeZoneOffsetSeconds)] = it }
         }
         return hourly.map { h ->
@@ -403,7 +407,7 @@ object FusionEngine {
         }
     }
 
-    // —— AQI（国标整条优先；缺时本地按 GB HJ 633-2012 用浓度计算；污染物可跨源补空） ——
+    // —— AQI（供应商整条优先；无供应商指数时按 HJ 633—2026 估算，保留模型/缺项口径） ——
 
     internal fun fuseAqi(input: Input): AqiInfo? {
         val fromSource = AQI_PRIORITY.firstNotNullOfOrNull { id ->
@@ -412,93 +416,65 @@ object FusionEngine {
         val om = input.omAir
         if (fromSource != null) {
             return fromSource.copy(
-                pm25 = fromSource.pm25 ?: om?.currentPm25?.roundToInt()?.toString(),
-                pm10 = fromSource.pm10 ?: om?.currentPm10?.roundToInt()?.toString(),
-                o3 = fromSource.o3 ?: om?.currentO3?.roundToInt()?.toString(),
-                no2 = fromSource.no2 ?: om?.currentNo2?.roundToInt()?.toString(),
-                so2 = fromSource.so2 ?: om?.currentSo2?.roundToInt()?.toString(),
+                pm25 = fromSource.pm25 ?: modelPollutantDisplay(om?.currentPm25),
+                pm10 = fromSource.pm10 ?: modelPollutantDisplay(om?.currentPm10),
+                o3 = fromSource.o3 ?: modelPollutantDisplay(om?.currentO3),
+                no2 = fromSource.no2 ?: modelPollutantDisplay(om?.currentNo2),
+                so2 = fromSource.so2 ?: modelPollutantDisplay(om?.currentSo2),
                 co = fromSource.co ?: coDisplay(om?.currentCo),
                 pollutantUnits = fromSource.pollutantUnits.ifEmpty { WeatherRepository.CHINA_POLLUTANT_UNITS }
                     .let { units -> if (fromSource.co == null && coDisplay(om?.currentCo) != null)
                         units + ("co" to "mg/m³") else units },
             )
         }
-        if (om == null || om.currentPm25 == null && om.currentPm10 == null && om.currentO3 == null) return null
-        val (value, primary) = gbAqiNow(om) ?: return null
+        if (om == null) return null
+        val estimate = currentAqiEstimate(om)
+        if (estimate.subIndices.isEmpty()) return null
+        val value = estimate.value
         return AqiInfo(
             value = value,
-            level = WeatherRepository.aqiLevel(value),
+            level = value?.let(WeatherRepository::aqiLevel),
             standard = "中国",
-            primary = primary,
-            pm25 = om.currentPm25?.roundToInt()?.toString(),
-            pm10 = om.currentPm10?.roundToInt()?.toString(),
-            o3 = om.currentO3?.roundToInt()?.toString(),
-            no2 = om.currentNo2?.roundToInt()?.toString(),
-            so2 = om.currentSo2?.roundToInt()?.toString(),
+            estimated = true,
+            estimationNote = estimate.note,
+            primary = estimate.primary,
+            pm25 = modelPollutantDisplay(om.currentPm25),
+            pm10 = modelPollutantDisplay(om.currentPm10),
+            o3 = modelPollutantDisplay(om.currentO3),
+            no2 = modelPollutantDisplay(om.currentNo2),
+            so2 = modelPollutantDisplay(om.currentSo2),
             co = coDisplay(om.currentCo),
             pollutantUnits = WeatherRepository.CHINA_POLLUTANT_UNITS,
-            suggest = localAqiSuggest(value),
+            suggest = value?.let(::localAqiSuggest),
         )
     }
+
+    private fun modelPollutantDisplay(value: Double?): String? = value
+        ?.takeIf { it.isFinite() && it >= 0.0 }
+        ?.let { java.math.BigDecimal.valueOf(it).setScale(0, java.math.RoundingMode.HALF_EVEN).toPlainString() }
 
     private fun coDisplay(value: Double?): String? = value
         ?.takeIf { it.isFinite() && it >= 0.0 }
         ?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }
 
-    internal fun gbAqiNow(om: OmAirQuality): Pair<Int, String?>? {
-        val items = listOfNotNull(
-            om.currentPm25?.let { iaqi(it, GB_PM25)?.let { v -> v to "PM2.5" } },
-            om.currentPm10?.let { iaqi(it, GB_PM10)?.let { v -> v to "PM10" } },
-            om.currentO3?.let { iaqi(it, GB_O3)?.let { v -> v to "O₃" } },
-            om.currentNo2?.let { iaqi(it, GB_NO2)?.let { v -> v to "NO₂" } },
-            om.currentSo2?.let { iaqi(it, GB_SO2)?.let { v -> v to "SO₂" } },
-            om.currentCo?.let { iaqi(it, GB_CO)?.let { v -> v to "CO" } },
-        )
-        if (items.isEmpty()) return null
-        val (value, name) = items.maxByOrNull { it.first }!!
-        return value.toInt().coerceIn(0, 500) to name.takeIf { value > 50 }
+    private fun currentAqiEstimate(om: OmAirQuality): ChineseAqi2026.Estimate = ChineseAqi2026.estimate(
+        om.currentPm25, om.currentPm10, om.currentO3, om.currentNo2, om.currentSo2, om.currentCo,
+    )
+
+    internal fun gbAqiNow(om: OmAirQuality): Pair<Int, String?>? = currentAqiEstimate(om).let {
+        it.value?.let { value -> value to it.primary }
     }
 
-    /** 逐时兜底：OM 空气质量逐时浓度 → 国标 AQI（按整点就近取，±90 分钟内）。 */
+    /** Model concentrations are instantaneous: only an exact forecast timestamp can backfill AQI. */
     internal fun gbAqiAt(om: OmAirQuality?, bucket: Long): Pair<Int, String?>? {
         om ?: return null
-        val idx = om.hourlyTimeMillis.indices.minByOrNull { abs(om.hourlyTimeMillis[it] - bucket) }
-            ?.takeIf { abs(om.hourlyTimeMillis[it] - bucket) <= HOUR_MS / 2 + HOUR_MS } ?: return null
-        val items = listOfNotNull(
-            om.hourlyPm25.getOrNull(idx)?.let { iaqi(it, GB_PM25) },
-            om.hourlyPm10.getOrNull(idx)?.let { iaqi(it, GB_PM10) },
-            om.hourlyO3.getOrNull(idx)?.let { iaqi(it, GB_O3) },
-            om.hourlyNo2.getOrNull(idx)?.let { iaqi(it, GB_NO2) },
-            om.hourlySo2.getOrNull(idx)?.let { iaqi(it, GB_SO2) },
-            om.hourlyCo.getOrNull(idx)?.let { iaqi(it, GB_CO) },
+        if (bucket <= 0L) return null
+        val idx = om.hourlyTimeMillis.indexOf(bucket).takeIf { it >= 0 } ?: return null
+        val estimate = ChineseAqi2026.estimate(
+            om.hourlyPm25.getOrNull(idx), om.hourlyPm10.getOrNull(idx), om.hourlyO3.getOrNull(idx),
+            om.hourlyNo2.getOrNull(idx), om.hourlySo2.getOrNull(idx), om.hourlyCo.getOrNull(idx),
         )
-        val max = items.maxOrNull() ?: return null
-        return max.toInt().coerceIn(0, 500) to null
-    }
-
-    // IAQI 分段线性（HJ 633-2012）。断点表 = [浓度断点] 对应 IAQI [0,50,100,150,200,300,400,500]。
-    private val IAQI_LEVELS = doubleArrayOf(0.0, 50.0, 100.0, 150.0, 200.0, 300.0, 400.0, 500.0)
-    private val GB_PM25 = doubleArrayOf(0.0, 35.0, 75.0, 115.0, 150.0, 250.0, 350.0, 500.0)
-    private val GB_PM10 = doubleArrayOf(0.0, 50.0, 150.0, 250.0, 350.0, 420.0, 500.0, 600.0)
-    private val GB_O3 = doubleArrayOf(0.0, 160.0, 200.0, 300.0, 400.0, 800.0, 1000.0, 1200.0)
-    private val GB_NO2 = doubleArrayOf(0.0, 100.0, 200.0, 700.0, 1200.0, 2340.0, 3090.0, 3840.0)
-    private val GB_SO2 = doubleArrayOf(0.0, 150.0, 500.0, 650.0, 800.0, 1600.0, 2100.0, 2620.0)
-    private val GB_CO = doubleArrayOf(0.0, 5.0, 10.0, 35.0, 60.0, 90.0, 120.0, 150.0)
-
-    private fun iaqi(concentration: Double, breakpoints: DoubleArray): Double? {
-        if (!concentration.isFinite() || concentration < 0.0) return null
-        val last = breakpoints.lastIndex
-        if (concentration >= breakpoints[last]) return IAQI_LEVELS[last]
-        for (i in 0 until last) {
-            val lo = breakpoints[i]
-            val hi = breakpoints[i + 1]
-            if (concentration <= hi) {
-                val iaqiLo = IAQI_LEVELS[i]
-                val iaqiHi = IAQI_LEVELS[i + 1]
-                return (iaqiHi - iaqiLo) / (hi - lo) * (concentration - lo) + iaqiLo
-            }
-        }
-        return null
+        return estimate.value?.let { it to estimate.primary }
     }
 
     private fun localAqiSuggest(value: Int): String = when {
@@ -591,6 +567,7 @@ object FusionEngine {
         om ?: return emptyList()
         val end = nowMillis + 120 * 60_000L
         return om.minutely15TimeMillis.mapIndexedNotNull { i, t ->
+            if (t <= 0L) return@mapIndexedNotNull null
             val start = t - 15 * 60_000L
             if (t <= nowMillis || start > end) return@mapIndexedNotNull null
             val mm = om.minutely15PrecipMm.getOrNull(i) ?: return@mapIndexedNotNull null
@@ -645,30 +622,45 @@ object FusionEngine {
         sources.sortedByDescending { it.weight }
             .firstNotNullOfOrNull { it.data.forecastSummary?.takeIf { s -> s.isNotBlank() } }
 
-    /** 本地派生 24h 摘要（完全体兜底，不产生精确数字断言）。 */
+    /** Describe only the contiguous temperature forecast we actually have; missing rain probability is unknown. */
     internal fun deriveForecastSummary(
         hourly: List<HourlyWeather>,
         current: CurrentWeather?,
         nowMillis: Long,
     ): String? {
-        val window = hourly.filter { it.timeMillis in (nowMillis + 1)..(nowMillis + 24 * HOUR_MS) }
+        val candidates = hourly.filter { it.timeMillis in (nowMillis + 1)..(nowMillis + 24 * HOUR_MS) }
+            .distinctBy { it.timeMillis }.sortedBy { it.timeMillis }
+        val first = candidates.firstOrNull() ?: return null
+        if (first.timeMillis - nowMillis > HOUR_MS) return null
+        val window = mutableListOf<HourlyWeather>()
+        for (hour in candidates) {
+            if (hour.temperature?.takeIf { it.isFinite() && it in -110.0..70.0 } == null) break
+            if (window.lastOrNull()?.let { hour.timeMillis - it.timeMillis > HOUR_MS } == true) break
+            window += hour
+        }
+        if (window.size < 3) return null
         val temps = window.mapNotNull { it.temperature }
-        if (temps.size < 3) return null
-        val start = current?.temperature ?: temps.first()
+        val start = current?.temperature?.takeIf { it.isFinite() && it in -110.0..70.0 } ?: temps.first()
         val max = temps.max()
         val min = temps.min()
-        val peakProb = window.mapNotNull { it.precipProb }.maxOrNull() ?: 0
+        val probabilities = window.mapNotNull { it.precipProb?.takeIf { p -> p in 0..100 } }
+        val peakProb = probabilities.maxOrNull()
         val trend = when {
             max - start >= 4.0 -> "气温明显回升"
             start - min >= 4.0 -> "气温逐步走低"
             else -> "气温变化平缓"
         }
         val rain = when {
-            peakProb >= 60 -> "降水概率较大"
-            peakProb >= 30 -> "可能出现降水"
-            else -> "降水概率较小"
+            peakProb == null -> null
+            peakProb >= 60 -> if (probabilities.size == window.size) "降水概率较大" else "部分时段降水概率较大"
+            peakProb >= 30 -> if (probabilities.size == window.size) "可能出现降水" else "部分时段可能出现降水"
+            probabilities.size == window.size -> "降水概率较小"
+            else -> null
         }
-        return "未来 24 小时$trend，$rain"
+        val horizonMinutes = ((window.last().timeMillis - nowMillis) / 60_000L).toInt()
+        val horizon = if (horizonMinutes % 60 == 0) "${horizonMinutes / 60} 小时"
+            else "${horizonMinutes / 60} 小时 ${horizonMinutes % 60} 分钟"
+        return "未来 $horizon$trend" + rain?.let { "，$it" }.orEmpty()
     }
 
     // —— 分块主导源（用于排障与设置页展示） ——

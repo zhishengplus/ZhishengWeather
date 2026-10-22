@@ -1,6 +1,6 @@
 package com.zhisheng.weather.ui
 
-import com.zhisheng.weather.ui.components.weatherSharedBounds
+import com.zhisheng.weather.ui.components.cityScopedSharedBounds
 import com.zhisheng.weather.ui.home.dataSourceShortLabel
 import com.zhisheng.weather.ui.components.PhosphorIcon
 import com.zhisheng.weather.R
@@ -89,7 +89,6 @@ import androidx.lifecycle.repeatOnLifecycle
 internal fun LandscapeWeatherCoreScreen(
     uiState: HomeUiState,
     onRefresh: () -> Unit,
-    onExitLandscape: () -> Unit,
     onSettings: () -> Unit,
 ) {
     val data = uiState.weather
@@ -122,7 +121,7 @@ internal fun LandscapeWeatherCoreScreen(
     val hours = data?.hourly.orEmpty().filter { it.timeMillis >= nowMillis - 30 * 60_000L }.take(6)
 
     if (isPhosphorVista) {
-        VistaLandscapeWeatherCore(uiState, nowMillis, night, clock, seconds, date, onRefresh, onExitLandscape, onSettings)
+        VistaLandscapeWeatherCore(uiState, nowMillis, night, clock, seconds, date, onRefresh, onSettings)
         return
     }
 
@@ -141,7 +140,6 @@ internal fun LandscapeWeatherCoreScreen(
                     city = uiState.selectedCity?.displayName ?: "枳生天气",
                     loading = uiState.loading,
                     onRefresh = onRefresh,
-                    onExitLandscape = onExitLandscape,
                     onSettings = onSettings,
                 )
                 Spacer(Modifier.height(7.dp))
@@ -197,13 +195,13 @@ internal fun LandscapeWeatherCoreScreen(
                             WeatherIcon(
                                 data?.let { phaseAwareCondition(current?.condition, it, nowMillis) }
                                     ?: current?.condition,
-                                Modifier.weatherSharedBounds("current-condition").size(iconSize),
+                                Modifier.cityScopedSharedBounds("current-condition", uiState.selectedCity?.locationKey ?: "").size(iconSize),
                             )
                             Spacer(Modifier.width(12.dp))
                             Row(verticalAlignment = Alignment.Top) {
                                 Text(
                                     Fmt.temp(current?.temperature, uiState.tempUnit) ?: "--",
-                                    modifier = Modifier.weatherSharedBounds("current-temperature"),
+                                    modifier = Modifier.cityScopedSharedBounds("current-temperature", uiState.selectedCity?.locationKey ?: ""),
                                     style = MaterialTheme.typography.displayMedium,
                                     color = ZhishengText,
                                     fontWeight = if (isPhosphorVista) FontWeight.Light else FontWeight.Bold,
@@ -261,7 +259,7 @@ internal fun LandscapeWeatherCoreScreen(
                         high = Fmt.temp(today?.high, uiState.tempUnit)?.plus("°") ?: "--",
                         low = Fmt.temp(today?.low, uiState.tempUnit)?.plus("°") ?: "--",
                         humidity = current?.humidity?.let { "${it.toInt()}%" } ?: "--",
-                        aqi = data?.aqi?.value?.toString(),
+                        aqi = data?.aqi?.value?.let { Fmt.aqiValueLabel(it, data.aqi?.estimated == true) },
                     )
                 }
                 Spacer(Modifier.height(6.dp))
@@ -293,7 +291,6 @@ private fun WeatherCoreTopRail(
     city: String,
     loading: Boolean,
     onRefresh: () -> Unit,
-    onExitLandscape: () -> Unit,
     onSettings: () -> Unit,
 ) {
     Row(
@@ -325,8 +322,6 @@ private fun WeatherCoreTopRail(
                 color = if (loading) ZhishengOrange else ZhishengMint,
                 letterSpacing = 1.4.sp,
             )
-            StandbyPortraitButton(onClick = onExitLandscape)
-            Spacer(Modifier.width(6.dp))
             IconButton(
                 onClick = onSettings,
                 modifier = Modifier.size(if (isPhosphorVista) 48.dp else 38.dp).zhishengCompactPanel(),

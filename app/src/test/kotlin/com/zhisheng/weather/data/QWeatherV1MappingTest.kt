@@ -3,10 +3,40 @@ package com.zhisheng.weather.data
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.zhisheng.weather.model.WeatherCondition
 
 class QWeatherV1MappingTest {
+    @Test
+    fun minuteRainMissingOrInvalidAmountsLeaveRealTimestampGaps() {
+        val parsed = Json.decodeFromString<QwMinutely>("""{"code":"200","minutely":[
+            {"fxTime":"2026-10-13T10:00+08:00","precip":"0"},
+            {"fxTime":"2026-10-13T10:05+08:00"},
+            {"fxTime":"2026-10-13T10:10+08:00","precip":"bad"},
+            {"fxTime":"2026-10-13T10:15+08:00","precip":"NaN"},
+            {"fxTime":"2026-10-13T10:20+08:00","precip":"-1"},
+            {"fxTime":"2026-10-13T10:25+08:00","precip":"0.25","type":"snow"}
+        ]}""")
+        val points = WeatherRepository.qweatherMinuteSeries(parsed)
+        assertEquals(2, points.size)
+        assertEquals(25 * 60_000L, points.last().timeMillis - points.first().timeMillis)
+        assertEquals(0f, points.first().precip, 0f)
+        assertEquals(3f, points.last().precip, 0f)
+        assertEquals(com.zhisheng.weather.model.PrecipitationPhase.SNOW, points.last().phase)
+        assertTrue(WeatherRepository.qweatherMinuteSeries(parsed.copy(code = "403")).isEmpty())
+    }
+
+    @Test
+    fun minuteRainRejectsAllMissingAmountsAndBadTimestamps() {
+        val parsed = Json.decodeFromString<QwMinutely>("""{"code":"200","minutely":[
+            {"fxTime":"2026-10-13T10:00+08:00","precip":null},
+            {"fxTime":"2026-10-13T10:05+08:00","precip":"Infinity"},
+            {"fxTime":"bad","precip":"1"}
+        ]}""")
+        assertTrue(WeatherRepository.qweatherMinuteSeries(parsed).isEmpty())
+    }
+
     @Test
     fun gpsCoordinatesUseProviderSupportedOneKilometreGridInsteadOfCityId() {
         assertEquals("32.12", QWeatherApi.lat(32.1234567))

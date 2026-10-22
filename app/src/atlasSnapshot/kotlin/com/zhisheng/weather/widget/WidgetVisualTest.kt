@@ -223,7 +223,7 @@ class WidgetVisualTest {
         }
     }
     @Test fun notificationLayouts() {
-        for (expanded in listOf(false, true)) for (night in listOf(false, true)) {
+        for (expanded in listOf(false, true)) for (night in listOf(false, true)) for (airKind in listOf("provider", "estimated", "missing")) {
             paparazzi.unsafeUpdateConfig(
                 deviceConfig = DeviceConfig.NEXUS_5.copy(screenWidth = 1080, screenHeight = 2340, nightMode = if (night) com.android.resources.NightMode.NIGHT else com.android.resources.NightMode.NOTNIGHT),
                 theme = if (night) "android:Theme.Material.NoActionBar" else "android:Theme.Material.Light.NoActionBar",
@@ -234,14 +234,24 @@ class WidgetVisualTest {
                 layoutParams = ViewGroup.LayoutParams(dp(300), dp(if (expanded) 234 else 48))
             }
             val now = System.currentTimeMillis()
-            val view = WidgetNotification.views(context, NotificationSettings(), widgetPreviewSample(now), expanded, now).apply(context, frame)
+            val original = widgetPreviewSample(now)
+            val air = when (airKind) {
+                "estimated" -> original.weather.aqi!!.copy(estimated = true)
+                "missing" -> original.weather.aqi!!.copy(value = null, estimated = true)
+                else -> original.weather.aqi!!
+            }
+            val sample = original.copy(weather = original.weather.copy(aqi = air))
+            val view = WidgetNotification.views(context, NotificationSettings(), sample, expanded, now).apply(context, frame)
             frame.addView(view, FrameLayout.LayoutParams(dp(300), ViewGroup.LayoutParams.WRAP_CONTENT))
-            val name = "notification_${if (expanded) "expanded" else "compact"}_${if (night) "dark" else "light"}"
+            val name = "notification_${airKind}_${if (expanded) "expanded" else "compact"}_${if (night) "dark" else "light"}"
             paparazzi.snapshot(frame, name)
             org.junit.Assert.assertTrue("Notification must respect system height limits", view.height <= dp(if (expanded) 252 else 48))
             if (expanded) {
                 org.junit.Assert.assertEquals("62%", view.findViewById<TextView>(R.id.notification_metric_2).text.toString())
-                org.junit.Assert.assertEquals("优 42", view.findViewById<TextView>(R.id.notification_metric_4).text.toString())
+                org.junit.Assert.assertEquals(notificationAirValue(air), view.findViewById<TextView>(R.id.notification_metric_4).text.toString())
+                val description = view.findViewById<TextView>(R.id.notification_metric_4).contentDescription.toString()
+                if (air.estimated) org.junit.Assert.assertTrue(description.contains("模型估算"))
+                if (air.value == null) org.junit.Assert.assertEquals("—", view.findViewById<TextView>(R.id.notification_metric_4).text.toString())
                 org.junit.Assert.assertEquals("最高 20%", view.findViewById<TextView>(R.id.notification_metric_5).text.toString())
             }
             val bitmap = android.graphics.Bitmap.createBitmap(dp(300), frame.height, android.graphics.Bitmap.Config.ARGB_8888)

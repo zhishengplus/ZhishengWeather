@@ -8,14 +8,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -41,7 +48,7 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
-/** A light weather timeline: one reading baseline, with wind available at a glance. */
+/** Temperature readings follow their contour; weather details retain their shared baseline. */
 @Composable
 internal fun VistaHourlyForecast(
     items: List<HourlyDisplayItem>,
@@ -57,6 +64,14 @@ internal fun VistaHourlyForecast(
         if (!inspectionMode && Build.VERSION.SDK_INT >= 33) HourlyEdgeOptics() else null
     }
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val trend = remember(items) { hourlyTemperatureTrend(items) }
+    val curves = remember(trend) { hourlyTemperatureCurves(trend) }
+    val hasTrend = trend.any { it != null }
+    val temperatureLabelHeight = 26.dp * fontScale
+    val temperatureTravel = if (hasTrend) HourlyTemperatureProfileTravel else 0.dp
+    val temperatureProfileHeight = temperatureLabelHeight + temperatureTravel +
+        if (hasTrend) HourlyTemperatureLineGap + HourlyTemperatureMistDepth else 0.dp
+    val iconToTemperatureGap = if (hasTrend) 6.dp else 8.dp
     val showRain = vistaHourlyShowsPrecip(items.map { it.weather })
     val scrollState = rememberScrollState()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -112,11 +127,81 @@ internal fun VistaHourlyForecast(
                 )
             }
         }) {
-        Row(Modifier.horizontalScroll(scrollState)) {
+        Row(Modifier.cityChartGestures().horizontalScroll(scrollState).drawWithCache {
+            // Match the actual rounded Column/Spacer measurements, including large type.
+            val columnWidth = cellWidth.roundToPx().toFloat()
+            val top = (22.dp * fontScale).roundToPx() + 8.dp.roundToPx() +
+                28.dp.roundToPx() + iconToTemperatureGap.roundToPx()
+            val lineTop = top + temperatureLabelHeight.roundToPx() + HourlyTemperatureLineGap.roundToPx()
+            val points = trend.mapIndexed { index, point ->
+                point?.let { Offset((index + 0.5f) * columnWidth,
+                    lineTop + temperatureTravel.toPx() * it.fraction) }
+            }
+            // Shared pure geometry keeps adjacent segments tangent-continuous. The edge
+            // continuation follows the real trend instead of adding a short horizontal shelf.
+            val floorY = lineTop + temperatureTravel.toPx() + HourlyTemperatureMistDepth.toPx()
+            val travel = temperatureTravel.toPx()
+            val contours = curves.map { curve ->
+                val first = curve.segments.first().start
+                val last = curve.segments.last().end
+                val trace = Path().apply {
+                    moveTo(first.x * columnWidth, lineTop + first.fraction * travel)
+                    curve.segments.forEach { segment ->
+                        cubicTo(segment.firstControl.x * columnWidth, lineTop + segment.firstControl.fraction * travel,
+                            segment.secondControl.x * columnWidth, lineTop + segment.secondControl.fraction * travel,
+                            segment.end.x * columnWidth, lineTop + segment.end.fraction * travel)
+                    }
+                }
+                val wash = Path().apply {
+                    addPath(trace)
+                    lineTo(last.x * columnWidth, floorY)
+                    lineTo(first.x * columnWidth, floorY)
+                    close()
+                }
+                trace to wash
+            }
+            val warm = lerp(palette.orange, palette.text, if (palette.isLight) 0.16f else 0.35f)
+            val cool = lerp(palette.cyan, palette.mint, 0.25f)
+            val colorTop = lineTop.toFloat()
+            val dyes = trend.map { lerp(warm, cool, it?.fraction ?: 0.5f).copy(alpha = 0.88f) }
+            val contentWidth = size.width.coerceAtLeast(1f)
+            val edge = (14.dp.toPx() / contentWidth).coerceIn(0f, 0.15f)
+            val colorStops = buildList<Pair<Float, Color>> {
+                add(0f to dyes.first().copy(alpha = 0f))
+                add(edge to dyes.first())
+                dyes.forEachIndexed { index, color -> add((index + 0.5f) * columnWidth / contentWidth to color) }
+                add((1f - edge) to dyes.last())
+                add(1f to dyes.last().copy(alpha = 0f))
+            }
+            val silk = Brush.horizontalGradient(*colorStops.toTypedArray())
+            val mist = Brush.verticalGradient(listOf(warm.copy(alpha = 0.12f),
+                cool.copy(alpha = 0.045f), cool.copy(alpha = 0f)), colorTop, floorY.coerceAtLeast(colorTop + 1f))
+            val traceStroke = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round)
+            val softStroke = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+            val softOffset = 1.dp.toPx()
+            val nowRadius = 2.dp.toPx()
+            onDrawBehind {
+                contours.forEach { (trace, wash) ->
+                    drawPath(wash, mist)
+                    withTransform({ translate(top = softOffset) }) {
+                        drawPath(trace, silk, alpha = 0.075f, style = softStroke)
+                    }
+                    drawPath(trace, silk, style = traceStroke)
+                }
+                points.forEachIndexed { index, point ->
+                    if (point != null && items[index].isNow) {
+                        val tint = lerp(warm, cool, trend[index]!!.fraction)
+                        drawCircle(tint.copy(alpha = 0.12f), 5.dp.toPx(), point)
+                        drawCircle(tint, nowRadius, point)
+                        drawCircle(lerp(tint, palette.text, 0.6f), 0.8.dp.toPx(), point)
+                    }
+                }
+            }
+        }) {
             items.forEachIndexed { index, item ->
                 val h = item.weather
                 val condition = phaseAwareCondition(h.condition, data, h.timeMillis)
-                val temperature = Fmt.temp(h.temperature, unit)?.let { "$it°" } ?: "—"
+                val temperature = Fmt.temp(h.temperature?.takeIf(Double::isFinite), unit)?.let { "$it°" } ?: "—"
                 val numberSize = minOf(20f, cellWidth.value / (temperature.length * 0.58f * fontScale))
                 Column(Modifier.width(cellWidth), horizontalAlignment = Alignment.CenterHorizontally) {
                     // Every reading occupies the full cell width and a shared row height.
@@ -131,12 +216,17 @@ internal fun VistaHourlyForecast(
                     Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.Center) {
                         WeatherIcon(condition, Modifier.size(28.dp))
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Box(Modifier.fillMaxWidth().height(26.dp * fontScale), contentAlignment = Alignment.Center) {
-                        Text(temperature, color = if (item.isNow) palette.mint else palette.text,
-                            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                            fontSize = numberSize.sp, lineHeight = 25.sp,
-                            fontWeight = FontWeight.Light, letterSpacing = (-0.4).sp, maxLines = 1)
+                    Spacer(Modifier.height(iconToTemperatureGap))
+                    // The number and its curve point form one object, with a fixed clear gap.
+                    Box(Modifier.fillMaxWidth().height(temperatureProfileHeight)) {
+                        Box(Modifier.fillMaxWidth().height(temperatureLabelHeight)
+                            .offset(y = temperatureTravel * (trend[index]?.fraction ?: 0.5f)),
+                            contentAlignment = Alignment.Center) {
+                            Text(temperature, color = if (item.isNow) palette.mint else palette.text,
+                                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+                                fontSize = numberSize.sp, lineHeight = 25.sp,
+                                fontWeight = FontWeight.Light, letterSpacing = (-0.4).sp, maxLines = 1)
+                        }
                     }
                     Box(Modifier.height(18.dp * fontScale).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(condition?.takeUnless { it == WeatherCondition.UNKNOWN }?.label ?: "暂无",
@@ -168,3 +258,7 @@ internal fun VistaHourlyForecast(
         }
     }
 }
+
+private val HourlyTemperatureProfileTravel = 36.dp
+private val HourlyTemperatureLineGap = 6.dp
+private val HourlyTemperatureMistDepth = 14.dp

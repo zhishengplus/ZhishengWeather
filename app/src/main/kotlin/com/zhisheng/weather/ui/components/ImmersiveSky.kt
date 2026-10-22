@@ -23,45 +23,72 @@ import com.zhisheng.weather.model.ThermalModifier
 
 /** A bounded volume of cloud, evaluated directly by the hardware canvas on Android 13+. */
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-internal class ImmersiveSky {
+internal class ImmersiveSky(private val onFailure: () -> Unit = {}) {
     private val shader = RuntimeShader(SKY_SHADER).apply {
         setInputShader("noiseTexture", BitmapShader(CloudNoiseTexture.bitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply {
             setFilterMode(BitmapShader.FILTER_MODE_LINEAR)
         })
     }
     private val paint = Paint().apply { shader = this@ImmersiveSky.shader }
+    private val structures = NaturalWeather.entries.map { weather -> when (weather) {
+        NaturalWeather.OVERCAST -> floatArrayOf(1.45f, 2.3f, .23f, .95f)
+        NaturalWeather.RAIN, NaturalWeather.MIXED, NaturalWeather.ICE -> floatArrayOf(2.8f, 5.5f, .17f, 1f)
+        NaturalWeather.STORM -> floatArrayOf(1.8f, 3.8f, .11f, 1f)
+        NaturalWeather.SNOW -> floatArrayOf(1.35f, 2.7f, .29f, .72f)
+        NaturalWeather.FOG -> floatArrayOf(.8f, 1.2f, .38f, .08f)
+        NaturalWeather.HAZE -> floatArrayOf(.7f, 1.1f, .4f, .04f)
+        NaturalWeather.DUST -> floatArrayOf(3.6f, 1.0f, .35f, .12f)
+        NaturalWeather.WIND -> floatArrayOf(3.4f, 6.2f, .16f, .8f)
+        else -> floatArrayOf(2.25f, 4.1f, .15f, 1f)
+    } }
 
     private data class Frame(val state: NaturalLightState, val palette: NaturalLightPalette,
         val phase: Double, val gain: Float, val light: Boolean, val size: IntSize,
-        val previous: NaturalWeather, val next: NaturalWeather, val blend: Float)
+        val weatherWeights: List<Float>, val quality: SkyRenderQuality)
     private var recorded: Frame? = null
+    private var recordedAt = 0L
+    private var unavailable = false
 
     /** Only the soft cloud volume is rasterized at half resolution. Text and rain stay native.
      * Scrolling changes layer position/opacity without reevaluating the cloud volume. */
     fun drawCached(scope: DrawScope, layer: GraphicsLayer, state: NaturalLightState, palette: NaturalLightPalette,
                    phase: Double, gain: Float, opacity: Float, light: Boolean, height: Float,
-                   previousWeather: NaturalWeather, nextWeather: NaturalWeather, blend: Float) {
-        val target = IntSize(ceil(scope.size.width * .5f).toInt().coerceAtLeast(1),
-            ceil(height * .5f).toInt().coerceAtLeast(1))
-        val frame = Frame(state, palette, phase, gain, light, target, previousWeather, nextWeather, blend)
+                   weatherWeights: List<Float>, quality: SkyRenderQuality,
+                   minimumFrameIntervalNanos: Long): Boolean {
+        if (unavailable) return false
+        val target = IntSize(ceil(scope.size.width * quality.resolutionScale).toInt().coerceAtLeast(1),
+            ceil(height * quality.resolutionScale).toInt().coerceAtLeast(1))
+        val frame = Frame(state, palette, phase, gain, light, target, weatherWeights, quality)
         layer.compositingStrategy = CompositingStrategy.Offscreen
         layer.alpha = opacity.coerceIn(0f, 1f)
-        with(scope) {
-            if (recorded != frame || layer.size != target) {
-                layer.record(size = target) {
-                    draw(this, state, palette, phase, gain, light, size.height, previousWeather, nextWeather, blend)
+        return runCatching {
+            with(scope) {
+                val now = System.nanoTime()
+                val mustRecord = recorded == null || layer.size != target || recorded?.quality != quality
+                if (mustRecord || (recorded != frame && now - recordedAt >= minimumFrameIntervalNanos)) {
+                    layer.record(size = target) {
+                        draw(this, state, palette, phase, gain, light, size.height, weatherWeights, quality)
+                    }
+                    recorded = frame
+                    recordedAt = now
                 }
-                recorded = frame
+                scale(size.width / target.width, height / target.height, pivot = Offset.Zero) { drawLayer(layer) }
             }
-            scale(size.width / target.width, height / target.height, pivot = Offset.Zero) { drawLayer(layer) }
+            true
+        }.getOrElse {
+            // Permanently retire this renderer after its first device/driver failure. No retry loop.
+            unavailable = true
+            android.util.Log.w("ImmersiveSky", "Sky rendering unavailable; using compatible atmosphere", it)
+            onFailure()
+            false
         }
     }
 
     private fun draw(scope: DrawScope, state: NaturalLightState, palette: NaturalLightPalette,
              phase: Double, gain: Float, light: Boolean, height: Float,
-             previousWeather: NaturalWeather = state.weather, nextWeather: NaturalWeather = state.weather, blend: Float = 1f) {
+             weatherWeights: List<Float>, quality: SkyRenderQuality) {
         fun weatherWeight(predicate: (NaturalWeather) -> Boolean): Float =
-            (if (predicate(previousWeather)) 1f - blend else 0f) + (if (predicate(nextWeather)) blend else 0f)
+            NaturalWeather.entries.indices.sumOf { if (predicate(NaturalWeather.entries[it])) weatherWeights[it].toDouble() else 0.0 }.toFloat()
         shader.setFloatUniform("resolution", scope.size.width, height)
         // A closed path in density space has matching position and velocity at the clock seam.
         val angle = phase * PI * 2
@@ -75,6 +102,8 @@ internal class ImmersiveSky {
         shader.setFloatUniform("skyCloudShade", palette.cloudShadow.red, palette.cloudShadow.green, palette.cloudShadow.blue)
         shader.setFloatUniform("skyCloudLit", palette.cloudLit.red, palette.cloudLit.green, palette.cloudLit.blue)
         shader.setFloatUniform("strength", gain)
+        shader.setFloatUniform("cloudSlices", if (quality == SkyRenderQuality.HIGH) 6f else 4f)
+        shader.setFloatUniform("detail", if (quality == SkyRenderQuality.HIGH) 1f else 0f)
         shader.setFloatUniform("lightTheme", if (light) 1f else 0f)
         val stormWeight = weatherWeight { it == NaturalWeather.STORM }
         shader.setFloatUniform("storm", stormWeight)
@@ -83,20 +112,9 @@ internal class ImmersiveSky {
         shader.setFloatUniform("sunVisible", weatherWeight { it != NaturalWeather.NEUTRAL })
         shader.setFloatUniform("heat", if (state.thermal == ThermalModifier.HOT) 1f else 0f)
         shader.setFloatUniform("heatPhase", (phase * 2 * PI).toFloat())
-        fun structure(weather: NaturalWeather): FloatArray = when (weather) {
-            NaturalWeather.OVERCAST -> floatArrayOf(1.45f, 2.3f, .23f, .95f)
-            NaturalWeather.RAIN, NaturalWeather.MIXED, NaturalWeather.ICE -> floatArrayOf(2.8f, 5.5f, .17f, 1f)
-            NaturalWeather.STORM -> floatArrayOf(1.8f, 3.8f, .11f, 1f)
-            NaturalWeather.SNOW -> floatArrayOf(1.35f, 2.7f, .29f, .72f)
-            NaturalWeather.FOG -> floatArrayOf(.8f, 1.2f, .38f, .08f)
-            NaturalWeather.HAZE -> floatArrayOf(.7f, 1.1f, .4f, .04f)
-            NaturalWeather.DUST -> floatArrayOf(3.6f, 1.0f, .35f, .12f)
-            NaturalWeather.WIND -> floatArrayOf(3.4f, 6.2f, .16f, .8f)
-            else -> floatArrayOf(2.25f, 4.1f, .15f, 1f)
-        }
-        val previous = structure(previousWeather)
-        val next = structure(nextWeather)
-        shader.setFloatUniform("structure", FloatArray(4) { previous[it] + (next[it]-previous[it])*blend })
+        shader.setFloatUniform("structure", FloatArray(4) { component ->
+            structures.indices.sumOf { (structures[it][component] * weatherWeights[it]).toDouble() }.toFloat()
+        })
         shader.setFloatUniform("aerosol", weatherWeight { it == NaturalWeather.FOG },
             weatherWeight { it == NaturalWeather.HAZE }, weatherWeight { it == NaturalWeather.DUST })
         shader.setFloatUniform("cloudColor", palette.cloud.red, palette.cloud.green, palette.cloud.blue)
@@ -137,6 +155,8 @@ uniform float2 sunSource;
 uniform float3 skyCloudShade;
 uniform float3 skyCloudLit;
 uniform float strength;
+uniform float cloudSlices;
+uniform float detail;
 uniform float lightTheme;
 uniform float storm;
 uniform float lightning;
@@ -158,8 +178,9 @@ float noise(float3 p) {
     return mix(rg.x,rg.y,f.z);
 }
 float field(float3 p) {
-    return noise(p)*.48 + noise(p*2.03+11.3)*.26 + noise(p*4.11+27.1)*.14
-         + noise(p*8.23+31.7)*.08 + noise(p*16.51+7.9)*.04;
+    float coarse = noise(p)*.48 + noise(p*2.03+11.3)*.26 + noise(p*4.11+27.1)*.14;
+    if (detail < .5) return coarse / .88;
+    return coarse + noise(p*8.23+31.7)*.08 + noise(p*16.51+7.9)*.04;
 }
 float density(float3 p) {
     float n = field(p);
@@ -188,7 +209,8 @@ half4 main(float2 coord) {
     lit = mix(lit, skyCloudLit, solarMode);
     if (cover > .015 && structure.w > .025) {
     for (int i=0; i<6; i++) {
-        float t = 1.0+float(i)*.30;
+        if (float(i) >= cloudSlices) break;
+        float t = 1.0+float(i)*.30*6.0/cloudSlices;
         // Broad horizontal cloud banks, with finer vertical structure and clear air between.
         float3 pos = origin + ray*t*float3(structure.x,structure.y,2.8);
         float d = density(pos);
@@ -197,7 +219,7 @@ half4 main(float2 coord) {
         float threshold = mix(.78,.39,cover);
         float towardLight = smoothstep(threshold,threshold+.15,lightDensity);
         float illumination = clamp(.32+(d-towardLight)*1.35,.12,.86);
-        float alpha = d * mix(.36,.46,lightTheme) * structure.w;
+        float alpha = (1.0-pow(1.0-d*mix(.36,.46,lightTheme)*structure.w,6.0/cloudSlices));
         sum += trans * alpha * mix(shade,lit,illumination);
         trans *= 1.0-alpha;
     }

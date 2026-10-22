@@ -127,7 +127,8 @@ object WidgetRuntime {
         val source = SettingsRepository.sourcePref.first()
         val own = WidgetStore.snapshot(c, city.locationKey)?.takeIf { WeatherRepository.cacheCompatible(it.weather, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it.weather) }
         val cached = WeatherCache.load(c, city.locationKey)?.data?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
-        val data = listOfNotNull(own?.weather, cached).maxByOrNull { it.fetchedAt ?: 0L } ?: return WidgetSnapshot(city, WeatherData())
+        val data = latestWeatherCache(listOfNotNull(own?.weather, cached), System.currentTimeMillis())
+            ?: return WidgetSnapshot(city, WeatherData())
         return WidgetSnapshot(city, data)
     }
     suspend fun renderAll(c: Context) = renderLock.withLock {
@@ -148,14 +149,16 @@ object WidgetRuntime {
         val sky = SettingsRepository.livingSky.first()
         val level = SettingsRepository.ambience.first()
         val now = System.currentTimeMillis()
-        fun views(size: SizeF) = WidgetBinder.bind(c, id, instance, config, data,
+        fun views(size: SizeF, budget: WidgetBitmapBudget) = WidgetBinder.bind(c, id, instance, config, data,
             size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1), now = now,
-            livingSkyEnabled = sky, ambienceLevel = level)
+            livingSkyEnabled = sky, ambienceLevel = level, bitmapBudget = budget)
         val sizes = widgetExactSizes(options)
-        val remote = if (Build.VERSION.SDK_INT >= 31 && sizes.isNotEmpty()) RemoteViews(sizes.associateWith(::views))
-        else {
-            val (landscape, portrait) = widgetLegacySizes(options, instance.kind)
-            RemoteViews(views(landscape), views(portrait))
+        val remote = budgetedWidgetViews(c) { budget ->
+            if (Build.VERSION.SDK_INT >= 31 && sizes.isNotEmpty()) RemoteViews(sizes.associateWith { views(it, budget) })
+            else {
+                val (landscape, portrait) = widgetLegacySizes(options, instance.kind)
+                RemoteViews(views(landscape, budget), views(portrait, budget))
+            }
         }
         manager.updateAppWidget(id, remote)
     }
@@ -163,11 +166,11 @@ object WidgetRuntime {
         val sky = SettingsRepository.livingSky.first()
         val level = SettingsRepository.ambience.first()
         val now = System.currentTimeMillis()
-        fun bind(size: SizeF) = WidgetBinder.bind(c, id, WidgetInstance(id, style, kind), config, data,
+        fun bind(size: SizeF, budget: WidgetBitmapBudget) = WidgetBinder.bind(c, id, WidgetInstance(id, style, kind), config, data,
             size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1), now = now, interactive = false,
-            livingSkyEnabled = sky, ambienceLevel = level)
+            livingSkyEnabled = sky, ambienceLevel = level, bitmapBudget = budget)
         val reference = SizeF(kind.width.toFloat(), kind.height.toFloat())
-        if (Build.VERSION.SDK_INT < 31) return bind(reference)
+        if (Build.VERSION.SDK_INT < 31) return budgetedWidgetViews(c) { bind(reference, it) }
         // Pin dialogs choose their own grid bounds before an ID/options bundle exists.
         // A single reference-width layout can therefore clip text in a narrower host.
         val provider = AppWidgetManager.getInstance(c).getInstalledProvidersForPackage(c.packageName, null)
@@ -177,8 +180,10 @@ object WidgetRuntime {
         val minHeight = provider?.minHeight?.takeIf { it > 0 }?.div(density) ?: reference.height
         val widths = listOf(minWidth, reference.width).distinct()
         val heights = listOf(minHeight, reference.height).distinct()
-        return RemoteViews(widths.flatMap { width -> heights.map { height -> SizeF(width, height) } }
-            .associateWith(::bind))
+        return budgetedWidgetViews(c) { budget ->
+            RemoteViews(widths.flatMap { width -> heights.map { height -> SizeF(width, height) } }
+                .associateWith { bind(it, budget) })
+        }
     }
 }
 object WidgetRefresh {
@@ -232,36 +237,46 @@ class WidgetSkyWorker(context: Context, params: WorkerParameters) : CoroutineWor
     }
 }
 class WidgetRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    private suspend fun targets(ctx: Context): List<Pair<City, Int>>? =
+        readStableWidgetRefreshTargets(reminderDeliveryGate::contextVersion) {
+            val selected = CityRepository.selectedCity.first()
+            val cities = CityRepository.savedCities()
+            val locatedKey = CityRepository.locatedCityKey.first()
+            val configs = WidgetRuntime.instances(ctx).map { WidgetStore.config(ctx, it.id, it.style) }.toMutableList()
+            WidgetStore.notification(ctx).takeIf { it.enabled || it.alertsEnabled }?.let { configs += it.config }
+            val automation = AutomationSettingsRepository.read(ctx)
+            widgetRefreshTargets(configs, selected, cities, locatedKey,
+                automation.checkMinutes.takeIf { automation.needsBackground })
+        }
+
     override suspend fun doWork(): Result = lock.withLock {
         val ctx = applicationContext
-        val configs = WidgetRuntime.instances(ctx).map { WidgetStore.config(ctx, it.id, it.style) }.toMutableList()
-        WidgetStore.notification(ctx).takeIf { it.enabled || it.alertsEnabled }?.let { configs += it.config }
-        val automation = AutomationSettingsRepository.read(ctx)
-        val pairs = configs.mapNotNull { cfg -> WidgetRuntime.city(ctx, cfg)?.let { it to cfg.intervalMinutes } }.toMutableList()
-        if (automation.needsBackground) CityRepository.selectedCity.first()?.let { pairs += it to automation.checkMinutes }
+        val pairs = targets(ctx) ?: return@withLock if (shouldRetryWidgetRefresh(true, runAttemptCount))
+            Result.retry() else Result.success()
         val source = SettingsRepository.sourcePref.first()
         var failed = false
         pairs.groupBy { it.first.locationKey }.values.forEach { group ->
             val city = group.first().first
             val interval = group.minOf { it.second }
-            val existing = WidgetStore.snapshot(ctx, city.locationKey)?.weather?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
-                ?: WeatherCache.load(ctx, city.locationKey)?.data?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
+            val own = WidgetStore.snapshot(ctx, city.locationKey)?.weather?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
+            val cached = WeatherCache.load(ctx, city.locationKey)?.data?.takeIf { WeatherRepository.cacheCompatible(it, source) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it) }
+            val existing = latestWeatherCache(listOfNotNull(own, cached), System.currentTimeMillis())
             val age = System.currentTimeMillis() - (existing?.fetchedAt ?: 0L)
             if (age in 0..10_000 || (!inputData.getBoolean("force", false) && age in 0 until interval * 60_000L)) return@forEach
             try {
                 val data = withTimeout(25_000) { WeatherRepository.fetchWeather(city, source) }
-                if (data.current != null && data.error == null && SettingsRepository.sourcePref.first() == source &&
-                    WeatherRepository.cacheCompatible(data, source) &&
-                    CityRepository.savedCities().firstOrNull { it.locationKey == city.locationKey }
-                        ?.let { weatherCityIdentity(it) == weatherCityIdentity(city) } == true) {
-                    WeatherCache.save(ctx, city.locationKey, data); WidgetStore.publish(ctx, city, data)
-                } else failed = true
+                val published = publishWidgetRefresh(data, isCurrent = {
+                    SettingsRepository.sourcePref.first() == source && WeatherRepository.cacheCompatible(data, source) &&
+                        targets(ctx)?.let { isCurrentWidgetRefreshCity(city, it) } == true
+                }, save = { WeatherCache.save(ctx, city.locationKey, data) },
+                    publish = { WidgetStore.publish(ctx, city, data) })
+                if (!published) failed = true
             } catch (e: TimeoutCancellationException) { failed = true }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { failed = true }
         }
         WidgetRuntime.renderAll(ctx); WidgetNotification.refresh(ctx); WeatherReminderSchedule.schedule(ctx)
-        if (failed && runAttemptCount < 2) Result.retry() else Result.success()
+        if (shouldRetryWidgetRefresh(failed, runAttemptCount)) Result.retry() else Result.success()
     }
     companion object { private val lock = Mutex() }
 }

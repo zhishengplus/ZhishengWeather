@@ -53,6 +53,7 @@ import com.zhisheng.weather.ui.theme.isPhosphorVista
 
 @Composable
 fun ContributorsDialog(onClose: () -> Unit) {
+    val directory = rememberCommunityDirectory()
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -72,12 +73,12 @@ fun ContributorsDialog(onClose: () -> Unit) {
                 else -> 2
             }
             var query by remember { mutableStateOf("") }
-            val visibleSections = remember(query) {
+            val visibleSections = remember(query, directory) {
                 val needle = query.trim()
                 if (needle.isBlank()) {
-                    CommunityContributorSections
+                    directory.sections
                 } else {
-                    CommunityContributorSections.mapNotNull { section ->
+                    directory.sections.mapNotNull { section ->
                         val matches = section.contributors.filter { contributor ->
                             contributor.contains(needle, ignoreCase = true)
                         }
@@ -86,8 +87,8 @@ fun ContributorsDialog(onClose: () -> Unit) {
                 }
             }
             val visibleCount = visibleSections.sumOf { it.contributors.size }
-            val sequenceById = remember {
-                CommunityContributors.withIndex().associate { (index, contributor) -> contributor to index + 1 }
+            val sequenceById = remember(directory) {
+                directory.contributors.withIndex().associate { (index, contributor) -> contributor to index + 1 }
             }
             Column(
                 modifier = Modifier
@@ -102,7 +103,7 @@ fun ContributorsDialog(onClose: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 14.dp)) {
                         Text(
-                            "${CommunityContributors.size} 位社区贡献者",
+                            "${directory.contributors.size} 位社区贡献者",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengCyan,
                             letterSpacing = 1.4.sp,

@@ -8,6 +8,7 @@ import com.zhisheng.weather.model.HourlyWeather
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.WeatherData
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -240,20 +241,55 @@ class FusionEngineTest {
         val s = FusionEngine.deriveForecastSummary(hourly, CurrentWeather(temperature = 19.0), now)!!
         assertTrue(s.contains("回升"))
         assertTrue(s.contains("较大"))
+        assertTrue(s.startsWith("未来 6 小时"))
     }
 
-    // —— 国标 AQI 本地计算（GB HJ 633-2012） ——
+    @Test
+    fun forecastSummaryOmitsUnknownRainAndUsesOnlyActualContiguousCoverage() {
+        val threeHours = (1..3).map { hourAt(it.toLong(), temp = 20.0) }
+        val summary = FusionEngine.deriveForecastSummary(threeHours, CurrentWeather(temperature = 20.0), now)!!
+        assertEquals("未来 3 小时气温变化平缓", summary)
+        assertFalse(summary.contains("降水"))
+        val gap = threeHours + hourAt(5, temp = 45.0, prob = 100)
+        assertEquals(summary, FusionEngine.deriveForecastSummary(gap, CurrentWeather(temperature = 20.0), now))
+        assertNull(FusionEngine.deriveForecastSummary(listOf(hourAt(2, temp = 20.0),
+            hourAt(3, temp = 20.0), hourAt(4, temp = 20.0)), null, now))
+        assertNull(FusionEngine.deriveForecastSummary(listOf(hourAt(1, temp = 20.0),
+            hourAt(2), hourAt(3, temp = 20.0), hourAt(4, temp = 20.0)), null, now))
+    }
+
+    @Test
+    fun sparseProbabilitiesNeverSupportLowRainClaimsButRetainKnownWetPeriods() {
+        val dryAndUnknown = listOf(hourAt(1, temp = 20.0, prob = 0), hourAt(2, temp = 20.0),
+            hourAt(3, temp = 20.0, prob = 101))
+        assertEquals("未来 3 小时气温变化平缓", FusionEngine.deriveForecastSummary(dryAndUnknown, null, now))
+        val partlyWet = dryAndUnknown.mapIndexed { index, hour -> if (index == 0) hour.copy(precipProb = 70) else hour }
+        assertTrue(FusionEngine.deriveForecastSummary(partlyWet, null, now)!!.contains("部分时段降水概率较大"))
+        val complete = dryAndUnknown.map { it.copy(precipProb = 0) }
+        assertTrue(FusionEngine.deriveForecastSummary(complete, null, now)!!.contains("降水概率较小"))
+    }
+
+    @Test
+    fun forecastSummaryDoesNotTreatAnIncompleteDayOrDuplicateHoursAsTwentyFourHours() {
+        val full = (1..24).map { hourAt(it.toLong(), temp = 20.0, prob = 0) }
+        assertTrue(FusionEngine.deriveForecastSummary(full, null, now)!!.startsWith("未来 24 小时"))
+        assertTrue(FusionEngine.deriveForecastSummary(full, null, now + 15 * 60_000L)!!
+            .startsWith("未来 23 小时 45 分钟"))
+        assertNull(FusionEngine.deriveForecastSummary(List(5) { hourAt(1, temp = 20.0) }, null, now))
+    }
+
+    // —— HJ 633—2026 本地模型估算 ——
 
     @Test
     fun gbAqiComputesFromPollutantConcentrations() {
         val om = omAir(pm25 = 18.0, o3 = 54.0)
         val (v, primary) = FusionEngine.gbAqiNow(om)!!
-        assertEquals(25, v) // pm2.5=18 → IAQI≈25.7，O₃=54 → ≈16.9，取最大
+        assertEquals(26, v) // PM2.5=18 → IAQI≈25.7，向上进位
         assertNull(primary) // ≤50 无首要污染物
 
         val heavy = omAir(pm25 = 75.0, o3 = null)
         val (v2, p2) = FusionEngine.gbAqiNow(heavy)!!
-        assertEquals(100, v2)
+        assertEquals(114, v2)
         assertEquals("PM2.5", p2)
     }
 
@@ -271,7 +307,42 @@ class FusionEngineTest {
         val local = FusionEngine.fuse(FusionEngine.Input(city, listOf(noAqi), now, omAir = omAir(pm25 = 18.0, o3 = 54.0)))
             .aqi!!
         assertEquals("中国", local.standard)
-        assertEquals(25, local.value)
+        assertEquals(26, local.value)
+        assertTrue(local.estimated)
+        assertTrue(local.estimationNote!!.contains("瞬时模型浓度估算"))
+        assertFalse(withSource.estimated)
+    }
+
+    @Test
+    fun incompleteModelAirKeepsConcentrationsWithoutClaimingAnAqiLevel() {
+        val air = omAir(pm25 = 18.0).copy(currentPm10 = null)
+        assertNull(FusionEngine.gbAqiNow(air))
+        val local = FusionEngine.fuse(FusionEngine.Input(city,
+            listOf(src("XIAOMI", data = data(current = CurrentWeather(temperature = 20.0)))), now,
+            omAir = air)).aqi!!
+        assertEquals("18", local.pm25)
+        assertNull(local.value)
+        assertNull(local.level)
+        assertNull(local.suggest)
+        assertTrue(local.estimated)
+        assertTrue(local.estimationNote!!.contains("缺少PM10"))
+    }
+
+    @Test
+    fun hourlyAqiBackfillCarriesEstimateFlagAndPreservesSupplierValues() {
+        val air = omAir(pm25 = 61.0).copy(hourlyTimeMillis = listOf(hourAt(1).timeMillis),
+            hourlyPm25 = listOf(61.0), hourlyPm10 = listOf(0.0), hourlyCo = listOf(0.0),
+            hourlyNo2 = listOf(0.0), hourlySo2 = listOf(0.0), hourlyO3 = listOf(0.0))
+        val source = src("XIAOMI", data = data(hourly = listOf(hourAt(1, temp = 20.0))))
+        val filled = FusionEngine.fuseHourly(FusionEngine.Input(city, listOf(source), now, omAir = air),
+            now, now + 2 * FusionEngine.HOUR_MS).single()
+        assertEquals(101, filled.aqi)
+        assertTrue(filled.aqiEstimated)
+        val supplied = source.copy(data = data(hourly = listOf(hourAt(1, temp = 20.0).copy(aqi = 42))))
+        val preserved = FusionEngine.fuseHourly(FusionEngine.Input(city, listOf(supplied), now, omAir = air),
+            now, now + 2 * FusionEngine.HOUR_MS).single()
+        assertEquals(42, preserved.aqi)
+        assertFalse(preserved.aqiEstimated)
     }
 
     // —— OM 15 分钟降水兜底 ——
@@ -333,8 +404,8 @@ class FusionEngineTest {
 
     private fun omAir(pm25: Double? = null, o3: Double? = null) = OmAirQuality(
         timeZoneOffsetSeconds = 28800,
-        currentPm25 = pm25, currentPm10 = null, currentCo = null,
-        currentNo2 = null, currentSo2 = null, currentO3 = o3,
+        currentPm25 = pm25, currentPm10 = 0.0, currentCo = 0.0,
+        currentNo2 = 0.0, currentSo2 = 0.0, currentO3 = o3 ?: 0.0,
         hourlyTimeMillis = emptyList(), hourlyPm25 = emptyList(), hourlyPm10 = emptyList(),
         hourlyCo = emptyList(), hourlyNo2 = emptyList(), hourlySo2 = emptyList(), hourlyO3 = emptyList(),
     )

@@ -10,6 +10,9 @@ import com.zhisheng.weather.ui.game.SkyBirdBadge
 import com.zhisheng.weather.ui.game.SkyBirdGameDialog
 import com.zhisheng.weather.data.HomeSurfaceStyle
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.lifecycle.repeatOnLifecycle
 import com.zhisheng.weather.i18n.uiText
 
@@ -48,7 +51,10 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.foundation.layout.FlowRow
-import com.zhisheng.weather.ui.components.weatherSharedBounds
+import com.zhisheng.weather.ui.components.cityScopedSharedBounds
+import com.zhisheng.weather.ui.components.LocalCityPageMotionRunning
+import com.zhisheng.weather.ui.components.SkyCityFrame
+import com.zhisheng.weather.ui.components.SkyPagingTransition
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -101,6 +107,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.produceState
+import com.zhisheng.weather.data.CachedWeather
+import com.zhisheng.weather.model.City
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -274,25 +283,6 @@ internal fun vistaHomeBlocks(
         ordered + VistaHomeBlock.entries).distinct().filter(available::contains)
 }
 
-private sealed interface HomeContentSnapshot {
-    data object Empty : HomeContentSnapshot
-    data object Loading : HomeContentSnapshot
-    data class Error(val message: String) : HomeContentSnapshot
-    data class Data(
-        val weather: WeatherData,
-        val sceneWeather: com.zhisheng.weather.model.SceneWeatherData?,
-        val city: com.zhisheng.weather.model.City?,
-        val staleAgeMillis: Long?,
-    ) : HomeContentSnapshot
-}
-
-private sealed interface HomeContentKey {
-    data object Empty : HomeContentKey
-    data object Loading : HomeContentKey
-    data class Error(val message: String) : HomeContentKey
-    data class Data(val cityKey: String) : HomeContentKey
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -329,8 +319,11 @@ fun HomeScreen(
     var cityDeckPinned by remember { mutableStateOf(false) }
     var cityDeckExpansion by remember { mutableFloatStateOf(0f) }
     var weatherContentScrolling by remember { mutableStateOf(false) }
+    var cityPaging by remember { mutableStateOf(false) }
+    var cityPager by remember { mutableStateOf<androidx.compose.foundation.pager.PagerState?>(null) }
+    val sharedChrome = remember { CitySharedChromeState() }
     var scrollToTopRequest by remember { mutableIntStateOf(0) }
-    val cityContentSnapshots = remember { mutableMapOf<String, HomeContentSnapshot.Data>() }
+    val previewRevision by viewModel.previewRevision.collectAsState()
     val selectedCityIndex = uiState.cities.indexOfFirst {
         it.locationKey == uiState.selectedCity?.locationKey
     }.coerceAtLeast(0)
@@ -352,13 +345,18 @@ fun HomeScreen(
     // 氛围层要知道现在是不是夜里：国标现象码（小米 weathercn）没有昼夜变体，
     // 只看 condition 的话夜里的晴天也会走白天那套。每分钟对一次表，
     // 日落之后主屏立刻换成星点，不必等下一次天气刷新（v0.0.9）。
-    // Keep the last sky while the next city's weather is being fetched.
-    var lastAtmosphereWeather by remember(uiState.selectedCity?.locationKey) { mutableStateOf(uiState.weather) }
+    // Keep weather and coordinates together through the selection/loading gap. Resetting
+    // this state on city key used to flash a default sky before the real sky faded in.
+    // This is decorative only; each city page still displays only its own validated data.
+    var lastAtmosphere by remember { mutableStateOf(uiState.selectedCity to uiState.weather) }
     androidx.compose.runtime.SideEffect {
-        if (uiState.weather != null) lastAtmosphereWeather = uiState.weather
+        if (uiState.weather != null || uiState.cities.isEmpty())
+            lastAtmosphere = uiState.selectedCity to uiState.weather
     }
-    val atmosphereWeather = uiState.weather ?: lastAtmosphereWeather
-    val epochMinute = weatherPresentationTime() / 60_000L
+    val atmosphereWeather = uiState.weather ?: lastAtmosphere.second
+    val atmosphereCity = if (uiState.weather != null) uiState.selectedCity else lastAtmosphere.first
+    val presentationTime = weatherPresentationTime()
+    val epochMinute = presentationTime / 60_000L
     val sceneLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(sceneLifecycleOwner) {
         sceneLifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
@@ -373,6 +371,25 @@ fun HomeScreen(
     } ?: java.time.LocalTime.now().run { hour * 60 + minute }
     val todayAstro = atmosphereWeather?.todayDaily(epochMinute * 60_000L)
     val night = isNightAt(todayAstro?.sunrise, todayAstro?.sunset, nowMinutes)
+    val skySegment by remember(cityPager, uiState.cities.size) {
+        derivedStateOf {
+            cityPager?.let { cityPageSegment(it.currentPage + it.currentPageOffsetFraction, uiState.cities.size) }
+        }
+    }
+    fun skyFrame(index: Int): SkyCityFrame? {
+        val city = uiState.cities.getOrNull(index) ?: return null
+        val weather = sharedChrome.entries[city.locationKey]?.data?.takeIf { it.current != null } ?: return null
+        val localMinutes = weather.utcOffsetSeconds?.let {
+            Math.floorMod(epochMinute + it / 60L, 1440L).toInt()
+        } ?: nowMinutes
+        val astro = weather.todayDaily(presentationTime)
+        return SkyCityFrame(weather, city, isNightAt(astro?.sunrise, astro?.sunset, localMinutes))
+    }
+    val skyTransition = skySegment?.let { segment ->
+        val from = skyFrame(segment.from)
+        val to = skyFrame(segment.to)
+        if (from != null && to != null) SkyPagingTransition(from, to) else null
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -402,195 +419,70 @@ fun HomeScreen(
         }
         // 氛围层视差：列表滚动越深，天空/云层越往上退（按城市列表取最大滚动深度）
         val ambienceParallax = remember { mutableFloatStateOf(0f) }
-        val floatingGlassHeader = isPhosphorVista &&
-            uiState.prefs.homeSurfaceStyle == HomeSurfaceStyle.FRAGRANCE_GLASS
-        val scrollBackdrop = rememberGraphicsLayer()
-        var scrollBackdropOrigin by remember { mutableStateOf(Offset.Zero) }
-        val activeWeatherList = remember { mutableStateOf<LazyListState?>(null) }
-        LaunchedEffect(uiState.selectedCity?.locationKey) { activeWeatherList.value = null }
-        var topBarHeightPx by remember { mutableIntStateOf(0) }
-        val topBarInset = if (topBarHeightPx > 0) with(density) { topBarHeightPx.toDp() }
-            else WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 64.dp
         NaturalWeatherSurface(atmosphereWeather, uiState.prefs.ambience, night,
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 alpha = if (drawerState.isOpen && drawerState.targetValue == DrawerValue.Open) 0f else 1f
             }, active = ambienceActive && !drawerState.isOpen && drawerState.targetValue != DrawerValue.Open,
-            parallax = { ambienceParallax.floatValue }, city = uiState.selectedCity) {
-            val skyBackdrop = LocalHomeBackdrop.current
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                PullToRefreshBox(
-                    isRefreshing = uiState.loading || uiState.locating,
-                    onRefresh = { viewModel.refreshFromUser() },
-                    modifier = Modifier.widthIn(max = chrome.contentMaxWidth).fillMaxSize()
-                        .then(if (floatingGlassHeader) Modifier else Modifier.padding(top = topBarInset))
-                        .navigationBarsPadding()
-                        .then(if (floatingGlassHeader) Modifier
-                            .onGloballyPositioned { scrollBackdropOrigin = it.positionInRoot() }
-                            .drawWithContent {
-                                scrollBackdrop.record { this@drawWithContent.drawContent() }
-                                drawLayer(scrollBackdrop)
-                            } else Modifier),
-                ) {
-                    Box(modifier = Modifier.fillMaxSize().pointerInput(
-                        uiState.cities.map { it.locationKey }, uiState.selectedCity?.locationKey,
-                        ambienceActive, cityDeckVisible, drawerState.isOpen,
-                    ) {
-                        if (!ambienceActive || cityDeckVisible || drawerState.isOpen || uiState.cities.size < 2)
-                            return@pointerInput
-                        val threshold = 64.dp.toPx()
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
-                            var dx = 0f
-                            var dy = 0f
-                            var horizontal = false
-                            var cancelled = false
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Final)
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                // Child hourly/date charts and vertical list retain their gestures.
-                                if (event.changes.count { it.pressed } > 1 || change.isConsumed) {
-                                    cancelled = true
-                                    break
-                                }
-                                val delta = change.positionChange()
-                                dx += delta.x
-                                dy += delta.y
-                                if (!horizontal) {
-                                    horizontal = isHorizontalCitySwipe(dx, dy, viewConfiguration.touchSlop)
-                                    if (!horizontal && abs(dy) >= viewConfiguration.touchSlop) {
-                                        cancelled = true
-                                        break
-                                    }
-                                }
-                                if (horizontal) change.consume()
-                                if (!change.pressed) break
-                            }
-                            if (!cancelled && isHorizontalCitySwipe(dx, dy, threshold)) {
-                                citySwipeTarget(uiState.cities.map { it.locationKey },
-                                    uiState.selectedCity?.locationKey, dx)?.let(viewModel::selectCity)
-                            }
+            parallax = { ambienceParallax.floatValue }, city = atmosphereCity,
+            pagingTransition = skyTransition,
+            pagingFraction = { cityPager?.let { p ->
+                (p.currentPage + p.currentPageOffsetFraction - (skySegment?.from ?: 0)).coerceIn(0f, 1f)
+            } ?: 0f }, pagingActive = { cityPaging }) {
+            Box(Modifier.fillMaxSize()) {
+                if (uiState.cities.isEmpty()) {
+                    Column(Modifier.fillMaxSize()) {
+                        TopBar("枳生天气", uiState.loading, { scope.launch { drawerState.open() } },
+                            viewModel::refreshFromUser, onSettingsClick)
+                        if (uiState.citiesLoaded) EmptyState(onSearchClick, onLocationSetupClick) else BootState()
+                    }
+                } else CompositionLocalProvider(LocalCitySharedChrome provides sharedChrome) { CityWeatherPager(
+                    cities = uiState.cities,
+                    selectedKey = uiState.selectedCity?.locationKey,
+                    enabled = ambienceActive && !cityDeckVisible && !drawerState.isOpen,
+                    onSelect = viewModel::selectCity,
+                    onPaging = { cityPaging = it },
+                    onPagerReady = { cityPager = it },
+                    overlay = { pager -> CitySharedChromeHost(sharedChrome, uiState.cities, pager, uiState,
+                        { scope.launch { drawerState.open() } }, viewModel::refreshFromUser, onSettingsClick,
+                        scrollEnabled = ambienceActive && !cityDeckVisible && !drawerState.isOpen) },
+                    modifier = Modifier.fillMaxSize(),
+                ) { city, pager ->
+                    // Changing configuration/coordinates destroys the preview before the next frame.
+                    androidx.compose.runtime.key(city.locationKey, city.latitude, city.longitude, previewRevision) {
+                        val selected = city.locationKey == uiState.selectedCity?.locationKey
+                        val liveWeather = uiState.weather.takeIf { selected }
+                        val preview by produceState<CachedWeather?>(null, city, previewRevision) {
+                            // Disk is only the fallback until the in-memory snapshot for this city arrives.
+                            if (value == null) value = viewModel.loadCityPreview(city)
                         }
-                    }) {
-                        // 0.0.9-debug：cities 占位期（citiesLoaded=false）不判空态，
-                        // 渲染 loading——否则已存城市的用户每次冷启动闪一屏"未接入城市"。
-                        val weatherSnapshot = uiState.weather
-                        val contentKey: HomeContentKey = when {
-                            uiState.citiesLoaded && uiState.cities.isEmpty() -> HomeContentKey.Empty
-                            uiState.loading && weatherSnapshot == null -> HomeContentKey.Loading
-                            weatherSnapshot?.error != null && weatherSnapshot.current == null ->
-                                HomeContentKey.Error(weatherSnapshot.error.orEmpty())
-                            weatherSnapshot != null -> {
-                                val cityKey = uiState.selectedCity?.locationKey ?: "__current__"
-                                cityContentSnapshots[cityKey] = HomeContentSnapshot.Data(
-                                    weather = weatherSnapshot,
-                                    sceneWeather = uiState.sceneWeather,
-                                    city = uiState.selectedCity,
-                                    staleAgeMillis = uiState.staleAgeMillis,
-                                )
-                                // 会话级转场快照加上限：超限淘汰最早写入的城市，防止长会话内存无限增长
-                                //（快照仅用于 Crossfade 退出帧，重新进入会重算）
-                                while (cityContentSnapshots.size > 12) {
-                                    cityContentSnapshots.remove(cityContentSnapshots.keys.first())
-                                }
-                                HomeContentKey.Data(cityKey)
-                            }
-                            else -> HomeContentKey.Loading
+                        val frame = cityPageWeather(city, uiState.selectedCity?.locationKey, liveWeather,
+                            uiState.staleAgeMillis, preview, presentationTime,
+                            snapshot = uiState.citySnapshots[city.locationKey])
+                        // A preview cannot open details against a different persisted city,
+                        // including a second touch during a drag or a delayed selection emission.
+                        fun openCityDetail(action: () -> Unit) {
+                            if (!pager.isScrollInProgress && viewModel.selectedCity.value?.locationKey == city.locationKey) action()
                         }
-                        // Crossfade 的退出帧必须持有上一城市的完整快照。若在 lambda 内继续读取
-                        // uiState.weather，selectCity() 清空天气后旧 "data" 帧仍会组合并触发 NPE。
-                        var displayedContentKey by remember(uiState.selectedCity?.locationKey) { mutableStateOf(contentKey) }
-                        val contentOpacity = remember { Animatable(1f) }
-                        LaunchedEffect(contentKey) {
-                            if (displayedContentKey != contentKey) {
-                                contentOpacity.animateTo(0f, tween(90))
-                                displayedContentKey = contentKey
-                            }
-                            contentOpacity.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
-                        }
-                        // A single content tree: outgoing/incoming temperature glyphs never overlap.
-                        Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentOpacity.value }) {
-                            val page = displayedContentKey
-                            when (page) {
-                                HomeContentKey.Empty -> EmptyState(onSearchClick, onLocationSetupClick)
-                                is HomeContentKey.Error -> ErrorState(page.message, onSearchClick)
-                                // 0.0.9-debug 修复：按城市 key 包一层。换城市时若只使用统一的
-                                // "data" key，WeatherContent 不重建，原城市停在半截的滚动深度、
-                                // 逐日展开行、预警展开态全部原样带进新城市。key 换城市即
-                                // 整个子树重建：列表回顶、展开态清零（entered 交错动画随
-                                // 重建重放一次，语义正确——这就是新城市首次入场）。
-                                is HomeContentKey.Data -> {
-                                    val snapshot = cityContentSnapshots[page.cityKey]
-                                    if (snapshot == null) {
-                                        BootState()
-                                    } else androidx.compose.runtime.key(page.cityKey) {
-                                        val weatherListState = rememberLazyListState()
-                                        LaunchedEffect(scrollToTopRequest) {
-                                            if (scrollToTopRequest > 0 && page.cityKey == uiState.selectedCity?.locationKey) {
-                                                weatherListState.animateScrollToItem(0)
-                                            }
-                                        }
-                                        val scrolling = weatherListState.isScrollInProgress
-                                        LaunchedEffect(page.cityKey, scrolling) {
-                                            weatherContentScrolling = scrolling
-                                        }
-                                        LaunchedEffect(weatherListState, page.cityKey) {
-                                            activeWeatherList.value = weatherListState
-                                        }
-                                        // 氛围层视差数据源：滚动越深天空退得越远（只采样，不重组氛围层）
-                                        LaunchedEffect(weatherListState, page.cityKey == uiState.selectedCity?.locationKey) {
-                                            if (page.cityKey == uiState.selectedCity?.locationKey)
-                                                com.zhisheng.weather.ui.components.observeNaturalScroll(weatherListState) {
-                                                    ambienceParallax.floatValue = it
-                                                }
-                                        }
-                                        WeatherContent(
-                                            data = snapshot.weather,
-                                            sceneWeather = snapshot.sceneWeather,
-                                            city = snapshot.city,
-                                            unit = uiState.tempUnit,
-                                            showTyphoon = uiState.showTyphoon,
-                                            prefs = uiState.prefs,
-                                            staleAgeMillis = snapshot.staleAgeMillis,
-                                            listState = weatherListState,
-                                            topInset = if (floatingGlassHeader) topBarInset else 0.dp,
-                                            onHistoryClick = onHistoryClick,
-                                            onRadarClick = onRadarClick,
-                                            onDailyForecastClick = onDailyForecastClick,
-                                            onPrecipitationClick = onPrecipitationClick,
-                                            onHourlyClick = onHourlyClick,
-                                            onTyphoonClick = onTyphoonClick,
-                                        )
-                                    }
-                                }
-                                HomeContentKey.Loading -> BootState()
-                            }
-                        }
+                        HomeCityPage(
+                            city = city, data = frame.data,
+                            sceneWeather = uiState.sceneWeather.takeIf { selected },
+                            uiState = uiState, selected = selected,
+                            staleAge = frame.staleAgeMillis,
+                            scrollToTopRequest = scrollToTopRequest,
+                            onScrolling = { weatherContentScrolling = it },
+                            onParallax = { ambienceParallax.floatValue = it },
+                            onMenu = { scope.launch { drawerState.open() } },
+                            onRefresh = { if (selected && !pager.isScrollInProgress) viewModel.refreshFromUser() },
+                            onSettings = onSettingsClick,
+                            indicator = { CityPageIndicator(uiState.cities, city, pager) },
+                            onHistoryClick = { openCityDetail(onHistoryClick) }, onRadarClick = { openCityDetail(onRadarClick) },
+                            onDailyForecastClick = { openCityDetail(onDailyForecastClick) },
+                            onPrecipitationClick = { openCityDetail(onPrecipitationClick) }, onHourlyClick = { openCityDetail(onHourlyClick) },
+                            onTyphoonClick = { openCityDetail(onTyphoonClick) },
+                        )
                     }
                 }
-                TopBar(
-                    cityName = uiState.selectedCity?.displayName ?: "枳生天气",
-                    loading = uiState.loading || uiState.locating,
-                    onMenu = { scope.launch { drawerState.open() } },
-                    onRefresh = { viewModel.refreshFromUser() },
-                    onSettings = onSettingsClick,
-                    modifier = Modifier.widthIn(max = chrome.contentMaxWidth).fillMaxWidth()
-                        .onSizeChanged { topBarHeightPx = it.height }
-                        .then(if (floatingGlassHeader) Modifier.glassScrollHeader(
-                            backdrop = scrollBackdrop,
-                            backdropOrigin = scrollBackdropOrigin,
-                            underlay = skyBackdrop?.layer,
-                            underlayOrigin = skyBackdrop?.origin ?: Offset.Zero,
-                            strength = {
-                                val list = activeWeatherList.value
-                                if (list == null) 0f else {
-                                    val index = list.firstVisibleItemIndex
-                                    val offset = list.firstVisibleItemScrollOffset
-                                    if (index > 0) 1f else (offset / with(density) { 48.dp.toPx() })
-                                        .coerceIn(0f, 1f)
-                                }
-                            },
-                        ) else Modifier),
-                )
+                }
             }
             CityDeckOverlay(
                 visible = cityDeckVisible,
@@ -714,6 +606,116 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun HomeCityPage(
+    city: City, data: WeatherData?, sceneWeather: com.zhisheng.weather.model.SceneWeatherData?,
+    uiState: HomeUiState, selected: Boolean, staleAge: Long?, scrollToTopRequest: Int,
+    onScrolling: (Boolean) -> Unit, onParallax: (Float) -> Unit,
+    onMenu: () -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
+    indicator: @Composable () -> Unit,
+    onHistoryClick: () -> Unit, onRadarClick: () -> Unit, onDailyForecastClick: () -> Unit,
+    onPrecipitationClick: () -> Unit, onHourlyClick: () -> Unit, onTyphoonClick: () -> Unit,
+) {
+    val chrome = LocalZhishengChrome.current
+    val density = LocalDensity.current
+    val sharedChrome = LocalCitySharedChrome.current
+    val floatingGlassHeader = isPhosphorVista && uiState.prefs.homeSurfaceStyle == HomeSurfaceStyle.FRAGRANCE_GLASS
+    val backdrop = rememberGraphicsLayer()
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    var headerHeight by remember { mutableIntStateOf(0) }
+    val measuredHeader = sharedChrome?.headerHeight ?: headerHeight
+    val topInset = if (measuredHeader > 0) with(density) { measuredHeader.toDp() }
+        else WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 80.dp
+    val bodyInset = if (floatingGlassHeader) topInset else 0.dp
+    val weatherListState = rememberLazyListState()
+    val cardNow = weatherPresentationTime()
+    val cardMinutes = data?.utcOffsetSeconds?.let {
+        Math.floorMod(cardNow / 60_000L + it / 60L, 1440L).toInt()
+    } ?: java.time.LocalTime.now().run { hour * 60 + minute }
+    val cardAstro = data?.todayDaily(cardNow)
+    val cardNight = isNightAt(cardAstro?.sunrise, cardAstro?.sunset, cardMinutes)
+    val chromeEntry = remember(city, backdrop, weatherListState) { CityChromeEntry(city, backdrop, weatherListState) }
+    DisposableEffect(sharedChrome, chromeEntry) {
+        sharedChrome?.entries?.set(city.locationKey, chromeEntry)
+        onDispose { if (sharedChrome?.entries?.get(city.locationKey) === chromeEntry) sharedChrome?.entries?.remove(city.locationKey) }
+    }
+    SideEffect { chromeEntry.data = data }
+    val sky = LocalHomeBackdrop.current
+    val pageCoordinates = com.zhisheng.weather.ui.theme.LocalSurfacePageCoordinates.current
+    // The weather column is the expensive display list. The page indicator lives
+    // outside it and is the only thing that has to redraw while the finger moves.
+    val retainedColumn = remember { Modifier.graphicsLayer() }
+    LaunchedEffect(scrollToTopRequest) {
+        if (scrollToTopRequest > 0 && selected) weatherListState.animateScrollToItem(0)
+    }
+    LaunchedEffect(selected, weatherListState.isScrollInProgress) {
+        if (selected) onScrolling(weatherListState.isScrollInProgress)
+    }
+    LaunchedEffect(selected, weatherListState) {
+        if (selected) com.zhisheng.weather.ui.components.observeNaturalScroll(weatherListState, onParallax)
+    }
+    CompositionLocalProvider(LocalCityChromeEntry provides chromeEntry.takeIf { sharedChrome != null }) {
+    com.zhisheng.weather.ui.components.WeatherGlassOwner(weather = data, night = cardNight) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        PullToRefreshBox(
+            isRefreshing = selected && (uiState.loading || uiState.locating), onRefresh = onRefresh,
+            modifier = Modifier.widthIn(max = chrome.contentMaxWidth).fillMaxSize()
+                .then(if (floatingGlassHeader) Modifier else Modifier.padding(top = topInset))
+                .navigationBarsPadding()
+                .then(retainedColumn)
+                .then(if (floatingGlassHeader) Modifier.onGloballyPositioned {
+                    origin = pageCoordinates?.positionOf(it) ?: it.positionInRoot()
+                    chromeEntry.bodyOrigin = origin
+                }
+                    .drawWithContent { backdrop.record { this@drawWithContent.drawContent() }; drawLayer(backdrop) }
+                    else Modifier),
+        ) {
+            when {
+                data?.error != null && data.current == null -> Box(Modifier.fillMaxSize().padding(top = bodyInset)) {
+                    ErrorState(data.error.orEmpty(), onMenu)
+                }
+                data != null -> WeatherContent(
+                    data = data, sceneWeather = sceneWeather, city = city,
+                    unit = uiState.tempUnit, showTyphoon = uiState.showTyphoon, prefs = uiState.prefs,
+                    staleAgeMillis = staleAge, listState = weatherListState,
+                    topInset = bodyInset,
+                    onHistoryClick = onHistoryClick, onRadarClick = onRadarClick,
+                    onDailyForecastClick = onDailyForecastClick, onPrecipitationClick = onPrecipitationClick,
+                    onHourlyClick = onHourlyClick, onTyphoonClick = onTyphoonClick,
+                )
+                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
+                    top = bodyInset + 48.dp, start = 28.dp, end = 28.dp, bottom = 48.dp)) {
+                    item {
+                        Text("—°", style = MaterialTheme.typography.displayLarge, color = ZhishengText)
+                        Spacer(Modifier.height(12.dp))
+                        Text(if (selected) "正在获取天气" else "松手查看天气", color = ZhishengTextSecondary)
+                    }
+                }
+            }
+        }
+        if (sharedChrome == null) Box(
+            Modifier.widthIn(max = chrome.contentMaxWidth).fillMaxWidth()
+                .onSizeChanged { headerHeight = it.height },
+        ) {
+            if (floatingGlassHeader) {
+                // Glass is a sibling of the title row. The moving page dots sit in the
+                // row, so following the finger does not resample this header.
+                Box(Modifier.matchParentSize().glassScrollHeader(
+                    backdrop = backdrop, backdropOrigin = { origin }, underlay = sky?.layer,
+                    underlayOrigin = sky?.origin ?: Offset.Zero,
+                    strength = { if (weatherListState.firstVisibleItemIndex > 0) 1f else
+                        (weatherListState.firstVisibleItemScrollOffset / with(density) { 48.dp.toPx() }).coerceIn(0f, 1f) },
+                ))
+            }
+            TopBar(city.displayName, selected && (uiState.loading || uiState.locating), onMenu, onRefresh, onSettings,
+                modifier = Modifier.fillMaxWidth(), indicator = indicator)
+        }
+    }
+    }
+    }
+}
+
 /**
  * 开发者氛围实验室复用的真实首页表面。
  * data/city/prefs 全由调用方以内存值传入，不持有 ViewModel，也不会写入缓存或城市选择。
@@ -741,6 +743,7 @@ fun SimulatedWeatherSurface(
                     LaunchedEffect(listState) {
                         com.zhisheng.weather.ui.components.observeNaturalScroll(listState) { previewScroll.floatValue = it }
                     }
+                    com.zhisheng.weather.ui.components.WeatherGlassOwner(weather = data, night = night) {
                     WeatherContent(
                         data = data,
                         sceneWeather = null,
@@ -751,6 +754,7 @@ fun SimulatedWeatherSurface(
                         staleAgeMillis = null,
                         listState = listState,
                     )
+                    }
                 }
             }
         }
@@ -1129,11 +1133,13 @@ internal fun TopBar(
     onRefresh: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    indicator: @Composable () -> Unit = {},
+    heading: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
             .statusBarsPadding()
-            .then(if (isPhosphorVista) Modifier.heightIn(min = 64.dp) else Modifier.height(56.dp))
+            .heightIn(min = if (isPhosphorVista) 64.dp else 56.dp)
             .padding(horizontal = if (isPhosphorVista) 8.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1144,15 +1150,16 @@ internal fun TopBar(
             if (isPhosphorVista) PhosphorIcon(R.drawable.ph_list, uiText("城市列表"), Modifier.size(22.dp), ZhishengTextSecondary)
             else Icon(Icons.Filled.Menu, contentDescription = uiText("城市列表"), tint = ZhishengTextSecondary, modifier = Modifier.size(22.dp))
         }
-        Column(Modifier.weight(1f).padding(start = 4.dp)
+        Column(Modifier.weight(1f).clickable(onClick = onMenu).heightIn(min = 48.dp).padding(start = 4.dp)
             .then(if (isPhosphorVista) Modifier.padding(vertical = 8.dp) else Modifier)) {
             val (title, address) = if (isPhosphorVista) vistaLocationHeading(cityName) else cityName to ""
+            if (heading != null) heading() else {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
                 color = if (isPhosphorVista) ZhishengText else ZhishengOrange,
                 fontWeight = FontWeight.Bold,
-                maxLines = if (isPhosphorVista) Int.MAX_VALUE else 1,
+                maxLines = Int.MAX_VALUE,
                 overflow = TextOverflow.Ellipsis,
             )
             if (address.isNotEmpty()) Text(
@@ -1161,15 +1168,17 @@ internal fun TopBar(
                 color = ZhishengTextSecondary,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            }
             if (!isPhosphorVista) Text(
                 text = "ZHISHENG WEATHER TERMINAL",
                 style = MaterialTheme.typography.labelSmall,
                 color = ZhishengTextTertiary,
                 letterSpacing = 1.5.sp,
             )
+            indicator()
         }
         // 刷新中持续旋转：原来是静态 360f，视觉上等于没转（v0.0.2）
-        val angle = if (loading) {
+        val angle = if (loading && LocalCityPageMotionRunning.current) {
             val spin = rememberInfiniteTransition(label = "spin")
             val animatedAngle by spin.animateFloat(
                 initialValue = 0f,
@@ -1217,6 +1226,10 @@ private fun Stagger(index: Int, entered: Boolean, content: @Composable (Modifier
         content(Modifier)
         return
     }
+    if (!LocalCityPageMotionRunning.current) {
+        content(Modifier)
+        return
+    }
     val alpha by androidx.compose.animation.core.animateFloatAsState(
         if (entered) 1f else 0f, tween(300, delayMillis = index * 50, easing = FastOutSlowInEasing), label = "sa",
     )
@@ -1249,6 +1262,7 @@ private fun WeatherContent(
     onHourlyClick: () -> Unit = {},
     onTyphoonClick: () -> Unit = {},
 ) {
+    val heroEntry = LocalCityChromeEntry.current
     // 入场动画总开关：状态提升到 LazyColumn 之上，只驱动一次交错入场（v0.0.1 修复快滑闪卡）
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
@@ -1313,7 +1327,9 @@ private fun WeatherContent(
                 )
             }
             item(key = "module_${module.key}") {
-                com.zhisheng.weather.ui.components.RainLandingTarget(vista && n == 1) {
+                com.zhisheng.weather.ui.components.RainLandingTarget(vista && n == 1,
+                    cityKey = city?.locationKey, weather = data) {
+                CompositionLocalProvider(com.zhisheng.weather.ui.components.LocalWeatherGlassTarget provides (vista && n == 1)) {
                 Stagger(animationIndex, entered) { m ->
                     when (module) {
                         HomeModule.HOURLY -> HourlySection(data, unit, prefs.windUnit, data.utcOffsetSeconds, m, onHourlyClick)
@@ -1344,6 +1360,7 @@ private fun WeatherContent(
                     }
                 }
                 }
+                }
             }
         }
 
@@ -1357,7 +1374,10 @@ private fun WeatherContent(
                 when (block) {
                     VistaHomeBlock.METADATA -> item { StatusLine(city, data, staleAgeMillis) }
                     VistaHomeBlock.HERO -> data.current?.let { cur ->
-                        item { Stagger(nextStagger(), entered) { m -> HeroSection(cur, data, unit, prefs, m) } }
+                        item(key = "home_hero") {
+                            val original: @Composable () -> Unit = { Stagger(nextStagger(), entered) { m -> HeroSection(cur, data, unit, prefs, m, city?.locationKey ?: "") } }
+                            if (heroEntry != null) SharedHeroSlot(heroEntry, original) else original()
+                        }
                     }
                     VistaHomeBlock.ALERTS -> {
                         compactAfterHero = false
@@ -1379,7 +1399,10 @@ private fun WeatherContent(
         } else {
             item { StatusLine(city, data, staleAgeMillis) }
             data.current?.let { cur ->
-                item { Stagger(nextStagger(), entered) { m -> HeroSection(cur, data, unit, prefs, m) } }
+                item(key = "home_hero") {
+                    val original: @Composable () -> Unit = { Stagger(nextStagger(), entered) { m -> HeroSection(cur, data, unit, prefs, m, city?.locationKey ?: "") } }
+                    if (heroEntry != null) SharedHeroSlot(heroEntry, original) else original()
+                }
             }
             if (data.alerts.isNotEmpty()) {
                 item { Stagger(nextStagger(), entered) { m -> AlertSection(data.alerts.take(3), m) } }
@@ -1476,50 +1499,43 @@ private fun StatusLine(city: com.zhisheng.weather.model.City?, data: WeatherData
         }
         return
     }
-    Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = coord,
-                style = MaterialTheme.typography.labelSmall,
-                color = ZhishengTextTertiary,
-                letterSpacing = 1.sp,
-                maxLines = 1,
-                softWrap = false,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                updText,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelSmall,
-                color = if (staleAgeMillis != null && staleAgeMillis >= 10 * 60_000L) ZhishengOrange else ZhishengTextTertiary,
-                letterSpacing = 1.sp,
-                maxLines = 1,
-                softWrap = false,
-                textAlign = TextAlign.End,
-                overflow = TextOverflow.Ellipsis,
-            )
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp)
+    val updateColor = if (staleAgeMillis != null && staleAgeMillis >= 10 * 60_000L) ZhishengOrange else ZhishengTextTertiary
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val language = com.zhisheng.weather.i18n.LocalAppLanguage.current
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 2.dp)) {
+        // Compare the actual localized strings at their real font scale and letter spacing.
+        // A long coordinate must not squeeze the complete update date into a tiny Row weight.
+        val coordinateWidth = textMeasurer.measure(uiText(coord, language), labelStyle, softWrap = false, maxLines = 1).size.width
+        val updateWidth = textMeasurer.measure(uiText(updText, language), labelStyle, softWrap = false, maxLines = 1).size.width
+        val fitsOneLine = coordinateWidth + with(density) { 8.dp.roundToPx() } + updateWidth <= constraints.maxWidth
+        Column(Modifier.fillMaxWidth()) {
+            if (fitsOneLine) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(coord, style = labelStyle, color = ZhishengTextTertiary, maxLines = 1, softWrap = false)
+                Spacer(Modifier.width(8.dp))
+                Text(updText, modifier = Modifier.weight(1f), style = labelStyle, color = updateColor,
+                    maxLines = 1, softWrap = false, textAlign = TextAlign.End)
+            } else {
+                Text(coord, modifier = Modifier.fillMaxWidth(), style = labelStyle, color = ZhishengTextTertiary)
+                Text(updText, modifier = Modifier.fillMaxWidth(), style = labelStyle, color = updateColor,
+                    textAlign = TextAlign.End)
+            }
+            Text(srcText, modifier = Modifier.fillMaxWidth(), style = labelStyle,
+                color = ZhishengTextTertiary, textAlign = TextAlign.End)
         }
-        Text(
-            srcText,
-            modifier = Modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.labelSmall,
-            color = ZhishengTextTertiary,
-            letterSpacing = 1.sp,
-            maxLines = 1,
-            textAlign = TextAlign.End,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
 // —— Hero：大温度 + 数字滚动 + 大图标 ——
 @Composable
-private fun HeroSection(
+internal fun HeroSection(
     cur: CurrentWeather,
     data: WeatherData,
     unit: String,
     prefs: com.zhisheng.weather.ui.DisplayPrefs,
     modifier: Modifier,
+    cityKey: String = "",
 ) {
     val nowMillis = weatherPresentationTime()
     val showVistaAlerts = isPhosphorVista && vistaVisibleAlerts(data.alerts).isNotEmpty()
@@ -1531,7 +1547,7 @@ private fun HeroSection(
     // The primary reading belongs to the sky, while supporting modules use glass.
     // A full-height hero card makes the first screen feel boxed in and adds dead space.
     Column(modifier = heroModifier) {
-        if (isPhosphorVista) VistaCurrentOverview(cur, data, unit, prefs.windUnit, prefs.showAqi)
+        if (isPhosphorVista) VistaCurrentOverview(cur, data, unit, prefs.windUnit, prefs.showAqi, cityKey)
         else Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1770,6 +1786,7 @@ internal fun VistaCurrentOverview(
     unit: String,
     windUnit: String,
     showAqi: Boolean,
+    cityKey: String = "",
 ) {
     // Today's range is not HeroTemps' time-dependent left/right pair.
     val today = data.todayDaily(weatherPresentationTime())
@@ -1791,7 +1808,7 @@ internal fun VistaCurrentOverview(
             Box(Modifier.fillMaxWidth().heightIn(min = if (!hasArtwork) 132.dp else if (stacked) 188.dp else if (fragranceGlass) 164.dp else 204.dp)) {
                 if (hasArtwork) VistaWeatherArtwork(condition,
                     Modifier.align(if (stacked) Alignment.TopEnd else Alignment.CenterEnd).offset(x = 8.dp, y = 12.dp)
-                        .weatherSharedBounds("current-condition").size(artSize)
+                        .cityScopedSharedBounds("current-condition", cityKey).size(artSize)
                         .drawBehind {
                             // 浅色主题白云贴灰白底不足 3:1（WCAG 1.4.11），垫一层柔影把图形托起来
                             if (palette.isLight) {
@@ -1803,7 +1820,7 @@ internal fun VistaCurrentOverview(
                         }, hero = true)
                 Column(Modifier.align(if (stacked) Alignment.BottomStart else Alignment.CenterStart).padding(top = if (stacked) 108.dp else 0.dp)) {
                     Row(verticalAlignment = Alignment.Top) {
-                        Text(temperature, modifier = Modifier.weatherSharedBounds("current-temperature"),
+                        Text(temperature, modifier = Modifier.cityScopedSharedBounds("current-temperature", cityKey),
                             style = MaterialTheme.typography.displayLarge.copy(fontSize = numberSize.sp,
                                 lineHeight = numberSize.sp, fontWeight = FontWeight.Light, letterSpacing = (-5).sp),
                             color = ZhishengText, maxLines = 1)
@@ -1828,7 +1845,7 @@ internal fun VistaCurrentOverview(
             FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 windLabel(cur, windUnit)?.let { VistaObservationLabel(R.drawable.ph_wind, it) }
                 if (showAqi && data.aqi?.value != null) VistaObservationLabel(R.drawable.ph_leaf,
-                    "空气质量 ${data.aqi?.value}", aqiColor(data.aqi?.value))
+                    "空气质量 ${Fmt.aqiValueLabel(data.aqi?.value, data.aqi?.estimated == true)}", aqiColor(data.aqi?.value))
             }
         }
     }
@@ -1908,11 +1925,12 @@ private fun AnimatedTemp(celsius: Double?, unit: String) {
     }
     val target = if (unit == "f") celsius * 9.0 / 5.0 + 32.0 else celsius
     val anim = remember { Animatable(target.toFloat()) }
-    LaunchedEffect(target) {
-        anim.animateTo(target.toFloat(), tween(400))
+    val running = LocalCityPageMotionRunning.current
+    LaunchedEffect(target, running) {
+        if (running) anim.animateTo(target.toFloat(), tween(400)) else anim.snapTo(target.toFloat())
     }
     Text(
-        text = anim.value.roundToInt().toString(),
+        text = (if (running) anim.value else target.toFloat()).roundToInt().toString(),
         style = MaterialTheme.typography.displayLarge,
         color = ZhishengText,
         fontWeight = FontWeight.Bold,
@@ -2009,13 +2027,15 @@ private fun hazardStripes(scope: DrawScope, color: Color) {
 @Composable
 private fun rememberBlink(): Boolean {
     var on by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
+    val running = LocalCityPageMotionRunning.current
+    LaunchedEffect(running) {
+        if (!running) return@LaunchedEffect
         while (true) {
             kotlinx.coroutines.delay(500)
             on = !on
         }
     }
-    return on
+    return if (running) on else true
 }
 
 @Composable
@@ -2138,12 +2158,13 @@ internal fun SectionTitle(index: Int, title: String, en: String, prominent: Bool
             color = ZhishengTextTertiary.copy(alpha = if (prominent) 1f else 0.72f),
             letterSpacing = if (prominent) 1.4.sp else 1.sp,
         )
-        Spacer(Modifier.weight(1f))
-        Text(
-            "─".repeat(if (prominent) 6 else 3),
-            style = MaterialTheme.typography.labelSmall,
-            color = ZhishengCardBorder.copy(alpha = if (prominent) 1f else 0.65f),
-        )
+        val ruleColor = ZhishengCardBorder.copy(alpha = if (prominent) 1f else 0.65f)
+        Canvas(Modifier.weight(1f).height(1.dp)) {
+            // Decoration uses only the remaining width; it must never wrap like text.
+            val length = minOf(size.width, (if (prominent) 40.dp else 20.dp).toPx() * fontScale)
+            drawLine(ruleColor, Offset(size.width - length, size.height / 2f),
+                Offset(size.width, size.height / 2f), strokeWidth = 1.dp.toPx())
+        }
     }
 }
 
@@ -2218,14 +2239,14 @@ internal fun HourlySection(
     onOpenDetail: () -> Unit = {},
 ) {
     val nowMs = weatherPresentationTime()
-    val displayItems = hourlyDisplayItems(data.current, data.hourly, nowMs, data.aqi?.value)
+    val displayItems = hourlyDisplayItems(data.current, data.hourly, nowMs, data.aqi?.value, data.aqi?.estimated == true)
     val hourly = displayItems.map { it.weather }
     val temps = hourly.mapNotNull { h -> conv(h.temperature, unit) }
     val minT = temps.minOrNull() ?: 0.0
     val maxT = temps.maxOrNull() ?: 1.0
     // sp 会随系统字体缩放，逐时格宽也必须同步放大；否则首列的 26° / 56%
     // 会从 LazyRow 视口两侧溢出后被裁掉（部分 vivo / OriginOS 设备可复现）。
-    val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.5f)
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     val hourlyItemWidth = (if (isPhosphorVista) 72.dp else 54.dp) * fontScale
     // 0.0.9-debug 修复：原实现每格独立用 ±40 分钟双向容差判「现在」，
     // :20-:40 之间上一整点与下一整点同时命中，两格都标「现在」并高亮。
@@ -2258,15 +2279,14 @@ internal fun HourlySection(
             role = Role.Button, onClickLabel = "查看逐时详情", onClick = onOpenDetail)) {
             if (isPhosphorVista) {
                 Text(outlookText, style = MaterialTheme.typography.bodySmall,
-                    color = ZhishengTextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    color = ZhishengTextSecondary,
                     modifier = Modifier.padding(horizontal = LocalZhishengChrome.current.panelPadding))
             } else {
                 Text(
                     text = outlookText,
                     style = MaterialTheme.typography.labelMedium,
                     color = ZhishengTextTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             Spacer(Modifier.height(if (isPhosphorVista) 18.dp else 14.dp))
@@ -2275,6 +2295,7 @@ internal fun HourlySection(
             if (isPhosphorVista) {
                 VistaHourlyForecast(displayItems, data, unit, utcOffsetSeconds)
             } else LazyRow(
+                modifier = Modifier.cityChartGestures(),
                 state = classicHourlyState,
                 contentPadding = PaddingValues(start = 0.dp, end = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
@@ -2318,7 +2339,8 @@ internal fun hourlyDisplayItems(
     hourly: List<HourlyWeather>,
     nowMillis: Long,
     currentAqi: Int? = null,
-): List<HourlyDisplayItem> = hourlyDisplaySequence(current, hourly, nowMillis, currentAqi).take(HOME_HOURLY_ITEM_LIMIT)
+    currentAqiEstimated: Boolean = false,
+): List<HourlyDisplayItem> = hourlyDisplaySequence(current, hourly, nowMillis, currentAqi, currentAqiEstimated).take(HOME_HOURLY_ITEM_LIMIT)
 
 /** The detail screen keeps the complete provider horizon; only home is capped. */
 internal fun hourlyDisplaySequence(
@@ -2326,10 +2348,11 @@ internal fun hourlyDisplaySequence(
     hourly: List<HourlyWeather>,
     nowMillis: Long,
     currentAqi: Int? = null,
+    currentAqiEstimated: Boolean = false,
 ): List<HourlyDisplayItem> {
     if (hourly.isEmpty()) {
         return current?.let {
-            listOf(HourlyDisplayItem(currentAsHourly(it, null, nowMillis, currentAqi), isNow = true))
+            listOf(HourlyDisplayItem(currentAsHourly(it, nowMillis, currentAqi, currentAqiEstimated), isNow = true))
         }.orEmpty()
     }
     val sorted = hourly.distinctBy { it.timeMillis }.sortedBy { it.timeMillis }
@@ -2340,24 +2363,24 @@ internal fun hourlyDisplaySequence(
     val future = sorted.filter { it.timeMillis > nowMillis }
     return buildList {
         (if (current != null) previous else anchor)?.let { add(HourlyDisplayItem(it, isNow = false)) }
-        current?.let { add(HourlyDisplayItem(currentAsHourly(it, anchor, nowMillis, currentAqi), isNow = true)) }
+        current?.let { add(HourlyDisplayItem(currentAsHourly(it, nowMillis, currentAqi, currentAqiEstimated), isNow = true)) }
         future.forEach { add(HourlyDisplayItem(it, isNow = false)) }
     }
 }
 
 private fun currentAsHourly(
     current: CurrentWeather,
-    anchor: HourlyWeather?,
     nowMillis: Long,
     currentAqi: Int?,
+    currentAqiEstimated: Boolean,
 ): HourlyWeather = HourlyWeather(
     timeMillis = nowMillis,
     temperature = current.temperature,
     condition = current.condition,
     windSpeed = current.windSpeed,
-    precipProb = anchor?.precipProb,
     aqi = currentAqi,
-    profile = current.profile ?: anchor?.profile,
+    aqiEstimated = currentAqiEstimated,
+    profile = current.profile,
     feelsLike = current.feelsLike,
     windDirectionDeg = current.windDirectionDeg,
     windGust = current.windGust,
@@ -2879,7 +2902,7 @@ private fun DailyForecastStrip(
         val columnWidth = if (days.size <= 3) maxWidth / days.size else 88.dp
         val totalWidth = columnWidth * days.size
         Box(
-            Modifier.fillMaxWidth().height(stripHeight).horizontalScroll(scrollState),
+            Modifier.fillMaxWidth().height(stripHeight).cityChartGestures().horizontalScroll(scrollState),
         ) {
             Canvas(Modifier.width(totalWidth).height(stripHeight)) {
                 val columnPx = columnWidth.toPx()
@@ -3710,6 +3733,7 @@ private fun uvText(uv: Int): String = when {
 // —— AQI ——
 @Composable
 internal fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
+    val stackedPrimary = LocalDensity.current.fontScale > 1.3f
     if (isPhosphorVista) {
         // 与五天天气温差条同语言（20260919）：细圆角轨道 + 当前等级色单色填充 + 档界细线；
         // 污染物两行平铺；提示语保持下线。整页只出现当前档一个强调色。
@@ -3720,28 +3744,37 @@ internal fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                     Text(aqi.value?.toString() ?: "—", style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Medium, color = aqiColor(aqi.value))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(aqi.level ?: "空气质量", style = MaterialTheme.typography.titleMedium, color = aqiColor(aqi.value))
-                        Text("AQI${Fmt.aqiStandardLabel(aqi.standard)?.let { " · $it" }.orEmpty()}",
+                        Text(Fmt.aqiLevelLabel(aqi.value, aqi.level), style = MaterialTheme.typography.titleMedium, color = aqiColor(aqi.value))
+                        Text(if (aqi.estimated) "AQI · 估算" else Fmt.aqiBasisLabel(aqi.standard),
                             style = MaterialTheme.typography.bodySmall, color = ZhishengTextSecondary)
                     }
-                    aqi.primary?.takeIf(String::isNotBlank)?.let {
+                    aqi.primary?.takeIf { it.isNotBlank() && !stackedPrimary }?.let {
                         Column(Modifier.widthIn(max = 96.dp), horizontalAlignment = Alignment.End) {
                             Text("首要污染物", style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End,
                                 color = ZhishengTextTertiary, maxLines = 1)
                             Text(it, style = MaterialTheme.typography.titleSmall, color = aqiColor(aqi.value),
+                                modifier = Modifier.fillMaxWidth(),
                                 fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
+                if (stackedPrimary) aqi.primary?.takeIf(String::isNotBlank)?.let {
+                    Text("首要污染物 $it", style = MaterialTheme.typography.bodySmall, color = ZhishengTextSecondary)
+                }
+                if (aqi.estimated) Text(Fmt.AQI_ESTIMATION_LABEL,
+                    style = MaterialTheme.typography.bodySmall, color = ZhishengTextSecondary)
                 val trackColor = ZhishengCardBorder.copy(alpha = .55f)
                 val tickColor = ZhishengText.copy(alpha = .30f)
                 Canvas(Modifier.fillMaxWidth().height(8.dp)) {
                     val radius = size.height / 2f
                     drawRoundRect(trackColor, Offset.Zero,
                         Size(size.width, size.height), CornerRadius(radius))
-                    val frac = ((aqi.value?.toFloat() ?: 0f) / 300f).coerceIn(0.02f, 1f)
-                    drawRoundRect(fillColor, Offset.Zero, Size(size.width * frac, size.height), CornerRadius(radius))
+                    aqi.value?.let { value ->
+                        val frac = (value.toFloat() / 300f).coerceIn(0.02f, 1f)
+                        drawRoundRect(fillColor, Offset.Zero, Size(size.width * frac, size.height), CornerRadius(radius))
+                    }
                     // 档界细线：50/100/150/200（300 即右端点，不画）
                     listOf(50f, 100f, 150f, 200f).forEach { bound ->
                         val x = size.width * bound / 300f
@@ -3774,23 +3807,19 @@ internal fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        aqi.level ?: "空气质量",
+                        Fmt.aqiLevelLabel(aqi.value, aqi.level),
                         style = MaterialTheme.typography.titleMedium,
                         color = aqiColor(aqi.value),
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "AQI${Fmt.aqiStandardLabel(aqi.standard)?.let { " · $it" }.orEmpty()}" + if (isPhosphorVista) "" else " // AIR QUALITY INDEX",
+                        if (aqi.estimated) "AQI · 估算" else Fmt.aqiBasisLabel(aqi.standard) + " // AIR QUALITY INDEX",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZhishengTextTertiary,
                         letterSpacing = 0.7.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                aqi.primary?.let {
+                aqi.primary?.takeIf { it.isNotBlank() && !stackedPrimary }?.let {
                     Spacer(Modifier.width(12.dp))
                     Column(
                         modifier = Modifier.widthIn(max = 112.dp),
@@ -3798,12 +3827,15 @@ internal fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                     ) {
                         Text(
                             "首要污染物",
+                            modifier = Modifier.fillMaxWidth(),
                             style = MaterialTheme.typography.labelSmall,
                             color = ZhishengTextTertiary,
+                            textAlign = TextAlign.End,
                             maxLines = 1,
                         )
                         Text(
                             it,
+                            modifier = Modifier.fillMaxWidth(),
                             style = MaterialTheme.typography.titleSmall,
                             color = aqiColor(aqi.value),
                             fontWeight = FontWeight.Bold,
@@ -3814,10 +3846,18 @@ internal fun AqiCard(aqi: AqiInfo, modifier: Modifier) {
                     }
                 }
             }
+            if (stackedPrimary) aqi.primary?.takeIf(String::isNotBlank)?.let {
+                Spacer(Modifier.height(6.dp))
+                Text("首要污染物 $it", style = MaterialTheme.typography.bodySmall, color = ZhishengTextSecondary)
+            }
+            if (aqi.estimated) {
+                Spacer(Modifier.height(6.dp))
+                Text(Fmt.AQI_ESTIMATION_LABEL, style = MaterialTheme.typography.bodySmall, color = ZhishengTextSecondary)
+            }
             Spacer(Modifier.height(10.dp))
             // 刻度尺 + 游标
             Box(Modifier.fillMaxWidth().height(4.dp).background(ZhishengCardBorder, RectangleShape)) {
-                Box(
+                if (aqi.value != null) Box(
                     Modifier
                         .fillMaxWidth((aqi.value?.toFloat() ?: 0f).coerceIn(0f, 500f) / 500f)
                         .height(4.dp)

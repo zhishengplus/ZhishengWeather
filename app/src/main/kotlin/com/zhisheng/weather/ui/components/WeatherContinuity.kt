@@ -31,3 +31,12 @@ internal fun Modifier.weatherSharedBounds(key: String): Modifier {
         )
     }
 }
+
+/**
+ * Scope a shared-bounds key to one city page so adjacent HorizontalPager pages never
+ * register the same key at once. Duplicate active keys make the shared-element system
+ * match two live pages as one element, overlaying both cities' numbers mid-swipe.
+ */
+@Composable
+internal fun Modifier.cityScopedSharedBounds(key: String, cityKey: String): Modifier =
+    weatherSharedBounds(key + "|" + cityKey)

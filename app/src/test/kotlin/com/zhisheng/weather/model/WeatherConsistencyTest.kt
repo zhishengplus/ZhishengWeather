@@ -33,125 +33,81 @@ class WeatherConsistencyTest {
     }
 
     @Test
-    fun prependsNowSlotWhenHourlyStartsInTheFuture() {
-        val data = WeatherData(
-            current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
-            hourly = listOf(
-                HourlyWeather(t0 + 51 * 60_000L, 14.0, WeatherCondition.OVERCAST),
-                HourlyWeather(t0 + 111 * 60_000L, 14.0, WeatherCondition.OVERCAST),
-            ),
-        )
-        val aligned = WeatherConsistency.align(data, t0)
-        assertEquals(WeatherCondition.DRIZZLE, aligned.hourly.first().condition)
-        assertEquals(16.0, aligned.hourly.first().temperature)
-        assertEquals(WeatherCondition.OVERCAST, aligned.hourly[1].condition)
+    fun futureOnlySeriesRemainsNativeWithoutInsertedObservation() {
+        val raw = WeatherData(current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
+            hourly = listOf(HourlyWeather(t0 + 51 * 60_000L, 14.0, WeatherCondition.OVERCAST),
+                HourlyWeather(t0 + 111 * 60_000L, 15.0, WeatherCondition.CLEAR)))
+        val result = WeatherConsistency.align(raw, t0)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.hourly, result.hourly)
     }
 
     @Test
-    fun overlaysCurrentConditionOntoTheNowHour() {
-        val data = WeatherData(
-            current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
-            hourly = listOf(
-                HourlyWeather(t0, 14.0, WeatherCondition.OVERCAST),
-                HourlyWeather(t0 + 3_600_000L, 14.0, WeatherCondition.OVERCAST),
-            ),
-        )
-        val aligned = WeatherConsistency.align(data, t0)
-        assertEquals(WeatherCondition.DRIZZLE, aligned.hourly[0].condition)
-        assertEquals(16.0, aligned.hourly[0].temperature)
-        assertEquals(WeatherCondition.OVERCAST, aligned.hourly[1].condition)
+    fun currentObservationCannotOverwriteRealContainingHour() {
+        val raw = WeatherData(current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE),
+            hourly = listOf(HourlyWeather(t0, 14.0, WeatherCondition.OVERCAST), HourlyWeather(t0 + 3_600_000L, 15.0)))
+        val result = WeatherConsistency.align(raw, t0)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.hourly, result.hourly)
     }
 
     @Test
     fun futureSlotIsNotMislabelledAsNow() {
-        val data = WeatherData(
-            current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.CLEAR),
-            hourly = listOf(HourlyWeather(t0 + 20 * 60_000L, 12.0, WeatherCondition.RAIN)),
-        )
-        val aligned = WeatherConsistency.align(data, t0)
-        assertEquals(t0, aligned.hourly.first().timeMillis)
-        assertEquals(WeatherCondition.CLEAR, aligned.hourly.first().condition)
-        assertEquals(WeatherCondition.RAIN, aligned.hourly[1].condition)
+        for (minutes in listOf(5L, 20L, 51L)) {
+            val raw = WeatherData(current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.CLEAR),
+                hourly = listOf(HourlyWeather(t0 + minutes * 60_000, 12.0, WeatherCondition.RAIN)))
+            assertEquals(raw.hourly, WeatherConsistency.align(raw, t0).hourly)
+        }
     }
 
     @Test
-    fun snowNowcastDoesNotTurnIntoRain() {
-        val minutes = Nowcast.minuteSeries(
-            List(12) { 0.4f },
-            t0,
-            phase = PrecipitationPhase.SNOW,
-        )
-        val aligned = WeatherConsistency.align(
-            WeatherData(current = CurrentWeather(condition = WeatherCondition.OVERCAST), rainMinutes = minutes),
-            t0,
-        )
-        assertEquals(WeatherCondition.SNOW, aligned.current?.condition)
+    fun snowPredictionDoesNotReplaceCurrentObservation() {
+        val raw = WeatherData(current = CurrentWeather(condition = WeatherCondition.OVERCAST),
+            rainMinutes = Nowcast.minuteSeries(List(12) { .4f }, t0, phase = PrecipitationPhase.SNOW))
+        val result = WeatherConsistency.align(raw, t0)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.rainMinutes, result.rainMinutes)
+        assertTrue(Nowcast.briefingLine(result, "c", t0)!!.contains("短时预报提示当前有降雪"))
     }
 
     @Test
-    fun upgradesClearCurrentWhenMinuteSeriesIsWetNow() {
-        val minutes = Nowcast.minuteSeries(List(20) { 0.04f }, t0)
-        val data = WeatherData(
-            current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.OVERCAST, weatherText = "阴"),
-            rainMinutes = minutes,
-        )
-        val aligned = WeatherConsistency.align(data, t0)
-        assertEquals(WeatherCondition.DRIZZLE, aligned.current?.condition)
-        assertEquals("小雨", aligned.current?.weatherText)
-        assertEquals(0.04, aligned.current?.precipMm!!, 0.0001)
+    fun wetPredictionIsQualifiedAndDoesNotManufactureCurrentPrecipitation() {
+        val raw = WeatherData(current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.CLEAR, weatherText = "晴"),
+            rainMinutes = Nowcast.minuteSeries(List(20) { .04f }, t0))
+        val result = WeatherConsistency.align(raw, t0)
+        assertEquals(raw.current, result.current)
+        assertNull(result.current!!.precipMm)
+        assertTrue(Nowcast.briefingLine(result, "c", t0)!!.contains("短时预报提示当前有降水"))
     }
 
     @Test
-    fun dropsContradictingDryNowcastWhenRaining() {
-        val data = WeatherData(
-            current = CurrentWeather(condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
-            rainNowcast = "未来两小时不会下雨，您可以放心出门",
-        )
-        val aligned = WeatherConsistency.align(data, t0)
-        assertNull(aligned.rainNowcast)
-        assertEquals("正在下雨", Nowcast.briefingLine(aligned, "c", t0))
+    fun presentationPrefersObservedRainWithoutMutatingSourceText() {
+        val raw = WeatherData(current = CurrentWeather(condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
+            rainNowcast = "未来两小时不会下雨，您可以放心出门")
+        val result = WeatherConsistency.align(raw, t0)
+        assertEquals(raw.rainNowcast, result.rainNowcast)
+        assertEquals("正在下雨", Nowcast.briefingLine(result, "c", t0))
     }
 
     @Test
-    fun jinchangStyleHeroAndHourlyAgree() {
-        val minutes = Nowcast.minuteSeries(List(23) { 0.033f } + List(97) { 0f }, t0)
-        val data = WeatherData(
-            current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
-            hourly = listOf(
-                HourlyWeather(t0 + 51 * 60_000L, 14.0, WeatherCondition.OVERCAST),
-                HourlyWeather(t0 + 111 * 60_000L, 14.0, WeatherCondition.OVERCAST),
-                HourlyWeather(t0 + 171 * 60_000L, 14.0, WeatherCondition.DRIZZLE),
-            ),
-            rainNowcast = "未来两小时不会下雨",
-            rainMinutes = minutes,
-        )
-        val aligned = WeatherConsistency.align(data, t0)
-        assertEquals("小雨", aligned.current?.weatherText)
-        assertEquals(WeatherCondition.DRIZZLE, aligned.hourly.first().condition)
-        assertTrue(Nowcast.briefingLine(aligned, "c", t0)!!.contains("雨"))
-        assertTrue(!Nowcast.briefingLine(aligned, "c", t0)!!.contains("不会下雨"))
+    fun observationAndForecastRemainDistinctForDifferentConditions() {
+        val raw = WeatherData(current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
+            hourly = listOf(HourlyWeather(t0 + 51 * 60_000L, 14.0, WeatherCondition.OVERCAST),
+                HourlyWeather(t0 + 111 * 60_000L, 15.0, WeatherCondition.CLEAR)))
+        val result = WeatherConsistency.align(raw, t0)
+        assertEquals(raw.current, result.current)
+        assertEquals(raw.hourly, result.hourly)
+        assertTrue(Nowcast.briefingLine(result, "c", t0)!!.contains("雨"))
     }
 
     @Test
-    fun fiftyMinutesPastTheHourOverlaysTheContainingHourNotTheNext() {
-        val hour10 = t0
-        val hour11 = t0 + 3_600_000L
+    fun fiftyMinutesPastHourKeepsContainingAndFutureForecastUnchanged() {
+        val hours = listOf(HourlyWeather(t0, 14.0, WeatherCondition.OVERCAST),
+            HourlyWeather(t0 + 3_600_000L, 15.0, WeatherCondition.RAIN))
+        val raw = WeatherData(current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE), hourly = hours)
         val now = t0 + 50 * 60_000L
-        val hourly = listOf(
-            HourlyWeather(hour10, 14.0, WeatherCondition.OVERCAST),
-            HourlyWeather(hour11, 14.0, WeatherCondition.RAIN),
-        )
-        assertEquals(0, WeatherConsistency.currentHourIndex(hourly, now))
-        val aligned = WeatherConsistency.align(
-            WeatherData(
-                current = CurrentWeather(temperature = 16.0, condition = WeatherCondition.DRIZZLE, weatherText = "小雨"),
-                hourly = hourly,
-            ),
-            now,
-        )
-        assertEquals(WeatherCondition.DRIZZLE, aligned.hourly[0].condition)
-        assertEquals(16.0, aligned.hourly[0].temperature)
-        assertEquals(WeatherCondition.RAIN, aligned.hourly[1].condition)
+        assertEquals(0, WeatherConsistency.currentHourIndex(hours, now))
+        assertEquals(hours, WeatherConsistency.align(raw, now).hourly)
     }
 
     @Test

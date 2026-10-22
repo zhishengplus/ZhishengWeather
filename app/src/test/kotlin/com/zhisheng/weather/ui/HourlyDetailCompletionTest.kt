@@ -41,4 +41,15 @@ class HourlyDetailCompletionTest {
         assertEquals(48, local.values.sumOf { it.size })
         assertEquals("2026-10-10", hourlyDetailDays(items, -18_000).keys.first())
     }
+
+    @Test fun completeDetailPreservesEstimationFlagsAndDoesNotBorrowObservationFields() {
+        val hours = (1..240).map { HourlyWeather(now + it * 3_600_000L, aqi = 60, aqiEstimated = true,
+            precipProb = 80) }
+        val items = hourlyDetailDisplayItems(CurrentWeather(temperature = 23.0), hours, now, 45,
+            currentAqiEstimated = true)
+        assertEquals(241, items.size)
+        assertTrue(items.all { it.weather.aqiEstimated })
+        assertNull(items.single { it.isNow }.weather.precipProb)
+        assertEquals(hours, items.filterNot { it.isNow }.map { it.weather })
+    }
 }

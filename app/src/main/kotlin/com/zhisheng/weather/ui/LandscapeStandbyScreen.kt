@@ -44,7 +44,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,16 +82,15 @@ fun LandscapeStandbyScreen(
     uiState: HomeUiState,
     style: LandscapeStandbyStyle,
     onRefresh: () -> Unit,
-    onExitLandscape: () -> Unit,
     onSettings: () -> Unit,
 ) {
     StandbyBurnInProtection {
     when (style) {
         LandscapeStandbyStyle.CLASSIC -> ClassicLandscapeStandbyScreen(
-            uiState, onRefresh, onExitLandscape, onSettings,
+            uiState, onRefresh, onSettings,
         )
         LandscapeStandbyStyle.WEATHER_CORE -> LandscapeWeatherCoreScreen(
-            uiState, onRefresh, onExitLandscape, onSettings,
+            uiState, onRefresh, onSettings,
         )
     }
     }
@@ -103,7 +101,6 @@ fun LandscapeStandbyScreen(
 private fun ClassicLandscapeStandbyScreen(
     uiState: HomeUiState,
     onRefresh: () -> Unit,
-    onExitLandscape: () -> Unit,
     onSettings: () -> Unit,
 ) {
     val data = uiState.weather
@@ -248,7 +245,6 @@ private fun ClassicLandscapeStandbyScreen(
                             modifier = Modifier.align(Alignment.TopEnd),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            StandbyPortraitButton(onClick = onExitLandscape)
                             IconButton(
                                 onClick = onSettings,
                                 modifier = Modifier.size(44.dp)
@@ -314,29 +310,6 @@ private fun ClassicLandscapeStandbyScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-internal fun StandbyPortraitButton(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .height(if (com.zhisheng.weather.ui.theme.isPhosphorVista) 48.dp else 44.dp)
-            .zhishengCompactPanel(containerColor = ZhishengBg.copy(alpha = 0.72f))
-            .clickable(
-                role = Role.Button,
-                onClickLabel = uiText("回到竖屏"),
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            if (com.zhisheng.weather.ui.theme.isPhosphorVista) uiText("竖屏") else "↥  ${uiText("竖屏")}",
-            style = MaterialTheme.typography.labelMedium,
-            color = ZhishengCyan,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 

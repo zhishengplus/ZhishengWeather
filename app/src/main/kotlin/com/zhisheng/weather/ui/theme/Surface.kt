@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.zhisheng.weather.data.HomeSurfaceStyle
 import com.zhisheng.weather.ui.components.LocalHomeBackdrop
+import com.zhisheng.weather.ui.components.rememberWeatherGlassAtmosphere
 import android.os.Build
 
 /** Shared by the Vista home and settings surfaces. */
@@ -60,25 +61,31 @@ private fun Modifier.homeGlass(shape: Shape, light: Boolean, compact: Boolean, s
     // Dialogs have a different coordinate space and must not replay the host window's layer.
     val view = androidx.compose.ui.platform.LocalView.current
     val backdrop = LocalHomeBackdrop.current?.takeIf { it.owner === view }
-    val capture = rememberGraphicsLayer()
+    val capture = androidx.compose.runtime.key(light) { rememberGraphicsLayer() }
     val origin = remember { mutableStateOf(Offset.Zero) }
+    val pageCoordinates = LocalSurfacePageCoordinates.current.takeIf { backdrop != null }
     val screen = LocalConfiguration.current
     val screenSize = with(LocalDensity.current) {
         androidx.compose.ui.geometry.Size(screen.screenWidthDp.dp.toPx(), screen.screenHeightDp.dp.toPx())
     }
-    val optics = remember { if (Build.VERSION.SDK_INT >= 33)
+    val optics = remember(light) { if (Build.VERSION.SDK_INT >= 33)
         runCatching { HomeGlassOptics() }.onFailure { android.util.Log.w("HomeGlass", "Optics unavailable", it) }.getOrNull()
         else null }
+    val weatherOptics = rememberWeatherGlassAtmosphere()
     val touch = remember { mutableStateOf(Offset(.5f, .5f)) }
     val pressed = remember { mutableStateOf(false) }
     val energy = androidx.compose.animation.core.animateFloatAsState(
         if (pressed.value) 1f else 0f,
         androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 420f), label = "glass illumination")
-    return onGloballyPositioned { origin.value = it.positionInRoot() }
+    val retainedBlur = remember { Modifier.graphicsLayer() }
+    return onGloballyPositioned { origin.value = pageCoordinates?.positionOf(it) ?: it.positionInRoot() }
         .shadow(if (compact) 5.dp else 9.dp, shape, clip = false,
             ambientColor = Color(0xFF304459).copy(alpha = if (light) .12f else .20f),
             spotColor = Color(0xFF26384A).copy(alpha = if (light) .16f else .24f))
         .clip(shape)
+        // Keep the sampled blur in its own display list. Glow and hero artwork
+        // advance on the shared clock; they must not re-record every panel.
+        .then(retainedBlur)
         .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -126,7 +133,10 @@ private fun Modifier.homeGlass(shape: Shape, light: Boolean, compact: Boolean, s
                             maxOf(screenSize.height, view.rootView.height.toFloat())))
                     }
                 }
-                capture.renderEffect = effect ?: compatibleBlur
+                val glassEffect = effect ?: compatibleBlur
+                capture.renderEffect = if (Build.VERSION.SDK_INT >= 33)
+                    weatherOptics?.effect(captureSize.width.toFloat(), captureSize.height.toFloat(), glassEffect) ?: glassEffect
+                    else glassEffect
                 translate(-padding, -padding) { drawLayer(capture) }
                 if (effect == null) {
                     drawRect(if (light) Color.White.copy(alpha = .17f) else Color(0xFF13202C).copy(alpha = .23f))
@@ -167,6 +177,7 @@ internal fun Modifier.vistaSoftGlow(panel: Boolean = false): Modifier {
     val level = LocalVistaGlowLevel.current
     val natural = com.zhisheng.weather.ui.components.LocalNaturalLight.current
     val origin = remember { mutableStateOf(Offset.Zero) }
+    val pageCoordinates = LocalSurfacePageCoordinates.current
     val config = LocalConfiguration.current
     val density = LocalDensity.current
     val width = with(density) { config.screenWidthDp.dp.toPx() }.coerceAtLeast(1f)
@@ -174,7 +185,7 @@ internal fun Modifier.vistaSoftGlow(panel: Boolean = false): Modifier {
     val strength = (if (panel) 0.32f else 1f) * (if (palette.isLight) 0.65f else 0.45f) * level.strength.coerceAtMost(1.15f)
     // Separate the changing light and the static content into display lists. A clock tick
     // must not rerecord all text, weather icons and charts beneath this modifier.
-    return onGloballyPositioned { origin.value = it.positionInWindow() }.graphicsLayer().drawWithCache {
+    return onGloballyPositioned { origin.value = pageCoordinates?.positionOf(it, inWindow = true) ?: it.positionInWindow() }.graphicsLayer().drawWithCache {
         val radius = maxOf(width, height * 0.68f)
         val brushes = listOf(
             Brush.radialGradient(listOf((natural?.top ?: VistaGlowMist).copy(alpha = 0.20f * strength), Color.Transparent),

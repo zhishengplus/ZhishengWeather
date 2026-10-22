@@ -65,6 +65,10 @@ app/datastore/
 # Local dataset builder cache
 scripts/__pycache__/
 
+# Local aggregate bridge artifacts; authentication capabilities never enter Git.
+services/place-service/edgeone-counts.last.json
+services/place-service/legacy-bridge.last.private.json
+
 # Private local signing/configuration
 keystore/
 .env

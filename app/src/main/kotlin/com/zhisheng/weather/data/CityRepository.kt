@@ -124,11 +124,14 @@ object CityRepository {
         return outcome.cities
     }
 
-    internal suspend fun searchOnline(query: String, precise: Boolean, region: PlaceRegion = PlaceRegion.DOMESTIC): PlaceSearchOutcome {
+    internal suspend fun searchOnline(query: String, precise: Boolean, region: PlaceRegion = PlaceRegion.DOMESTIC,
+        areas: List<String> = emptyList()): PlaceSearchOutcome {
         if (query.isBlank()) return PlaceSearchOutcome(emptyList())
         val snapshot = currentPlaceCredentials()
         val providers = if (precise) preciseProviders(query, snapshot, region) else cityProviders(query, snapshot, region)
-        val scoped = providers.map { provider -> suspend { filterPlaceRegion(provider(), region, includeUnclassified = precise) } }
+        val scoped = providers.map { provider -> suspend {
+            filterPlaceRegion(provider(), region, includeUnclassified = precise).filter { cityMatchesSearchArea(it, areas) }
+        } }
         return coordinatePlaceSearch(scoped, isCurrent = { currentPlaceCredentials() == snapshot })
     }
 

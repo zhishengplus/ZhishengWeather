@@ -101,6 +101,8 @@ data class HourlyWeather(
     val dewPoint: Double? = null,
     val cloudCover: Double? = null,
     val uvIndex: Int? = null,
+    // Locally converted model concentrations must remain distinguishable from provider AQI.
+    val aqiEstimated: Boolean = false,
 )
 
 @Serializable
@@ -191,6 +193,8 @@ data class AqiInfo(
     val pollutantUnits: Map<String, String> = emptyMap(),
     // 健康建议文案（小米 suggest，v0.0.4 接入；其余源为空）
     val suggest: String? = null,
+    val estimated: Boolean = false,
+    val estimationNote: String? = null,
 )
 
 @Serializable

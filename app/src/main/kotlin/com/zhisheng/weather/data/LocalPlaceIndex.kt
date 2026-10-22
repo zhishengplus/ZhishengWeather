@@ -60,6 +60,22 @@ internal class LocalPlaceIndex private constructor(records: List<LocalPlaceRecor
             }
     }
 
+    fun areas(province: String? = null): List<String> {
+        val places = entries.map { it.place }
+        if (province == null) return (places.filter { it.id.startsWith("CN:") && it.level == "ADM1" }
+            .map { it.name }.distinct().sorted() + listOf("香港", "澳门", "台湾"))
+        return places.filter {
+            when (province) {
+                "香港" -> it.id.startsWith("HK:") && it.level == "ADM1"
+                "澳门" -> it.id.startsWith("MO:") && it.level == "ADM1"
+                "台湾" -> it.id.startsWith("TW:") && it.name != "台湾" &&
+                    (it.level == "ADM2" || it.level == "ADM1" && it.name.endsWith("市"))
+                else -> it.id.startsWith("CN:") && it.level == "ADM2" &&
+                    (it.affiliation.split('·').firstOrNull() == province || it.name == province)
+            }
+        }.map { it.name }.distinct().sorted()
+    }
+
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
         fun parse(bytes: ByteArray): LocalPlaceIndex {
@@ -92,6 +108,11 @@ internal object LocalPlaces {
     @Volatile private var index: LocalPlaceIndex? = null
     @Volatile private var attempted = false
     val unavailable: Boolean get() = attempted && index == null
+
+    suspend fun areas(context: Context, province: String? = null): List<String> {
+        search(context, "") // Loads and verifies the same index once.
+        return index?.areas(province).orEmpty()
+    }
 
     suspend fun search(context: Context, query: String): List<City> = withContext(Dispatchers.IO) {
         if (!attempted) synchronized(this@LocalPlaces) {

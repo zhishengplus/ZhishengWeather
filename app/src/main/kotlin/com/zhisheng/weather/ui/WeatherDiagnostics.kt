@@ -225,11 +225,16 @@ fun WeatherDiagnosticsButton() {
                     val report = (state as? WeatherDiagnosticsState.Ready)?.report ?: return@copy
                     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
                     val result = runCatching {
-                        checkNotNull(clipboard).setPrimaryClip(android.content.ClipData.newPlainText("天气诊断",
-                            report.text(includeLocationAndDevice)))
+                        val manager = checkNotNull(clipboard)
+                        val text = report.text(includeLocationAndDevice)
+                        manager.setPrimaryClip(android.content.ClipData.newPlainText("天气诊断", text))
+                        // Some ROMs silently reject writes instead of throwing.
+                        check(manager.primaryClip?.getItemAt(0)?.text?.toString() == text)
                     }
                     copied = result.isSuccess
                     copyFailed = result.isFailure
+                    if (copyFailed) android.widget.Toast.makeText(context,
+                        "未能写入剪贴板，请允许剪贴板访问，或长按诊断文字复制", android.widget.Toast.LENGTH_LONG).show()
                 }, onRetry = { attempt++; state = WeatherDiagnosticsState.Loading; copied = false; copyFailed = false },
                 onDismiss = { open = false }, modifier = modifier)
         }

@@ -50,6 +50,35 @@ class DomesticWeatherProtocolTest {
         assertNull(mojiRequest(city, creds.copy(currentToken = "")))
         assertNull(mojiRequest(city, creds, true))
     }
+    @Test fun confirmedLegacyMojiAliasUsesVerifiedHttpsGatewayForRequestsAndStorage() {
+        val gateway = "7b975b4aa6684075a85d760b6c1c99cf-cn-beijing.alicloudapi.com"
+        for (scheme in listOf("https", "http")) {
+            val creds = MojiRuntimeCreds(" test-appcode ", "$scheme://aliv8.data.moji.com/whapi/json/aliweather/condition/", " test-token ",
+                "$scheme://aliv8.data.moji.com/whapi/json/aliweather/forecast15days", " day-token ")
+            val current = mojiRequest(city, creds)!!
+            val daily = mojiRequest(city, creds, true)!!
+            assertEquals("https", current.url.scheme)
+            assertEquals(443, current.url.port)
+            assertEquals(gateway, current.url.host)
+            assertEquals("/whapi/json/aliweather/condition", current.url.encodedPath)
+            assertEquals(gateway, daily.url.host)
+            assertEquals("APPCODE test-appcode", current.header("Authorization"))
+            val saved = normalizedMojiCredentials(creds)
+            assertEquals(current.url.toString(), saved.currentEndpoint)
+            assertEquals(daily.url.toString(), saved.dailyEndpoint)
+            assertTrue(saved.ready)
+        }
+    }
+    @Test fun legacyAliasDoesNotAuthorizeArbitraryGatewaysOrMalformedUrls() {
+        val path = "/whapi/json/aliweather/condition"
+        listOf("https://aliv8.data.moji.com.evil.test$path", "https://aliv8.data.moji.com:444$path",
+            "http://aliv8.data.moji.com:8080$path", "https://user@aliv8.data.moji.com$path",
+            "https://aliv8.data.moji.com$path?token=private", "https://aliv8.data.moji.com$path#secret",
+            "https://unrelated.alicloudapi.com$path", "https://aliv8.data.moji.com/whapi/json/alicityweather/condition")
+            .forEach { assertNull(it, normalizedMojiEndpoint(it, false)) }
+        val cleared = normalizedMojiCredentials(MojiRuntimeCreds())
+        assertEquals(MojiRuntimeCreds(), cleared)
+    }
     @Test fun seniverseFreeFieldsRemainMissingAndPublishTimesAreNotRefreshTimes() {
         val data = parseSeniverseWeather(now, day, null, city, at)
         assertEquals("SENIVERSE", data.dataSource)

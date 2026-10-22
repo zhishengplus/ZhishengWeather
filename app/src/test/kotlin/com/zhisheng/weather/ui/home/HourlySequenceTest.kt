@@ -13,7 +13,8 @@ class HourlySequenceTest {
         val next = HourlyWeather(now + 3_600_000L, 24.0)
         val result = hourlyDisplayItems(CurrentWeather(temperature = 23.0), listOf(previous, sameHour, next), now)
         assertEquals(listOf(previous.timeMillis, now, next.timeMillis), result.map { it.weather.timeMillis })
-        assertEquals(30, result[1].weather.precipProb)
+        assertNull(result[1].weather.precipProb)
+        assertEquals(30, sameHour.precipProb)
         assertEquals(23.0, result[1].weather.temperature!!, 0.0)
     }
     private val now = 1_800_000_000_000L

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zhisheng.weather.data.AmbienceLevel
+import com.zhisheng.weather.data.CachedWeather
 import com.zhisheng.weather.data.CityRepository
 import com.zhisheng.weather.data.FavoriteToggleResult
 import com.zhisheng.weather.data.HomeModule
@@ -28,11 +29,16 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import com.zhisheng.weather.ui.home.citySwitchNeedsRefresh
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class DisplayPrefs(
     val showAqi: Boolean = true,
@@ -71,12 +77,71 @@ data class HomeUiState(
     val staleAgeMillis: Long? = null,
     // false = cities 仍是 stateIn 占位空表，UI 不得据此渲染"未接入城市"空态（0.0.9-debug）
     val citiesLoaded: Boolean = false,
+    // 每城最近一次可用天气快照（内存），供相邻页与刷新期间立即显示，避免翻页空白
+    val citySnapshots: Map<String, CachedWeather> = emptyMap(),
 )
 
 class WeatherViewModel(application: Application) : AndroidViewModel(application) {
 
+    // Non-secret generation: all city previews expire when the provider configuration changes.
+    private val _previewRevision = MutableStateFlow(0L)
+    val previewRevision: StateFlow<Long> = _previewRevision
+
+    /** Disk-only neighbour preview. Does not select a city, refresh widgets or spend API quota. */
+    suspend fun loadCityPreview(city: City): com.zhisheng.weather.data.CachedWeather? =
+        kotlinx.coroutines.withTimeoutOrNull(1_500L) {
+            try {
+                val revision = _previewRevision.value
+                val source = SettingsRepository.sourcePref.first()
+                val cached = listOfNotNull(_citySnapshots.value[city.locationKey], WeatherCache.load(getApplication(), city))
+                    .filter { it.isUsableOfflineAt(System.currentTimeMillis()) && com.zhisheng.weather.data.weatherCoordinatesMatch(city, it.data) }
+                    .sortedByDescending { it.savedAtMillis }.firstOrNull { WeatherRepository.cacheCompatible(it.data, source) }
+                    ?: return@withTimeoutOrNull null
+                val compatible = WeatherRepository.cacheCompatible(cached.data, source)
+                if (revision != _previewRevision.value || source != SettingsRepository.sourcePref.first())
+                    return@withTimeoutOrNull null
+                com.zhisheng.weather.ui.home.usableCityWeatherCache(cached, source,
+                    System.currentTimeMillis(), configurationCompatible = compatible, city = city)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A preview is optional; storage/configuration failure leaves a truthful empty page.
+                null
+            }
+        }
+
     private val _weather = MutableStateFlow<WeatherData?>(null)
     private val _weatherCityKey = MutableStateFlow<String?>(null)
+    // 邻页与刷新期间先展示最近一次可用数据，再决定是否需要重新拉取。
+    private val _citySnapshots = MutableStateFlow<Map<String, CachedWeather>>(emptyMap())
+    val citySnapshots: StateFlow<Map<String, CachedWeather>> = _citySnapshots
+
+    private fun publishCitySnapshot(key: String, entry: CachedWeather) {
+        _citySnapshots.value = _citySnapshots.value + (key to entry)
+    }
+
+    private fun seedCitySnapshots(cities: List<City>) {
+        viewModelScope.launch {
+            val revision = _previewRevision.value
+            val loaded = withContext(Dispatchers.IO) {
+                val map = mutableMapOf<String, CachedWeather>()
+                for (city in cities) {
+                    val entry = loadCityPreview(city)
+                    if (entry != null) map[city.locationKey] = entry
+                }
+                map
+            }
+            if (revision != _previewRevision.value) return@launch
+            val keys = cities.map { it.locationKey }.toSet()
+            val merged = _citySnapshots.value.filterKeys { it in keys }.toMutableMap()
+            loaded.forEach { (key, entry) ->
+                val current = merged[key]
+                if (current == null || entry.savedAtMillis > current.savedAtMillis) merged[key] = entry
+            }
+            _citySnapshots.value = merged
+        }
+    }
+
     private val _loading = MutableStateFlow(false)
     private val _locating = MutableStateFlow(false)
     private val _locateMessage = MutableStateFlow<String?>(null)
@@ -203,7 +268,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     // combine 的 6 元没有具名 lambda 重载，与 baseState 一样用 Array 风格
     val uiState: StateFlow<HomeUiState> = combine(
-        baseState, displayPrefs, sourcePref, _locating, _locateMessage, _staleAge, _citiesLoaded,
+        baseState, displayPrefs, sourcePref, _locating, _locateMessage, _staleAge, _citiesLoaded, _citySnapshots,
     ) { arr ->
         @Suppress("UNCHECKED_CAST")
         (arr[0] as HomeUiState).copy(
@@ -213,12 +278,13 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             locateMessage = arr[4] as String?,
             staleAgeMillis = arr[5] as Long?,
             citiesLoaded = arr[6] as Boolean,
+            citySnapshots = arr[7] as Map<String, CachedWeather>,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUiState())
 
     init {
         viewModelScope.launch {
-            selectedCity.collect { city ->
+            selectedCity.distinctUntilChangedBy { it?.locationKey }.collectLatest { city ->
                 if (city == null) {
                     sceneJob?.cancel()
                     _sceneCityKey.value = null
@@ -226,9 +292,26 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 }
                 if (city != null && city.locationKey != lastFetchedKey) {
                     lastFetchedKey = city.locationKey
-                    refresh(city)
+                    // Keep the snapshot on screen while consecutive swipes settle.
+                    fetchJob?.cancel()
+                    sceneJob?.cancel()
+                    _loading.value = false
+                    val cached = loadCityPreview(city)
+                    if (cached != null) publishCitySnapshot(city.locationKey, cached)
+                    if (selectedCity.value?.locationKey != city.locationKey) return@collectLatest
+                    _weather.value = cached?.data
+                    _weatherCityKey.value = city.locationKey
+                    _staleAge.value = cached?.let { System.currentTimeMillis() - it.savedAtMillis }
+                    kotlinx.coroutines.delay(1_000)
+                    if (selectedCity.value?.locationKey != city.locationKey) return@collectLatest
+                    if (citySwitchNeedsRefresh(cached?.savedAtMillis, System.currentTimeMillis())) refresh(city)
+                    else refreshScene(city, force = false)
                 }
             }
+        }
+        // 城市列表就绪/变化时，把每城磁盘缓存提升为内存快照，翻页第一帧即可显示。
+        viewModelScope.launch {
+            cities.collect { list -> seedCitySnapshots(list) }
         }
         // 数据源改了就立即重拉当前城市，不用等用户手动下拉（v0.0.2）
         viewModelScope.launch {
@@ -241,9 +324,13 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
             }.combine(com.zhisheng.weather.data.SecretStore.seniverseRuntimeFlow) { credentials, seniverse -> credentials + seniverse }
                 .combine(com.zhisheng.weather.data.SecretStore.mojiRuntimeFlow) { credentials, moji -> credentials + moji }
                 .combine(SettingsRepository.moduleSources) { credentials, modules -> credentials to modules }
+                .combine(SettingsRepository.sourcePriority) { setup, priority -> setup to priority }
                 .combine(SettingsRepository.developerMode) { setup, mode -> setup to mode }
                 .distinctUntilChanged().collect {
                 if (first) { first = false; return@collect }
+                _previewRevision.value++
+                _citySnapshots.value = emptyMap()
+                seedCitySnapshots(cities.value)
                 refresh()
             }
         }
@@ -272,11 +359,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         if (target.locationKey != lastFetchedKey) lastFetchedKey = target.locationKey
         lastFetchKey = target.locationKey
         fetchJob?.cancel()
+        val knownSnapshot = _citySnapshots.value[target.locationKey]
+            ?.takeIf { it.data.current != null && it.data.error == null && it.isUsableOfflineAt(now) &&
+                com.zhisheng.weather.data.weatherCoordinatesMatch(target, it.data) }
         if (_weatherCityKey.value != target.locationKey ||
             _weather.value?.let { !com.zhisheng.weather.data.weatherCoordinatesMatch(target, it) } == true) {
-            // 城市名切换后绝不允许继续挂着上一城市的温度/天气。
-            _weather.value = null
-            _staleAge.value = null
+            // 城市名切换后绝不允许继续挂着上一城市的温度/天气；有快照则先顶上，避免翻页空白。
+            _weather.value = knownSnapshot?.data
+            _staleAge.value = knownSnapshot?.let { now - it.savedAtMillis }
         }
         _weatherCityKey.value = target.locationKey
         var job: kotlinx.coroutines.Job? = null
@@ -287,14 +377,17 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 // 每次请求直接读取已落盘的来源，避免设置页显示锁定和风、首页却先走自动源。
                 val requestedSource = SettingsRepository.sourcePref.first()
                 if (_weather.value?.let { !WeatherRepository.cacheCompatible(it, requestedSource) } == true) {
-                    _weather.value = null
-                    _staleAge.value = null
+                    val compatibleSnapshot = _citySnapshots.value[target.locationKey]
+                        ?.takeIf { WeatherRepository.cacheCompatible(it.data, requestedSource) }
+                    _weather.value = compatibleSnapshot?.data
+                    _staleAge.value = compatibleSnapshot?.let { System.currentTimeMillis() - it.savedAtMillis }
                 }
                 if (_weather.value == null) {
                     WeatherCache.load(getApplication(), target)
                         ?.takeIf { WeatherRepository.cacheCompatible(it.data, requestedSource) && it.isUsableOfflineAt(System.currentTimeMillis()) &&
                             com.zhisheng.weather.data.weatherCoordinatesMatch(target, it.data) }
                         ?.let { cached ->
+                            publishCitySnapshot(target.locationKey, cached)
                             if (selectedCity.value?.locationKey == target.locationKey) {
                                 _weather.value = WeatherConsistency.align(cached.data)
                                 _staleAge.value = System.currentTimeMillis() - cached.savedAtMillis
@@ -325,6 +418,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         ?.takeIf { it.isUsableOfflineAt(cacheNow) }
                         ?.takeIf { com.zhisheng.weather.data.weatherCoordinatesMatch(target, it.data) }
                     if (cached != null) {
+                        publishCitySnapshot(target.locationKey, cached)
                         result = WeatherConsistency.align(cached.data)
                         _staleAge.value = System.currentTimeMillis() - cached.savedAtMillis
                         android.util.Log.i("ZhishengWeather", "${target.name} 抓取失败，展示 ${_staleAge.value}ms 前的缓存")
@@ -336,6 +430,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         !WeatherRepository.cacheCompatible(result, requestedSource)) return@launch
                     refreshGate.success(target.locationKey, System.currentTimeMillis())
                     _staleAge.value = null
+                    publishCitySnapshot(target.locationKey, CachedWeather(result, System.currentTimeMillis()))
                     runCatching { WeatherCache.save(getApplication(), target.locationKey, result) }
                     runCatching { WidgetRuntime.publishAndRender(getApplication(), target, result) }
                     com.zhisheng.weather.data.WeatherReminderSchedule.schedule(getApplication())
@@ -389,10 +484,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     fun selectCity(locationKey: String) {
         cancelLocateForSelection()
         _locateMessage.value = null
-        if (selectedCity.value?.locationKey != locationKey) {
-            _weather.value = null
-            _weatherCityKey.value = null
-        }
+        // Per-city snapshots remain available to the pager throughout selection.
         viewModelScope.launch { CityRepository.selectCity(locationKey) }
     }
 
@@ -568,7 +660,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         else {
                             appliedFix = located
                             lastAppliedLocationRevision = revision
-                            _locateMessage.value = "已取得当前位置，正在识别地址…"
+                            _locateMessage.value = if (initial.usingRecentApproximateFix)
+                                "已取得最近大致位置，正在识别地址…" else "已取得当前位置，正在识别地址…"
                             SettingsRepository.setLastAutoLocateAt(System.currentTimeMillis())
                             refresh(located)
                             true
@@ -580,7 +673,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                         if (selectionRevision != revision) return@launch
                         val enriched = r.city.copy(locationKey = initial.locationKey)
                         val locatedCity = CityRepository.updateLocatedLabel(enriched, r.configurationRevision) ?: return@launch
-                        val prefix = if (automatic) "已自动更新定位" else "已定位"
+                        val prefix = if (r.usingRecentApproximateFix) "最近大致位置" else if (automatic) "已自动更新定位" else "已定位"
                         val suffix = when (r.streetStatus) {
                             LocationSource.StreetStatus.APPROXIMATE_PERMISSION -> "（系统仅授予大致位置）"
                             LocationSource.StreetStatus.INSUFFICIENT_ACCURACY -> "（精度不足，未显示街道）"

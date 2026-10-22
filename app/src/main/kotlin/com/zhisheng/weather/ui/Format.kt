@@ -95,6 +95,18 @@ object Fmt {
         else -> standard.trim()
     }
 
+    const val AQI_ESTIMATION_LABEL = "模型估算，非监测AQI"
+
+    fun aqiValueLabel(value: Int?, estimated: Boolean = false): String =
+        value?.let { if (estimated) "$it（估算）" else it.toString() } ?: "—"
+
+    fun aqiBasisLabel(standard: String?, estimated: Boolean = false): String =
+        if (estimated) AQI_ESTIMATION_LABEL
+        else "AQI${aqiStandardLabel(standard)?.let { " · $it" }.orEmpty()}"
+
+    fun aqiLevelLabel(value: Int?, level: String?): String =
+        if (value == null) "AQI暂无数据" else level?.takeIf(String::isNotBlank) ?: "空气质量"
+
     fun temp(celsius: Double?, unit: String): String? = celsius?.let {
         (if (unit == "f") it * 9.0 / 5.0 + 32.0 else it).roundToInt().toString()
     }

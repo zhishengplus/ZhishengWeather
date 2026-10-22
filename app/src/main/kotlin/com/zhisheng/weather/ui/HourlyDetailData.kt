@@ -7,8 +7,8 @@ import com.zhisheng.weather.ui.home.hourlyDisplaySequence
 import com.zhisheng.weather.model.cityDate
 
 internal fun hourlyDetailDisplayItems(current: CurrentWeather?, hours: List<HourlyWeather>, now: Long,
-    currentAqi: Int?): List<HourlyDisplayItem> {
-    return hourlyDisplaySequence(current, hours, now, currentAqi)
+    currentAqi: Int?, currentAqiEstimated: Boolean = false): List<HourlyDisplayItem> {
+    return hourlyDisplaySequence(current, hours, now, currentAqi, currentAqiEstimated)
 }
 
 /** Index runs consumed directly by the chart drawing code. */

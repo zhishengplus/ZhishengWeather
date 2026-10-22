@@ -29,8 +29,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Beta 10 widget and update hotfix; keep the public package/signature.
-        versionCode = 20261068
-        versionName = "0.1.5-beta10.5-public"
+        versionCode = 20261102
+        versionName = "0.1.5-beta10.8"
         resValue("string", "shortcut_target_package", "com.zhisheng.weather")
 
         // 发行渠道面向实体手机；去掉仅供 Intel 模拟器使用的 x86/x86_64 MapLibre 库。
@@ -74,9 +74,11 @@ android {
         create("previewPublic") {
             initWith(getByName("release"))
             // 仅用于体验机并行安装：内容与公开版一致，但不覆盖手机上的满血版。
-            applicationIdSuffix = ".preview"
-            resValue("string", "shortcut_target_package", "com.zhisheng.weather.preview")
-            resValue("string", "app_name", "枳生天气 澄空体验")
+            val previewSuffix = providers.gradleProperty("previewSuffix").orElse(".preview").get()
+            require(Regex("\\.[a-z][a-z0-9_]*").matches(previewSuffix)) { "Invalid preview application suffix" }
+            applicationIdSuffix = previewSuffix
+            resValue("string", "shortcut_target_package", "com.zhisheng.weather$previewSuffix")
+            resValue("string", "app_name", if (previewSuffix == ".preview") "枳生天气 澄空体验" else "枳生天气 分层验证")
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             buildConfigField("String", "QW_HOST", "\"\"")

@@ -2,6 +2,7 @@ package com.zhisheng.weather.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -32,10 +33,13 @@ internal fun VistaWeatherArtwork(condition: WeatherCondition?, modifier: Modifie
     val ambient = LocalNaturalLight.current
     val clock = LocalVistaGlowPhase.current
     val moving = hero && LocalVistaSoftGlow.current
+    val pageRunning = LocalCityPageMotionRunning.current
+    val heldLift = remember { floatArrayOf(0f) }
     val motion = LocalVistaGlowLevel.current.drift
     Canvas(modifier.semantics { contentDescription = condition.label }) {
         // Read the existing lifecycle/reduced-motion aware clock only in the draw phase.
-        val lift = if (moving) sin(clock.value * Math.PI * 2).toFloat() * 1.4f * motion else 0f
+        if (moving && pageRunning) heldLift[0] = sin(clock.value * Math.PI * 2).toFloat() * 1.4f * motion
+        val lift = if (moving) heldLift[0] else 0f
         drawVistaWeatherArtwork(condition, light, hero, ambient, lift)
     }
 }

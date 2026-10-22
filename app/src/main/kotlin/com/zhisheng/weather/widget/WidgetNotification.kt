@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.zhisheng.weather.R
+import com.zhisheng.weather.model.AqiInfo
 import com.zhisheng.weather.model.cityZone
 import com.zhisheng.weather.model.phaseAwareCondition
 import com.zhisheng.weather.ui.Fmt
@@ -22,6 +23,10 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+internal fun notificationAirValue(aqi: AqiInfo?): String =
+    if (aqi?.value == null) "—" else listOfNotNull(aqi.level?.takeIf(String::isNotBlank),
+        Fmt.aqiValueLabel(aqi.value, aqi.estimated)).joinToString(" ")
 
 object WidgetNotification {
     const val CHANNEL = "weather_widget_live"
@@ -45,7 +50,7 @@ object WidgetNotification {
         val temp = WidgetBinder.temperature(current?.temperature, cfg)
         val title = "${snapshot?.city?.name ?: "等待地点"}  $temp  ${current?.weatherText ?: current?.condition?.label ?: "暂无天气"}"
         val summary = "${WidgetBinder.temperature(today?.low, cfg)} / ${WidgetBinder.temperature(today?.high, cfg)}" +
-            (if (cfg.showAir) "   空气 ${weather?.aqi?.level ?: weather?.aqi?.value ?: "—"}" else "")
+            (if (cfg.showAir) "   空气 ${notificationAirValue(weather?.aqi)}" else "")
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "常驻天气", NotificationManager.IMPORTANCE_LOW).apply { description = "当前天气与未来三日预报"; setShowBadge(false) })
         val refresh = PendingIntent.getBroadcast(context, -9180, Intent(context, FreshWidgetProvider::class.java).setAction(WidgetRefresh.ACTION_REFRESH), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ph_cloud)
@@ -85,15 +90,18 @@ object WidgetNotification {
         }
         val wind = listOfNotNull(direction, Fmt.windForce(current?.windSpeed?.takeIf { it.isFinite() && it >= 0 })).joinToString(" ").ifBlank { "—" }
         val chance = weather?.hourly.orEmpty().filter { it.timeMillis >= now && it.timeMillis < now + 3 * 3_600_000L }.mapNotNull { it.precipProb?.takeIf { it in 0..100 } }.maxOrNull()
-        val air = listOfNotNull(weather?.aqi?.level?.takeIf(String::isNotBlank), weather?.aqi?.value?.toString()).joinToString(" ").ifBlank { "—" }
+        val air = notificationAirValue(weather?.aqi)
         val metrics = listOf(
             "体感" to WidgetBinder.temperature(current?.feelsLike, cfg),
             "湿度" to (current?.humidity?.takeIf { it.isFinite() && it in 0.0..100.0 }?.let { "${it.roundToInt()}%" } ?: "—"),
             "风向风力" to wind,
-            (if (cfg.showAir) "空气质量" else "气压") to (if (cfg.showAir) air else Fmt.pressure(current?.pressure, "hpa") ?: "—"),
+            (if (cfg.showAir) if (weather?.aqi?.estimated == true) "空气估算" else "空气质量" else "气压") to (if (cfg.showAir) air else Fmt.pressure(current?.pressure, "hpa") ?: "—"),
             "3小时降水" to (chance?.let { "最高 $it%" } ?: "—"),
             "紫外线指数" to (current?.uvIndex?.takeIf { it >= 0 }?.toString() ?: "—"),
         )
+        if (cfg.showAir) result.setContentDescription(R.id.notification_metric_4,
+            (if (weather?.aqi?.estimated == true) Fmt.AQI_ESTIMATION_LABEL + "；" else "") +
+                if (weather?.aqi?.value == null) "空气质量指数暂无数据" else "空气质量 $air")
         val metricLabels = intArrayOf(R.id.notification_metric_label_1, R.id.notification_metric_label_2, R.id.notification_metric_label_3, R.id.notification_metric_label_4, R.id.notification_metric_label_5, R.id.notification_metric_label_6)
         val metricValues = intArrayOf(R.id.notification_metric_1, R.id.notification_metric_2, R.id.notification_metric_3, R.id.notification_metric_4, R.id.notification_metric_5, R.id.notification_metric_6)
         metrics.forEachIndexed { index, (label, value) ->

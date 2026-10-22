@@ -98,6 +98,7 @@ internal fun WeatherSourceManager(primary: SourcePref, weather: WeatherData?, on
                     onCompare = { if (!saving) {
                         if (comparisonAvailable) onCompare() else error = "请先返回主页选择一个城市，再比较天气来源"
                     } }, onManageProviders = { if (!saving) onManageProviders() },
+                    supplementSettings = { SourcePrioritySettings(primary, available, onSaving = { saving = it }) },
                     modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()
                         .heightIn(max = panelHeight))
             }
@@ -111,7 +112,8 @@ internal fun WeatherSourceManagerPanel(primary: SourcePref, policy: ModuleSource
     visible: Set<SourcePref>, available: Set<SourcePref>, navigation: WeatherSourceNavigation,
     saving: Boolean = false, error: String? = null, onNavigate: (WeatherSourceNavigation) -> Unit,
     onSelect: (SourcePref?) -> Unit, onBack: () -> Unit, onDone: () -> Unit, onCompare: () -> Unit,
-    onManageProviders: () -> Unit, modifier: Modifier = Modifier) {
+    onManageProviders: () -> Unit, modifier: Modifier = Modifier,
+    supplementSettings: @Composable () -> Unit = {}) {
     val palette = LocalZhishengPalette.current
     val compact = LocalConfiguration.current.screenHeightDp < 420
     val scroll = rememberScrollState()
@@ -155,6 +157,7 @@ internal fun WeatherSourceManagerPanel(primary: SourcePref, policy: ModuleSource
                         Modifier.padding(horizontal = 18.dp, vertical = 14.dp), style = caption, color = palette.textSecondary)
                     WeatherModuleSettingsContent(policy, available, weather, onCompare,
                         onChoose = { onNavigate(navigation.edit(it)) }, showHeader = false)
+                    supplementSettings()
                 } else {
                     val module = navigation.editing
                     val selected = if (module == null) primary else policy[module]

@@ -28,6 +28,7 @@ internal fun CityAtmosphere(weather: WeatherData?, level: AmbienceLevel, night: 
     val state = naturalLightState(weather, night, local.hour * 60 + local.minute, now)
     val palette = naturalLightPalette(state, LocalZhishengPalette.current.isLight)
     val lightTheme = LocalZhishengPalette.current.isLight
+    val moving = active && LocalCityPageMotionRunning.current
     val phase = LocalVistaGlowPhase.current
     val texture by produceState<ImageBitmap?>(null, state.weather) {
         value = withContext(Dispatchers.Default) { CityCloudTexture.image(state.weather) }
@@ -36,7 +37,7 @@ internal fun CityAtmosphere(weather: WeatherData?, level: AmbienceLevel, night: 
     val gain = when (level) { AmbienceLevel.OFF -> 0f; AmbienceLevel.SUBTLE -> .5f; AmbienceLevel.VIVID -> .76f; AmbienceLevel.INTENSE -> 1f }
     Box(modifier) {
         Canvas(Modifier.fillMaxSize()) {
-            if (active && level != AmbienceLevel.OFF) held[0] = phase.value.toDouble()
+            if (moving && level != AmbienceLevel.OFF) held[0] = phase.value.toDouble()
             val time = held[0]
             drawRect(Brush.verticalGradient(listOf(palette.top, palette.middle, palette.base)))
             val glow = Offset(size.width * .83f, size.height * .20f)

@@ -147,8 +147,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    landscapePortraitLocked: Boolean,
-    onRestoreLandscapeAuto: () -> Unit,
     onLocate: () -> Unit,
     locating: Boolean,
     locateMessage: String?,
@@ -174,7 +172,7 @@ fun SettingsScreen(
             title = { Text("设备与版本统计说明", color = ZhishengText) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("首次使用或版本变更时，向枳生天气自有服务器 zhishengweather.site 发送本应用专用的设备标识摘要与版本号，用于设备去重及版本分布，帮助改进使用体验、安排后续更新。\n\n摘要由 Android ID 在本地生成，不上传原值；无法获取时使用随机安装编号。不包含机型、位置、天气密钥或页面操作。摘要可关联同一设备，不属于完全匿名数据。\n\n服务器保存首次登记时间与最后登记版本，登记记录在统计服务存续期间保留。关闭“设备与版本统计”后停止发送，已有记录保留。\n\n卸载重装通常可去重，恢复出厂设置或系统用户变化仍可能算作新设备。统计不代表实时在线或当前仍安装的数量。", color = ZhishengTextSecondary)
+                    Text("首次使用或版本变更时，向枳生天气自有服务器发送本应用专用的设备标识摘要与版本号，用于设备去重和版本分布，帮助安排更新。不包含机型、位置、天气 Key 或页面操作；摘要可关联同一设备，不属于完全匿名数据。\n\n该开关同时控制公告回执：发送公告获取、展示与已读状态，用于统计安装数；回执使用按公告区分的独立随机标识，不与设备摘要、位置或诊断关联。关闭后停止发送，已有记录保留。", color = ZhishengTextSecondary)
                 }
             },
             confirmButton = { androidx.compose.material3.TextButton(onClick = { showStatisticsInfo = false }) { Text("知道了", color = ZhishengMint) } },
@@ -193,9 +191,18 @@ fun SettingsScreen(
     val softGlow by SettingsRepository.softGlow.collectAsState(initial = false)
     val softGlowLevel by SettingsRepository.softGlowLevel.collectAsState(initial = com.zhisheng.weather.data.SoftGlowLevel.FLOWING)
     val usageStatistics by SettingsRepository.usageStatistics.collectAsState(initial = false)
+    val directory = rememberCommunityDirectory()
+    val serviceDiagnostics by SettingsRepository.serviceDiagnostics.collectAsState(initial = false)
+    var showServiceDiagnostics by remember { mutableStateOf(false) }
+    var showServicePrivacy by remember { mutableStateOf(false) }
+    if (showServiceDiagnostics) ServiceDiagnosticsDialog(serviceDiagnostics) { showServiceDiagnostics = false }
+    if (showServicePrivacy) ServicePrivacyDialog { showServicePrivacy = false }
     val locationEnabled by SettingsRepository.locationEnabled.collectAsState(initial = false)
     val preciseLocationEnabled by SettingsRepository.preciseLocationEnabled.collectAsState(initial = false)
     val preciseLocationPermissionAsked by SettingsRepository.preciseLocationPermissionAsked.collectAsState(initial = false)
+    val sharedPlace by SecretStore.sharedPlaceFlow.collectAsState(initial = SecretStore.sharedPlaceRuntime)
+    var showSharedPlaceInfo by remember { mutableStateOf(false) }
+    if (showSharedPlaceInfo) SharedPlaceConsentDialog(sharedPlace) { showSharedPlaceInfo = false }
     val showAqi by SettingsRepository.showAqi.collectAsState(initial = true)
     val showIndices by SettingsRepository.showIndices.collectAsState(initial = true)
     val showYesterday by SettingsRepository.showYesterday.collectAsState(initial = true)
@@ -286,8 +293,10 @@ fun SettingsScreen(
     val sampleSettingsBackground = isPhosphorVista && LocalHomeSurfaceStyle.current == HomeSurfaceStyle.FRAGRANCE_GLASS
     val floatingContentInset = maxOf(112.dp,
         82.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
-    val glassSource = rememberGraphicsLayer()
-    val settingsBackground = rememberGraphicsLayer()
+    // Discard retained sampled pixels when the theme changes.
+    val glassTheme = com.zhisheng.weather.ui.theme.LocalZhishengPalette.current.isLight
+    val glassSource = androidx.compose.runtime.key(glassTheme) { rememberGraphicsLayer() }
+    val settingsBackground = androidx.compose.runtime.key(glassTheme) { rememberGraphicsLayer() }
     var glassOrigin by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { glassOrigin = it.positionInRoot() }) {
     if (sampleSettingsBackground) Box(Modifier.fillMaxSize()
@@ -404,6 +413,16 @@ fun SettingsScreen(
                         onClearLocateMessage()
                         permDenied = false
                         scope.launch { SettingsRepository.setPreciseLocationEnabled(!preciseLocationEnabled) }
+                    }
+                    SettingsDivider()
+                    ToggleRow(
+                        "枳生天气位置服务",
+                        if (sharedPlace.enabled) "已开启" else "帮助改善天气定位体验",
+                        sharedPlace.enabled,
+                        onInfo = { showSharedPlaceInfo = true },
+                    ) {
+                        if (sharedPlace.enabled) scope.launch { SecretStore.setSharedPlaceConsent(false) }
+                        else showSharedPlaceInfo = true
                     }
                     SettingsDivider()
                     ActionRow(
@@ -835,7 +854,7 @@ fun SettingsScreen(
 
             InlineGroupLabel("横屏待机")
             CardBox {
-                ToggleRow("横屏待机界面", "开启后旋转显示桌面时钟；关闭后锁定竖屏", landscapeStandby) {
+                ToggleRow("横屏待机界面", "横屏时显示天气时钟；屏幕旋转跟随系统设置", landscapeStandby) {
                     scope.launch { SettingsRepository.setLandscapeStandby(!landscapeStandby) }
                 }
                 SettingsDivider()
@@ -858,15 +877,6 @@ fun SettingsScreen(
                         SettingsRepository.setLandscapeStandbyStyle(LandscapeStandbyStyle.from(value))
                     }
                 }
-                }
-                if (landscapePortraitLocked) {
-                    SettingsDivider()
-                    ActionRow(
-                        label = "> 恢复自动旋转",
-                        enabled = landscapeStandby,
-                        color = ZhishengMint,
-                        onClick = onRestoreLandscapeAuto,
-                    )
                 }
             }
             InlineGroupLabel("刷新与天气提醒")
@@ -942,14 +952,14 @@ fun SettingsScreen(
             CardBox {
                 LinkRow(
                     "赞助榜单",
-                    "${SponsorBoard.size} 位支持者",
+                    "${directory.sponsors.size} 位支持者",
                     accent = ZhishengOrange,
                     forceSingleLine = true,
                 ) { showSponsorBoard = true }
                 SettingsDivider()
                 LinkRow(
                     "社区贡献者名单",
-                    "${CommunityContributors.size} 位贡献者",
+                    "${directory.contributors.size} 位贡献者",
                     accent = ZhishengMint,
                     forceSingleLine = true,
                 ) { showContributors = true }
@@ -996,13 +1006,23 @@ fun SettingsScreen(
             CardBox { Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) { WeatherDiagnosticsButton() } }
             InlineGroupLabel("隐私与权限")
             CardBox {
+                ToggleRow("帮助改进服务", "", serviceDiagnostics, onInfo = { showServiceDiagnostics = true }) {
+                    if (serviceDiagnostics) scope.launch { SettingsRepository.setServiceDiagnostics(false) }
+                    else scope.launch { SettingsRepository.setServiceDiagnostics(true) }
+                }
+                SettingsDivider()
+                InfoRow("隐私说明", "了解信息使用与管理方式", onClick = { showServicePrivacy = true })
+                SettingsDivider()
                 ToggleRow("设备与版本统计", "", usageStatistics, onInfo = { showStatisticsInfo = true }) {
                     scope.launch { SettingsRepository.setUsageStatistics(!usageStatistics) }
                 }
                 SettingsDivider()
                 InfoRow("权限", "网络；位置可选；安装更新时才调用系统安装")
                 SettingsDivider()
-                InfoRow("位置与搜索", "城市与区县可离线搜索；系统地址服务可能联网。个人高德 Key 可增强街道和地点，关闭或失效时回退系统服务。")
+                InfoRow("位置与搜索", "帮助改善定位与地点查询体验。", onClick = { showServicePrivacy = true })
+                SettingsDivider()
+                InfoRow("位置服务与历史", if (sharedPlace.enabled) "已开启 · 查看说明与删除历史" else "已关闭 · 查看说明与管理历史",
+                    onClick = { showSharedPlaceInfo = true })
             }
             Spacer(Modifier.height(20.dp))
             Text(
@@ -1027,7 +1047,7 @@ fun SettingsScreen(
     }
     if (glassHeader) {
         SettingsTopBar(onBack, Modifier.align(Alignment.TopCenter)
-            .glassScrollHeader(glassSource, glassOrigin,
+            .glassScrollHeader(glassSource, { glassOrigin },
                 underlay = settingsBackground, underlayOrigin = glassOrigin,
                 strength = { scrollState.value / glassBlendDistance })
             .statusBarsPadding())
@@ -1545,7 +1565,7 @@ private fun ToggleRow(label: String, hint: String, checked: Boolean, onInfo: (()
             if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
         }
         if (onInfo != null) IconButton(onClick = onInfo, modifier = Modifier.size(40.dp)) {
-            com.zhisheng.weather.ui.components.PhosphorIcon(com.zhisheng.weather.R.drawable.ph_info, "查看设备与版本统计说明",
+            com.zhisheng.weather.ui.components.PhosphorIcon(com.zhisheng.weather.R.drawable.ph_info, "查看${label}说明",
                 Modifier.size(17.dp), ZhishengTextTertiary)
         }
         Switch(

@@ -230,7 +230,9 @@ internal fun WeatherSourceComparisonPanel(city: City, rows: List<WeatherReposito
                                             Text("温度 ${comparisonValue(current.temperature, "℃")} · 湿度 ${comparisonValue(current.humidity, "%")}")
                                             Text("风速 ${comparisonValue(current.windSpeed, "km/h")} · ${current.weatherText ?: current.condition?.label ?: "天气现象缺失"}")
                                         } ?: Text("未返回当前实况", color = palette.textSecondary)
-                                        data.aqi?.let { Text("AQI ${it.value ?: "缺失"} · ${it.standard ?: "标准未标注，不能直接横比"}", color = palette.textSecondary) }
+                                        data.aqi?.let { Text("AQI ${Fmt.aqiValueLabel(it.value, it.estimated)} · " +
+                                            if (it.estimated) Fmt.AQI_ESTIMATION_LABEL
+                                            else it.standard ?: "标准未标注，不能直接横比", color = palette.textSecondary) }
                                         Text("逐时 ${data.hourly.size} · 逐日 ${data.daily.size} · 短时 ${data.rainMinutes.size} · 预警 ${data.alerts.size}", color = palette.textSecondary, style = caption)
                                         val hour = commonHour?.let { time -> data.hourly.firstOrNull { it.timeMillis == time } }
                                         if (commonHour != null) Text("共同小时温度：${comparisonValue(hour?.temperature, "℃", "未返回")}")

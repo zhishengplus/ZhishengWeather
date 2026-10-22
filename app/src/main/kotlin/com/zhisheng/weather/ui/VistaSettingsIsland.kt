@@ -62,9 +62,9 @@ internal fun VistaSettingsIsland(selected: Int, onSelected: (Int) -> Unit, modif
     val selection by rememberUpdatedState(selected)
     val commit by rememberUpdatedState(onSelected)
     val palette = LocalZhishengPalette.current
-    val materialLayer = rememberGraphicsLayer()
+    val materialLayer = key(palette.isLight) { rememberGraphicsLayer() }
     var glassPosition by remember { mutableStateOf(Offset.Zero) }
-    val optics = remember { if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { RefractiveGlass() }.onFailure { android.util.Log.w("RefractiveGlass", "Optics unavailable", it) }.getOrNull() else null }
+    val optics = remember(palette.isLight) { if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { RefractiveGlass() }.onFailure { android.util.Log.w("RefractiveGlass", "Optics unavailable", it) }.getOrNull() else null }
     val blur = remember { if (android.os.Build.VERSION.SDK_INT >= 31)
         android.graphics.RenderEffect.createBlurEffect(12f, 12f, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect() else null }
     BoxWithConstraints(modifier.fillMaxWidth()) {

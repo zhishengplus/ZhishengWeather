@@ -131,7 +131,7 @@ fun HourlyDetailScreen(
     val chrome = LocalZhishengChrome.current
     val palette = rememberChartPalette()
     val nowMs = weatherPresentationTime()
-    val allHours = hourlyDetailDisplayItems(data.current, data.hourly, nowMs, data.aqi?.value)
+    val allHours = hourlyDetailDisplayItems(data.current, data.hourly, nowMs, data.aqi?.value, data.aqi?.estimated == true)
     val offset = data.utcOffsetSeconds
     val days = hourlyDetailDays(allHours, offset)
     var selectedDate by rememberSaveable(cityName, offset) { mutableStateOf<String?>(null) }
@@ -224,22 +224,25 @@ fun HourlyDetailScreen(
             }
             if (display.any { it.weather.aqi != null }) {
                 item {
-                    ChartCard(R.drawable.ph_leaf, palette.aqiExcellent, "空气质量",
-                        legend = {
-                            val aqi = display[selected.value.coerceIn(0, display.lastIndex)].weather.aqi
-                            Text(aqi?.let { "$it ${aqiLevelText(it)}" } ?: "--",
-                                color = ZhishengTextSecondary, style = MaterialTheme.typography.labelMedium)
-                        },
-                    ) {
+                    ChartCard(R.drawable.ph_leaf, palette.aqiExcellent, "空气质量") {
+                        val hour = display[selected.value.coerceIn(0, display.lastIndex)].weather
+                        Text(hour.aqi?.let { "${Fmt.aqiValueLabel(it, hour.aqiEstimated)} ${aqiLevelText(it)}" } ?: "--",
+                            Modifier.fillMaxWidth(), color = ZhishengTextSecondary,
+                            style = MaterialTheme.typography.labelMedium)
                         HourlyAqiBars(
                             selected = selected,
                             times = times,
                             aqi = display.map { it.weather.aqi },
+                            estimated = display.map { it.weather.aqiEstimated },
                             palette = palette,
                             utcOffsetSeconds = offset,
                             bubbleStamps = bubbleStamps,
                             onSelect = { selected.value = it },
                         )
+                        if (display.any { it.weather.aqi != null && it.weather.aqiEstimated }) {
+                            Text("“估”为${Fmt.AQI_ESTIMATION_LABEL}", color = ZhishengTextSecondary,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
                         HourlyAxisLabels(display, offset, nowMs)
                     }
                 }
@@ -533,6 +536,7 @@ private fun HourlyAqiBars(
     selected: MutableIntState,
     times: List<Long>,
     aqi: List<Int?>,
+    estimated: List<Boolean>,
     palette: ChartPalette,
     utcOffsetSeconds: Int?,
     bubbleStamps: List<String>,
@@ -554,7 +558,8 @@ private fun HourlyAqiBars(
     Canvas(
         Modifier.fillMaxWidth().height(102.dp)
             .hourlySelect(times.size, onSelect)
-            .semantics { contentDescription = "逐时空气质量图，点按或拖动选择时刻" },
+            .semantics { contentDescription = "逐时空气质量图，点按或拖动选择时刻" +
+                if (estimated.any { it }) "，${Fmt.AQI_ESTIMATION_LABEL}" else "" },
     ) {
         val si = selected.value.coerceIn(0, times.lastIndex)
         val n = times.size
@@ -579,7 +584,8 @@ private fun HourlyAqiBars(
                 if (i == si) barColor(value) else barColor(value).copy(alpha = .72f),
                 Offset(cx - barW / 2, barTop), Size(barW, hValue), CornerRadius(2.5.dp.toPx()),
             )
-            val label = measurer.measure("$value", TextStyle(fontSize = 8.sp, color = labelColor))
+            val label = measurer.measure("$value" + if (estimated.getOrNull(i) == true) "估" else "",
+                TextStyle(fontSize = 8.sp, color = labelColor))
             drawText(label, topLeft = Offset(
                 (cx - label.size.width / 2f).coerceIn(0f, (size.width - label.size.width).coerceAtLeast(0f)),
                 (barTop - label.size.height - 2.dp.toPx()).coerceAtLeast(0f)))
@@ -588,7 +594,7 @@ private fun HourlyAqiBars(
         val selValue = aqi.getOrNull(si)
         if (selValue != null) {
             val layout = measurer.measure(
-                bubbleStamps[si] + " $selValue ${aqiLevelText(selValue)}",
+                bubbleStamps[si] + " ${Fmt.aqiValueLabel(selValue, estimated.getOrNull(si) == true)} ${aqiLevelText(selValue)}",
                 TextStyle(fontSize = 9.sp, color = bubbleTextColor),
             )
             val bubbleW = layout.size.width + 16.dp.toPx()
@@ -694,7 +700,7 @@ private fun scrubSummary(
     return listOfNotNull(
         time,
         tempText(h.temperature, tempUnit) + (feels ?: ""),
-        h.aqi?.let { "空气$it ${aqiLevelText(it)}" },
+        h.aqi?.let { "空气${Fmt.aqiValueLabel(it, h.aqiEstimated)} ${aqiLevelText(it)}" },
         h.uvIndex?.let { "紫外 ${uvLevelText(it)}" },
         Fmt.windForce(h.windSpeed)?.let { "${windDirText(h.windDirectionDeg)}风$it" },
     ).joinToString(" · ")

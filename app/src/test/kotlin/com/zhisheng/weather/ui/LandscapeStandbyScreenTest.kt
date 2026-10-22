@@ -1,6 +1,7 @@
 package com.zhisheng.weather.ui
 
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -16,13 +17,11 @@ class LandscapeStandbyScreenTest {
         assertTrue(activity.contains("LandscapeStandbyScreen"))
         assertTrue(activity.contains("val standbyVisible = standbyActive && screen == AppScreen.HOME"))
         assertTrue(activity.contains("onSettings = { screen = AppScreen.SETTINGS }"))
-        assertTrue(activity.contains("SCREEN_ORIENTATION_PORTRAIT"))
-        assertTrue(activity.contains("SCREEN_ORIENTATION_SENSOR"))
-        assertTrue(activity.contains("portraitSession"))
-        assertTrue(activity.contains("PortraitSessionNotice(onRestore = { portraitSession = false })"))
-        assertTrue(settings.contains("landscapePortraitLocked"))
-        assertTrue(settings.contains("> 恢复自动旋转"))
-        assertTrue(activity.contains("onExitLandscape"))
+        assertTrue(activity.contains("val standbyActive = landscapeStandby &&"))
+        assertTrue(activity.contains("configuration.orientation == Configuration.ORIENTATION_LANDSCAPE"))
+        assertFalse(activity.contains("portraitSession"))
+        assertFalse(settings.contains("恢复自动旋转"))
+        assertFalse(activity.contains("onExitLandscape"))
         assertTrue(screen.contains("ZHISHENG AMBIENT TERMINAL"))
         assertTrue(screen.contains("BuildConfig.VERSION_NAME"))
         assertTrue(screen.contains("ClassicLandscapeStandbyScreen"))
@@ -34,9 +33,10 @@ class LandscapeStandbyScreenTest {
         assertTrue(screen.contains("todayDaily(nowMillis)"))
         assertTrue(screen.contains("onSettings: () -> Unit"))
         assertTrue(screen.contains("Icons.Default.Settings"))
-        assertTrue(screen.contains("StandbyPortraitButton"))
-        assertTrue(weatherCore.contains("StandbyPortraitButton"))
+        assertFalse(screen.contains("StandbyPortraitButton"))
+        assertFalse(weatherCore.contains("StandbyPortraitButton"))
         assertTrue(settings.contains("横屏待机界面"))
+        assertTrue(settings.contains("屏幕旋转跟随系统设置"))
         assertTrue(settings.contains("Configuration.ORIENTATION_LANDSCAPE"))
         assertTrue(settings.contains("LandscapeSettingsRail"))
         assertTrue(settings.contains("LazyColumn"))
