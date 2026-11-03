@@ -1,0 +1,7 @@
+{
+  "versionCode": 20261172,
+  "versionName": "0.1.6",
+  "sha256": "68920185b20ede8b91b31bcc45ecd041b0b1b2774cdbb51c3608226af1a8cab0",
+  "privateSourceCheckpoint": "89771b7628826864cf9aecb7a94b2f9a808c883b",
+  "scope": "Official binary and updater metadata. This commit does not synchronize the application source tree."
+}
