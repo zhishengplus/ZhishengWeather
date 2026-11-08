@@ -2,6 +2,10 @@
 
 This directory contains images used by the repository README. They are not packaged in the Android app.
 
+- `readme/` — current README artwork: light and dark hero banners in Chinese and English, download buttons, the 0.1.6 feature images, screenshot gallery, interface comparison, widgets, app icons and QQ group codes. Screenshots use public campus coordinates or the in-app weather preview.
+
+The files below belong to earlier README versions:
+
 - `screenshot-home.jpg` — current conditions, alert, hourly forecast, and precipitation
 - `screenshot-details.jpg` — telemetry and air quality
 - `screenshot-cities.jpg` — saved cities
