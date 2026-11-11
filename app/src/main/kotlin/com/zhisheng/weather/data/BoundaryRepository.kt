@@ -15,6 +15,8 @@ import kotlin.math.cos
  *
  * 内存策略：启动仅解析索引（[BoundaryMatcher] 承担名称匹配），几何块按
  * 城市惰性解码并 LRU 缓存；数据缺失/损坏时保持空索引，UI 侧优雅降级。
+ *
+ * 城市轮廓地图由 PickGear 贡献（PR #7）。
  */
 object BoundaryRepository {
 
