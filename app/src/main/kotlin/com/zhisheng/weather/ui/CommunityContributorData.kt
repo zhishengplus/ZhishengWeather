@@ -40,6 +40,7 @@ internal val CommunityContributorSections = listOf(
             "Gstar_",
             "伍拾两HZ",
             "寡欲老公猪",
+            "PickGear",
         ),
     ),
     ContributorSection(
