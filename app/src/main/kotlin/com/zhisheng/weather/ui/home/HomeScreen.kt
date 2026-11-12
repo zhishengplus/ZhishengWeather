@@ -228,7 +228,7 @@ import com.zhisheng.weather.ui.theme.isPhosphorVista
 import com.zhisheng.weather.ui.theme.zhishengPanel
 import com.zhisheng.weather.ui.components.NaturalWeatherSurface
 import com.zhisheng.weather.ui.components.LocalHomeBackdrop
-import com.zhisheng.weather.ui.components.VistaWeatherArtwork
+import com.zhisheng.weather.ui.components.WeatherIcon
 import com.zhisheng.weather.ui.theme.vistaClick
 import com.zhisheng.weather.ui.theme.zhishengScreen
 import com.zhisheng.weather.ui.theme.zhishengCompactPanel
@@ -1806,7 +1806,7 @@ internal fun VistaCurrentOverview(
         val numberSize = minOf(124f, numberWidth / ((temperature.length * 0.49f) * fontScale)).coerceAtLeast(42f)
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Box(Modifier.fillMaxWidth().heightIn(min = if (!hasArtwork) 132.dp else if (stacked) 188.dp else if (fragranceGlass) 164.dp else 204.dp)) {
-                if (hasArtwork) VistaWeatherArtwork(condition,
+                if (hasArtwork) WeatherIcon(condition,
                     Modifier.align(if (stacked) Alignment.TopEnd else Alignment.CenterEnd).offset(x = 8.dp, y = 12.dp)
                         .cityScopedSharedBounds("current-condition", cityKey).size(artSize)
                         .drawBehind {
@@ -1817,7 +1817,7 @@ internal fun VistaCurrentOverview(
                                     radius = size.minDimension * 0.62f, center = center,
                                 )
                             }
-                        }, hero = true)
+                        })
                 Column(Modifier.align(if (stacked) Alignment.BottomStart else Alignment.CenterStart).padding(top = if (stacked) 108.dp else 0.dp)) {
                     Row(verticalAlignment = Alignment.Top) {
                         Text(temperature, modifier = Modifier.cityScopedSharedBounds("current-temperature", cityKey),
