@@ -52,6 +52,7 @@ class WidgetVisualTest {
                     val forecast = view.findViewById<ViewGroup>(R.id.widget_forecast)
                     for (index in 0 until forecast.childCount) {
                         val cell = forecast.getChildAt(index) as ViewGroup
+                        if (cell.visibility != View.VISIBLE) continue
                         for (childIndex in 0 until cell.childCount) {
                             val child = cell.getChildAt(childIndex)
                             org.junit.Assert.assertTrue("Hourly forecast must fit above footer: ${style.key}", child.top >= 0 && child.bottom <= cell.height)
@@ -274,7 +275,7 @@ class WidgetVisualTest {
         val minimum = tag != "large_font"
         for (style in WidgetStyle.entries) for (kind in WidgetKind.entries) {
             val width = if (!minimum) kind.width else if (kind == WidgetKind.NOW) 110 else 250
-            val height = if (!minimum) kind.height else when (kind) { WidgetKind.NOW -> 110; WidgetKind.PULSE -> 60; WidgetKind.BAND -> 120; WidgetKind.WEEK -> 140; WidgetKind.SCENE -> 320 }
+            val height = if (!minimum) kind.height else when (kind) { WidgetKind.NOW -> 110; WidgetKind.PULSE -> 60; WidgetKind.BAND -> 120; WidgetKind.WEEK -> 140; WidgetKind.SCENE -> 320; WidgetKind.COMBO -> 180 }
             val frame = FrameLayout(paparazzi.context).apply { layoutParams = ViewGroup.LayoutParams(dp(width), dp(height)) }
             val sample = widgetPreviewSample().let { it.copy(city = it.city.copy(name = "嘉峪关市"), weather = it.weather.copy(current = it.weather.current?.copy(temperature = temperature))) }
             val view = WidgetBinder.bind(paparazzi.context, 1, WidgetInstance(1, style, kind), WidgetConfig.defaults(style).copy(textScale = 1.25f, tempUnit = unit), sample, width, height, interactive = false).apply(paparazzi.context, frame)
@@ -320,7 +321,9 @@ class WidgetVisualTest {
         for (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK)) {
             val frame = FrameLayout(paparazzi.context)
             val view = WidgetBinder.bind(paparazzi.context, 1, WidgetInstance(1, WidgetStyle.VISTA, kind), WidgetConfig(), sample, kind.width, kind.height, now, interactive = false).apply(paparazzi.context, frame)
-            org.junit.Assert.assertEquals(if (kind == WidgetKind.BAND) 2 else 3, view.findViewById<ViewGroup>(R.id.widget_forecast).childCount)
+            val forecast = view.findViewById<ViewGroup>(R.id.widget_forecast)
+            org.junit.Assert.assertEquals(if (kind == WidgetKind.BAND) 2 else 3,
+                (0 until forecast.childCount).count { forecast.getChildAt(it).visibility == View.VISIBLE })
         }
     }
     @Test fun narrowAndTransparent() {

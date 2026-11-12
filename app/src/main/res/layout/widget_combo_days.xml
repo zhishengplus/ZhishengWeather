@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated: fixed forecast slots so launchers only reapply leaf setters (no addView at render time). -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+<FrameLayout android:visibility="gone" android:id="@+id/widget_day_0" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="36dp" android:paddingTop="2dp" android:paddingBottom="2dp">
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="start|center_vertical" android:orientation="vertical" android:gravity="center_horizontal">
+<TextView android:id="@+id/widget_day_0_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxWidth="88dp" android:textSize="14sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:id="@+id/widget_day_0_sublabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxWidth="88dp" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:orientation="horizontal" android:gravity="center_vertical">
+<ImageView android:id="@+id/widget_day_0_icon" android:layout_width="36dp" android:layout_height="36dp" android:scaleType="fitCenter" android:contentDescription="">
+</ImageView>
+<TextView android:id="@+id/widget_day_0_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="6dp">
+</TextView>
+</LinearLayout>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="end|center_vertical" android:orientation="horizontal" android:gravity="center_vertical">
+<ImageView android:id="@+id/widget_day_0_drop" android:layout_width="12dp" android:layout_height="12dp" android:layout_marginEnd="3dp" android:scaleType="fitCenter" android:src="@drawable/ph_drop" android:contentDescription="">
+</ImageView>
+<TextView android:id="@+id/widget_day_0_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="start" android:textSize="12sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+</LinearLayout>
+</FrameLayout>
+<FrameLayout android:visibility="gone" android:id="@+id/widget_day_1" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="36dp" android:paddingTop="2dp" android:paddingBottom="2dp">
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="start|center_vertical" android:orientation="vertical" android:gravity="center_horizontal">
+<TextView android:id="@+id/widget_day_1_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxWidth="88dp" android:textSize="14sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+<TextView android:id="@+id/widget_day_1_sublabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxWidth="88dp" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="normal" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+</LinearLayout>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:orientation="horizontal" android:gravity="center_vertical">
+<ImageView android:id="@+id/widget_day_1_icon" android:layout_width="36dp" android:layout_height="36dp" android:scaleType="fitCenter" android:contentDescription="">
+</ImageView>
+<TextView android:id="@+id/widget_day_1_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginStart="6dp">
+</TextView>
+</LinearLayout>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="end|center_vertical" android:orientation="horizontal" android:gravity="center_vertical">
+<ImageView android:id="@+id/widget_day_1_drop" android:layout_width="12dp" android:layout_height="12dp" android:layout_marginEnd="3dp" android:scaleType="fitCenter" android:src="@drawable/ph_drop" android:contentDescription="">
+</ImageView>
+<TextView android:id="@+id/widget_day_1_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="start" android:textSize="12sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end">
+</TextView>
+</LinearLayout>
+</FrameLayout>
+</merge>

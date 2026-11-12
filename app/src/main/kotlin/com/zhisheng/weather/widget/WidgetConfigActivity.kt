@@ -139,10 +139,28 @@ class WidgetConfigActivity : ComponentActivity() {
         }
         setResult(RESULT_CANCELED)
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        val instance = if (id != AppWidgetManager.INVALID_APPWIDGET_ID) WidgetRuntime.instance(this, id) else null
-        if (id != AppWidgetManager.INVALID_APPWIDGET_ID && instance == null) { finish(); return }
+        var instance = if (id != AppWidgetManager.INVALID_APPWIDGET_ID) WidgetRuntime.instance(this, id) else null
+        if (id != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            // HyperOS deletes the widget if configure returns RESULT_CANCELED.
+            // A valid first-add id must never finish canceled, even if the user
+            // later backs out or the provider cannot be resolved.
+            setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id))
+        }
+        if (id != AppWidgetManager.INVALID_APPWIDGET_ID && instance == null) {
+            val provider = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)?.provider
+            instance = provider?.let { WidgetRuntime.instanceFromProvider(this, id, it) }
+        }
+        if (id != AppWidgetManager.INVALID_APPWIDGET_ID && instance == null && !WidgetStore.hasConfig(this, id)) {
+            // Unrecoverable initial add: keep the dropped widget rather than vanish.
+            finish(); return
+        }
         val style = instance?.style ?: WidgetStyle.from(intent.getStringExtra("widget_style"))
-        val initial = instance?.let { WidgetStore.config(this, it.id, style) } ?: WidgetConfig.defaults(style)
+        val initial = when {
+            id != AppWidgetManager.INVALID_APPWIDGET_ID && WidgetStore.hasConfig(this, id) ->
+                WidgetStore.config(this, id, style)
+            instance != null -> WidgetStore.config(this, instance.id, style)
+            else -> WidgetConfig.defaults(style)
+        }
         notification = WidgetStore.notification(this)
         val statusBar = if (style == WidgetStyle.VISTA) android.graphics.Color.rgb(237,244,245) else android.graphics.Color.rgb(20,27,27)
         setContent {
@@ -151,7 +169,7 @@ class WidgetConfigActivity : ComponentActivity() {
             val located by CityRepository.locatedCityKey.collectAsState(initial = null)
             if (intent.getBooleanExtra("notification_settings", false)) NotificationStudio(notification, cities, selected, located,
                 onChange = { requestNotification(it) }, onClose = { finish() })
-            else WidgetStudio(style, instance?.id, instance?.kind ?: WidgetKind.WEEK, initial, cities, selected, located,
+            else WidgetStudio(style, instance?.id ?: id.takeIf { it != AppWidgetManager.INVALID_APPWIDGET_ID }, instance?.kind ?: WidgetKind.WEEK, initial, cities, selected, located,
                 notification, onNotification = { requestNotification(it) }, onClose = { finish() },
                 onApply = { kind, config -> applyWidget(style, kind, config, id) },
                 pinState = pinState, onAddHelp = { kind -> pinKind = kind; pinStyle = style; showAddHelp = true })

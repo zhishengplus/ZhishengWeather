@@ -32,6 +32,9 @@ android {
         versionCode = 20261102
         versionName = "0.1.5-beta10.8"
         resValue("string", "shortcut_target_package", "com.zhisheng.weather")
+        // HyperOS/AOSP resolve android:configure via ActivityInfo.buildClassName only
+        // when the value is a fully-qualified name that starts with applicationId.
+        resValue("string", "widget_configure_class", "com.zhisheng.weather.WidgetConfigure")
 
         // 发行渠道面向实体手机；去掉仅供 Intel 模拟器使用的 x86/x86_64 MapLibre 库。
         // 同时保留现代 ARM64 与 Android 8 时代的 32 位 ARM 设备。
@@ -78,6 +81,7 @@ android {
             require(Regex("\\.[a-z][a-z0-9_]*").matches(previewSuffix)) { "Invalid preview application suffix" }
             applicationIdSuffix = previewSuffix
             resValue("string", "shortcut_target_package", "com.zhisheng.weather$previewSuffix")
+            resValue("string", "widget_configure_class", "com.zhisheng.weather${previewSuffix}.WidgetConfigure")
             resValue("string", "app_name", if (previewSuffix == ".preview") "枳生天气 澄空体验" else "枳生天气 分层验证")
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
