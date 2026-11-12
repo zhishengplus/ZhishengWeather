@@ -1,0 +1,41 @@
+{
+  "available": true,
+  "model": "first-light.glb",
+  "edition": "初光 · 0.1.6",
+  "previewFront": "preview-front.webp",
+  "previewBack": "preview-back.webp",
+  "modelSha256": "1592e51f3363be26b9b53b97fa57a1c17c706d30525ac76ed1d35248d560e68a",
+  "labelAnchor": {
+    "position": [
+      0,
+      -1.55,
+      -0.455
+    ],
+    "normal": [
+      0,
+      0,
+      -1
+    ],
+    "up": [
+      0,
+      1,
+      0
+    ],
+    "width": 1.1,
+    "height": 0.22
+  },
+  "replaceSignatureBox": {
+    "material": "01 / Satin champagne titanium",
+    "min": [
+      -0.26,
+      -1.58,
+      -0.495
+    ],
+    "max": [
+      0.435,
+      -1.35,
+      -0.488
+    ]
+  },
+  "source": "Original 0.1.6 badge artwork; see licenses/."
+}

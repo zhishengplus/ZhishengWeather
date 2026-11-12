@@ -77,6 +77,7 @@ fun InterfaceStyleChoiceDialog(
             usePlatformDefaultWidth = false,
         ),
     ) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         Box(
             modifier = Modifier
                 .fillMaxSize()

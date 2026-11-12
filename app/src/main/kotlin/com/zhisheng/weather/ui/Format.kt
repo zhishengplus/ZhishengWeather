@@ -11,7 +11,8 @@ import kotlin.math.roundToInt
 // 显示格式工具：温度/风速/气压单位换算在此统一生效
 object Fmt {
 
-    private val hourFormatter = DateTimeFormatter.ofPattern("H时")
+    // 与其余时间格式统一拉丁数字，避免部分数字区域出现两套数字体系。
+    private val hourFormatter = DateTimeFormatter.ofPattern("H时", Locale.CHINA)
     private val dateFormatter = DateTimeFormatter.ofPattern("M月d日 E", Locale.CHINA)
     private val dayFormatter = DateTimeFormatter.ofPattern("d日", Locale.CHINA)
     private val monthFormatter = DateTimeFormatter.ofPattern("M月", Locale.CHINA)

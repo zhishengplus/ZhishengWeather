@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 
 open class FreshWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
-        async { WidgetRuntime.renderAll(context); WidgetRefresh.schedule(context); WidgetRefresh.request(context) }
+        async { WidgetRefresh.schedule(context); WidgetRefresh.request(context); ids.forEach { WidgetRuntime.renderOne(context, it) } }
     }
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, appWidgetId: Int, newOptions: Bundle) {
         async { WidgetRuntime.renderOne(context, appWidgetId) }
@@ -31,7 +31,7 @@ open class FreshWidgetProvider : AppWidgetProvider() {
         oldWidgetIds.zip(newWidgetIds).forEach { (old, new) ->
             WidgetStore.save(context, new, WidgetStore.config(context, old)); WidgetStore.delete(context, old)
         }
-        async { WidgetRuntime.renderAll(context); WidgetRefresh.schedule(context) }
+        async { WidgetRefresh.schedule(context); WidgetRefresh.request(context); WidgetRuntime.renderAll(context) }
     }
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
@@ -42,7 +42,7 @@ open class FreshWidgetProvider : AppWidgetProvider() {
         }
         if (intent.action in setOf(Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_DATE_CHANGED,
                 Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_WALLPAPER_CHANGED)) {
-            async { WidgetRuntime.renderAll(context); WidgetNotification.refresh(context); WidgetRefresh.schedule(context) }
+            async { WidgetRefresh.schedule(context); WidgetRefresh.request(context); WidgetRuntime.renderAll(context); WidgetNotification.refresh(context) }
         }
     }
     private fun async(block: suspend () -> Unit) {
@@ -98,7 +98,7 @@ object WidgetRuntime {
         val ctx = c.applicationContext
         // 升级或开机后配置流可能一个值都不变，distinctUntilChanged 就不会触发渲染，
         // 桌面会一直挂着旧包的 RemoteViews。进程启动先兜底重绘一次。
-        scope.launch { WidgetStore.migrateWeatherCache(ctx); renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.schedule(ctx) }
+        scope.launch { WidgetRefresh.schedule(ctx); WidgetRefresh.request(ctx); WidgetStore.migrateWeatherCache(ctx); renderAll(ctx); WidgetNotification.refresh(ctx) }
         WidgetRedrawAlarm.registerScreenReceiver(ctx)
         scope.launch {
             SettingsRepository.moduleSources.drop(1).collect {

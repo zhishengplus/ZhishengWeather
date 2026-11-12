@@ -106,7 +106,7 @@ private sealed interface RecentWeekState {
     data class Error(val message: String, val hint: String = "检查网络后可以重新读取") : RecentWeekState
 }
 
-private enum class HistoryView { RECENT_WEEK, SAME_DAY }
+private enum class HistoryView { RECENT_WEEK, SAME_DAY, DATE_RANGE }
 
 private data class HistoryLoadProgress(
     val date: LocalDate,
@@ -210,13 +210,15 @@ fun HistoryScreen(
         modifier = Modifier.fillMaxSize().zhishengScreen()
             .statusBarsPadding().navigationBarsPadding(),
     ) {
-        if (isPhosphorVista) WeatherFeatureNavigation("天气回看", city?.displayName, onBack, listOf("过去7天", "往年同日"),
-            if (view == HistoryView.RECENT_WEEK) 0 else 1) { viewName = (if (it == 0) HistoryView.RECENT_WEEK else HistoryView.SAME_DAY).name }
+        if (isPhosphorVista) WeatherFeatureNavigation("天气回看", city?.displayName, onBack, listOf("过去7天", "往年同日", "日期查询"),
+            view.ordinal) { viewName = HistoryView.entries[it].name }
         else {
             FeaturePageHeader("天气回看", "WEATHER MEMORY", onBack)
             HistoryViewToggle(view) { viewName = it.name }
         }
-        if (view == HistoryView.RECENT_WEEK) {
+        if (view == HistoryView.DATE_RANGE) {
+            HistoryDateRangeScreen(city, today, tempUnit, windUnit)
+        } else if (view == HistoryView.RECENT_WEEK) {
             when (val current = recentState) {
                 RecentWeekState.Loading -> RecentWeekLoading()
                 is RecentWeekState.Error -> FeatureErrorState(
@@ -262,22 +264,7 @@ fun HistoryScreen(
 
 @Composable
 private fun HistoryViewToggle(selected: HistoryView, onSelect: (HistoryView) -> Unit) {
-    if (isPhosphorVista) {
-        WeatherFeatureTabs(listOf("过去7天", "往年同日"), if (selected == HistoryView.RECENT_WEEK) 0 else 1) { onSelect(if (it == 0) HistoryView.RECENT_WEEK else HistoryView.SAME_DAY) }
-        return
-    }
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp)
-            .heightIn(min = 52.dp).selectableGroup().then(if (isPhosphorVista) Modifier.zhishengCompactPanel() else Modifier.background(ZhishengSurface).border(1.dp, ZhishengCardBorder)),
-    ) {
-        HistoryViewChoice("过去7天", "RECENT LOG", selected == HistoryView.RECENT_WEEK, Modifier.weight(1f)) {
-            onSelect(HistoryView.RECENT_WEEK)
-        }
-        if (!isPhosphorVista) Box(Modifier.width(1.dp).height(52.dp).background(ZhishengCardBorder))
-        HistoryViewChoice("往年同日", "YEAR TRACE", selected == HistoryView.SAME_DAY, Modifier.weight(1f)) {
-            onSelect(HistoryView.SAME_DAY)
-        }
-    }
+    WeatherFeatureTabs(listOf("过去7天", "往年同日", "日期查询"), selected.ordinal) { onSelect(HistoryView.entries[it]) }
 }
 
 @Composable
@@ -1004,7 +991,7 @@ private fun historyInsight(
     today: LocalDate,
 ): String {
     if (forecast != null && comparison != null) {
-        val dateLabel = if (review.referenceDate == today) "今天" else review.referenceDate.format(DateTimeFormatter.ofPattern("M月d日"))
+        val dateLabel = if (review.referenceDate == today) "今天" else review.referenceDate.format(DateTimeFormatter.ofPattern("M月d日", Locale.CHINA))
         val forecastText = when {
             forecast.low != null && forecast.high != null ->
                 "最高 ${Fmt.temp(forecast.high, tempUnit)}°、最低 ${Fmt.temp(forecast.low, tempUnit)}°"
@@ -1044,11 +1031,11 @@ internal fun recentWeekInsight(week: RecentWeatherWeek, tempUnit: String): Strin
     val coldest = week.summary.coldest
     return when {
         warmest?.high != null && coldest?.low != null -> {
-            "过去7天最高 ${Fmt.temp(warmest.high, tempUnit)}°，出现在${warmest.localDate.format(DateTimeFormatter.ofPattern("M月d日"))}；" +
-                "最低 ${Fmt.temp(coldest.low, tempUnit)}°，出现在${coldest.localDate.format(DateTimeFormatter.ofPattern("M月d日"))}。"
+            "过去7天最高 ${Fmt.temp(warmest.high, tempUnit)}°，出现在${warmest.localDate.format(DateTimeFormatter.ofPattern("M月d日", Locale.CHINA))}；" +
+                "最低 ${Fmt.temp(coldest.low, tempUnit)}°，出现在${coldest.localDate.format(DateTimeFormatter.ofPattern("M月d日", Locale.CHINA))}。"
         }
-        warmest?.high != null -> "过去7天最高 ${Fmt.temp(warmest.high, tempUnit)}°，出现在${warmest.localDate.format(DateTimeFormatter.ofPattern("M月d日"))}。"
-        coldest?.low != null -> "过去7天最低 ${Fmt.temp(coldest.low, tempUnit)}°，出现在${coldest.localDate.format(DateTimeFormatter.ofPattern("M月d日"))}。"
+        warmest?.high != null -> "过去7天最高 ${Fmt.temp(warmest.high, tempUnit)}°，出现在${warmest.localDate.format(DateTimeFormatter.ofPattern("M月d日", Locale.CHINA))}。"
+        coldest?.low != null -> "过去7天最低 ${Fmt.temp(coldest.low, tempUnit)}°，出现在${coldest.localDate.format(DateTimeFormatter.ofPattern("M月d日", Locale.CHINA))}。"
         else -> "已找到 ${week.days.size} 天可用记录，向下查看每天的天气。"
     }
 }

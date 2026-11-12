@@ -59,6 +59,9 @@ internal fun rememberWeatherGlassAtmosphere(): WeatherGlassAtmosphere? {
     val environment = LocalWeatherGlassEnvironment.current
     val target = LocalWeatherGlassTarget.current
     val preview = LocalInspectionMode.current
+    // Most glass panels never render a weather overlay. Do not allocate clock
+    // observers or copy the environment for those panels during list composition.
+    if (!target || environment == null || preview || Build.VERSION.SDK_INT < 33) return null
     val resources = LocalContext.current.resources
     val current = rememberUpdatedState(environment)
     // The capture layer subscribes to discrete output, rather than the shared high-rate clock.
@@ -73,8 +76,7 @@ internal fun rememberWeatherGlassAtmosphere(): WeatherGlassAtmosphere? {
             if (source.isFinite()) floor(source * steps) / steps else 0.0
         }
     }
-    val quantized = rememberUpdatedState(environment?.copy(phase = phase))
-    if (!target || environment == null || preview || Build.VERSION.SDK_INT < 33) return null
+    val quantized = rememberUpdatedState<WeatherGlassEnvironment?>(environment.copy(phase = phase))
     return remember(resources) { WeatherGlassAtmosphere(resources, quantized) }
 }
 

@@ -28,7 +28,7 @@ internal fun SharedPlaceConsentDialog(config: SharedPlaceConfiguration, onDismis
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         containerColor = zhishengOverlayColor(),
-        title = { Text("枳生天气位置服务", color = ZhishengText) },
+        title = { com.zhisheng.weather.ui.HighRefreshDialogContent(); Text("枳生天气位置服务", color = ZhishengText) },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 Text("开启后位置会上传到开发者服务器，用于补全天气地点；可随时关闭并删除本机已上传的历史。", color = ZhishengTextSecondary)

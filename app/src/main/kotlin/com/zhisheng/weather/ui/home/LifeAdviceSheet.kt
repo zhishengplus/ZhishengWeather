@@ -41,7 +41,9 @@ internal fun forecastLifeAdvice(english: String, day: DailyWeather?): String {
 internal fun LifeAdviceSheet(name: String, english: String, value: String, data: WeatherData, unit: String = "c", period: String? = null, onDismiss: () -> Unit) {
     val zone = Fmt.zoneId(data.utcOffsetSeconds)
     val today = Instant.ofEpochMilli(weatherPresentationTime()).atZone(zone).toLocalDate()
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = zhishengOverlayColor(), tonalElevation = 0.dp) {
+    ScrollableModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberScrollableSheetState(),
+        containerColor = zhishengOverlayColor(), tonalElevation = 0.dp) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PhosphorIcon(lifeIndexIcon(english), null, Modifier.size(24.dp), ZhishengMint)

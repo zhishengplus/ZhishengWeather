@@ -169,7 +169,7 @@ fun SettingsScreen(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showStatisticsInfo = false },
             containerColor = zhishengOverlayColor(),
-            title = { Text("设备与版本统计说明", color = ZhishengText) },
+            title = { com.zhisheng.weather.ui.HighRefreshDialogContent(); Text("设备与版本统计说明", color = ZhishengText) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("首次使用或版本变更时，向枳生天气自有服务器发送本应用专用的设备标识摘要与版本号，用于设备去重和版本分布，帮助安排更新。不包含机型、位置、天气 Key 或页面操作；摘要可关联同一设备，不属于完全匿名数据。\n\n该开关同时控制公告回执：发送公告获取、展示与已读状态，用于统计安装数；回执使用按公告区分的独立随机标识，不与设备摘要、位置或诊断关联。关闭后停止发送，已有记录保留。", color = ZhishengTextSecondary)
@@ -188,11 +188,12 @@ fun SettingsScreen(
     val ambience by SettingsRepository.ambience.collectAsState(initial = AmbienceLevel.INTENSE)
     val livingSky by SettingsRepository.livingSky.collectAsState(initial = true)
     val scanlines by SettingsRepository.scanlines.collectAsState(initial = true)
-    val softGlow by SettingsRepository.softGlow.collectAsState(initial = false)
+    // 三个开关的 DataStore 缺省均为 true；initial 与缺省一致，否则进页首帧闪“关”再跳变。
+    val softGlow by SettingsRepository.softGlow.collectAsState(initial = true)
     val softGlowLevel by SettingsRepository.softGlowLevel.collectAsState(initial = com.zhisheng.weather.data.SoftGlowLevel.FLOWING)
-    val usageStatistics by SettingsRepository.usageStatistics.collectAsState(initial = false)
+    val usageStatistics by SettingsRepository.usageStatistics.collectAsState(initial = true)
     val directory = rememberCommunityDirectory()
-    val serviceDiagnostics by SettingsRepository.serviceDiagnostics.collectAsState(initial = false)
+    val serviceDiagnostics by SettingsRepository.serviceDiagnostics.collectAsState(initial = true)
     var showServiceDiagnostics by remember { mutableStateOf(false) }
     var showServicePrivacy by remember { mutableStateOf(false) }
     if (showServiceDiagnostics) ServiceDiagnosticsDialog(serviceDiagnostics) { showServiceDiagnostics = false }
@@ -205,6 +206,7 @@ fun SettingsScreen(
     if (showSharedPlaceInfo) SharedPlaceConsentDialog(sharedPlace) { showSharedPlaceInfo = false }
     val showAqi by SettingsRepository.showAqi.collectAsState(initial = true)
     val showIndices by SettingsRepository.showIndices.collectAsState(initial = true)
+    val showOutfit by SettingsRepository.showOutfit.collectAsState(initial = true)
     val showYesterday by SettingsRepository.showYesterday.collectAsState(initial = true)
     val showPrecip by SettingsRepository.showPrecip.collectAsState(initial = true)
     val showTelemetry by SettingsRepository.showTelemetry.collectAsState(initial = true)
@@ -222,7 +224,7 @@ fun SettingsScreen(
     val themeMode by SettingsRepository.themeMode.collectAsState(initial = ThemeMode.LIGHT)
     val interfaceStyle by SettingsRepository.interfaceStyle.collectAsState(initial = InterfaceStyle.PHOSPHOR_VISTA)
     val accentTone by SettingsRepository.accentTone.collectAsState(initial = AccentTone.STANDARD)
-    val appIconStyle by SettingsRepository.appIconStyle.collectAsState(initial = AppIconStyle.CHARACTER)
+    val appIconStyle by SettingsRepository.appIconStyle.collectAsState(initial = AppIconStyle.DEFAULT)
     val homeBriefingStyle by SettingsRepository.homeBriefingStyle.collectAsState(
         initial = HomeBriefingStyle.TIPS,
     )
@@ -237,6 +239,7 @@ fun SettingsScreen(
     val mojiRt by SecretStore.mojiRuntimeFlow.collectAsState(initial = SecretStore.mojiRuntime)
 
     var permDenied by remember { mutableStateOf(false) }
+    var gpsPermissionDenied by remember { mutableStateOf(false) }
     // 0.0.9-debug 修复：原为普通 remember，Activity 配置变更重建时向导弹窗
     // 静默消失，而保留的 ProviderSetupViewModel 仍停在中间步骤——重开后旧步骤
     // 残留、验证态悬空。saveable 让弹窗随重建恢复，配合向导内的 DisposableEffect
@@ -273,6 +276,10 @@ fun SettingsScreen(
     }
 
     // 权限申请器：只在用户点「定位当前城市」时触发，App 启动/刷新绝不调用
+    val gpsPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        gpsPermissionDenied = !LocationSource.hasPrecisePermission(context)
+        if (!gpsPermissionDenied) { onClearLocateMessage(); onLocate() }
+    }
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -391,7 +398,7 @@ fun SettingsScreen(
             CardBox {
                 ToggleRow(
                     "自动跟随所在城市",
-                    if (locationEnabled) "开启·打开 App 时自动更新" else "关闭·不申请任何位置权限",
+                    if (locationEnabled) "开启·查看定位城市时自动更新，保留手动选城" else "关闭·不申请任何位置权限",
                     locationEnabled,
                 ) {
                     scope.launch {
@@ -452,6 +459,14 @@ fun SettingsScreen(
                             },
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         )
+                        if (!locating && !msg.startsWith("已") && !LocationSource.hasPrecisePermission(context)) {
+                            ActionRow(label = if (gpsPermissionDenied) "打开精确位置权限设置" else "允许 GPS 定位后重试", enabled = true, color = ZhishengMint) {
+                                if (gpsPermissionDenied) context.startActivity(android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", context.packageName, null)))
+                                else gpsPermissionLauncher.launch(LocationSource.requestedPermissions(precise = true))
+                            }
+                        }
                     }
                     if (permDenied) {
                         SettingsDivider()
@@ -628,6 +643,10 @@ fun SettingsScreen(
                     scope.launch { SettingsRepository.setShowAqi(!showAqi) }
                 }
                 SettingsDivider()
+                ToggleRow("穿搭", "按天气搭配衣物，直观看出门怎么穿", showOutfit) {
+                    scope.launch { SettingsRepository.setShowOutfit(!showOutfit) }
+                }
+                SettingsDivider()
                 ToggleRow("生活指数", "当天指数与未来三天建议，项目随数据源而定", showIndices) {
                     scope.launch { SettingsRepository.setShowIndices(!showIndices) }
                 }
@@ -637,7 +656,7 @@ fun SettingsScreen(
                 }
                 if (ReleaseFeatures.typhoon) {
                 SettingsDivider()
-                ToggleRow("台风路径", "实况路径、强度变化与多机构预报", showTyphoon) {
+                ToggleRow("台风路径", "实况路径、强度变化与中央气象台预报", showTyphoon) {
                     scope.launch { SettingsRepository.setShowTyphoon(!showTyphoon) }
                 }
                 }
@@ -918,7 +937,7 @@ fun SettingsScreen(
                         }
                     }
                 }
-                val iconHint = "深色与浅色随主题联动；天气娘和简约图标独立保持"
+                val iconHint = "默认与天气娘图标均独立于主题"
                 if (isPhosphorVista) {
                     SettingsChoiceRow("应用图标", iconOptions, appIconStyle.key, iconHint, selectIcon)
                 } else {
@@ -947,6 +966,9 @@ fun SettingsScreen(
                     onClick = { showAppUpdate = true },
                     attention = availableUpdate != null,
                 )
+                SettingsDivider()
+                InfoRow("我的徽章", "初光纪念徽章 · 查看、把玩与恢复",
+                    onClick = { context.startActivity(com.zhisheng.weather.ui.badge.BadgeActivity.intent(context)) })
             }
             InlineGroupLabel("社区与支持")
             CardBox {
@@ -971,13 +993,15 @@ fun SettingsScreen(
                     forceSingleLine = true,
                 ) { showSponsor = true }
                 SettingsDivider()
-                LinkRow(
-                    "用户交流 QQ 群",
-                    "2 群 · $CommunityQqGroup",
-                    accent = ZhishengMint,
-                    forceSingleLine = true,
-                ) { showCommunityGroup = true }
-                SettingsDivider()
+                if (CommunityQqGroup.isNotBlank()) {
+                    LinkRow(
+                        "用户交流 QQ 群",
+                        "2 群 · $CommunityQqGroup",
+                        accent = ZhishengMint,
+                        forceSingleLine = true,
+                    ) { showCommunityGroup = true }
+                    SettingsDivider()
+                }
                 LinkRow(
                     "枳生天气官网",
                     "zhishengweather.site · 官方网站",

@@ -1,80 +1,30 @@
-# ===== Gradle / 构建产物 =====
 .gradle/
-build/
-app/build/
 .kotlin/
-dist/
-dist-tmp/
-captures/
-local.properties
-*.log
-
-# ===== IDE =====
+**/build/
 .idea/
+.codex/
+.agents/
+.cursor/
 .claude/
+.local/
+.hallmark/
+AGENTS.md
 CLAUDE.md
 *.iml
-.DS_Store
-
-# ===== 签名凭据（敏感，永不入库） =====
-keystore/*.jks
-# 公开版签名证书（非敏感，随库分发，供 -PpublicBuild 构建公开 APK）
-# No signing keystore is distributed in this source export.
-
-# ===== 开发过程产物（仅本地保留） =====
-.hallmark/
-DESIGN.md
-PROJECT_STRUCTURE_*.md
-icon-preview/
-icon-backup/
-widget-backup/
-docs-backup/
-HANDOFF.md
-HANDOFF_*.md
-STATUS.md
-WORKLOG.md
-PROGRESS_*.md
-RELEASE_*.md
-STABILITY_*.md
-*测试报告*.md
-*核对结果.md
-进度总结.md
-PLAN-*.md
-RESEARCH_*.md
-
-# 真机截图与调试目录（不入库）
-.device-screenshots/
-shots/
-
-# 发布前本地核对、回退副本与生成物（保留在工作区，不进入公开仓库）
-artifacts/
-backups/
-assets/branding/character_design/
-DEBUG_AUDIT_*.md
-fetch_caiyun_docs.ps1
-scripts/update_contributors_from_xlsx.py
-scripts/node_modules/
-
-# ===== beta10.4 Git baseline: local reference material and generated output =====
-.ui-reference/
-.vendor-reference/
-app/src/test/snapshots/
-app/datastore/
-*.apk
-
-# Local dataset builder cache
-scripts/__pycache__/
-
-# Local aggregate bridge artifacts; authentication capabilities never enter Git.
-services/place-service/edgeone-counts.last.json
-services/place-service/legacy-bridge.last.private.json
-
-# Private local signing/configuration
+local.properties
 keystore/
-.env
-.env.*
+*.jks
+*.keystore
 *.pem
 *.key
 *.p12
 *.pfx
-!RELEASE_NOTES.md
+.env
+.env.*
+node_modules/
+__pycache__/
+*.pyc
+*.log
+*.apk
+*.aab
+.DS_Store

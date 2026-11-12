@@ -37,6 +37,7 @@ import com.zhisheng.weather.ui.theme.*
 internal fun VistaAlerts(alerts: List<AlertInfo>, modifier: Modifier = Modifier) {
     val visible = vistaVisibleAlerts(alerts)
     if (visible.isEmpty()) return
+    val headingCounts = visible.groupingBy(::vistaAlertHeading).eachCount()
     var expandedKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     Column(modifier.fillMaxWidth().padding(horizontal = LocalZhishengChrome.current.pagePadding, vertical = 4.dp).zhishengPanel()) {
         visible.forEachIndexed { index, alert ->
@@ -45,7 +46,10 @@ internal fun VistaAlerts(alerts: List<AlertInfo>, modifier: Modifier = Modifier)
             val identity = listOf(alert.title, alert.pubTime.orEmpty(), alert.type.orEmpty())
                 .joinToString("") { "${it.length}:$it" }
             val expanded = identity in expandedKeys
-            val heading = vistaAlertHeading(alert)
+            val shortHeading = vistaAlertHeading(alert)
+            // Province/city/county notices can have the same shortened title.
+            // Keep their issuer visible so they do not look like repeated rows.
+            val heading = if (headingCounts.getValue(shortHeading) > 1) alert.title else shortHeading
             val color = alertLevelColor(alert.severity)
             if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp),
                 color = ZhishengCardBorder.copy(alpha = 0.35f))

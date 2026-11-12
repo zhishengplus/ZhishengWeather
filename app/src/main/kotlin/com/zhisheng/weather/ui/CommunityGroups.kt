@@ -10,14 +10,15 @@ internal data class CommunityGroup(
     val qrResource: Int,
 )
 
-// Match the public website's group numbers, decoded QR links and recommendation order.
+// Contact details are supplied by each developer through local configuration.
 internal val CommunityGroups = listOf(
-    CommunityGroup(2, BuildConfig.COMMUNITY_QQ_GROUP, "https://qm.qq.com/q/Plez46Gzuy", R.drawable.qq_group_2_qr),
-    CommunityGroup(1, BuildConfig.COMMUNITY_QQ_GROUP_1, "https://qm.qq.com/q/nfpxlC4Pyo", R.drawable.qq_group_1_qr),
+    CommunityGroup(2, BuildConfig.COMMUNITY_QQ_GROUP, BuildConfig.COMMUNITY_QQ_JOIN_URL, R.drawable.qq_group_2_qr),
+    CommunityGroup(1, BuildConfig.COMMUNITY_QQ_GROUP_1, BuildConfig.COMMUNITY_QQ_JOIN_URL_1, R.drawable.qq_group_1_qr),
 )
 
 internal val CommunityQqGroup: String
     get() = CommunityGroups.first().number
 
 internal fun openCommunityGroupLink(group: CommunityGroup, launch: (String, String?) -> Boolean): Boolean =
-    launch(group.joinUrl, "com.tencent.mobileqq") || launch(group.joinUrl, null)
+    group.joinUrl.startsWith("https://") &&
+        (launch(group.joinUrl, "com.tencent.mobileqq") || launch(group.joinUrl, null))

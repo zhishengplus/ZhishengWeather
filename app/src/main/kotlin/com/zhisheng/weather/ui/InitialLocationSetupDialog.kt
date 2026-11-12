@@ -55,6 +55,7 @@ internal fun InitialLocationSetupPanel(
     onOpenLocationSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    onGpsRetry: (() -> Unit)? = null,
 ) {
     val palette = LocalZhishengPalette.current
     val busy = stage == InitialLocationSetupStage.REQUESTING_PERMISSION || stage == InitialLocationSetupStage.LOCATING
@@ -83,11 +84,12 @@ internal fun InitialLocationSetupPanel(
         InitialLocationSetupStage.LOCATING -> "正在定位…"
         InitialLocationSetupStage.PERMISSION_DENIED -> if (permissionNeedsSettings) "打开应用设置" else "再次允许定位"
         InitialLocationSetupStage.SERVICES_OFF -> "打开定位设置"
-        InitialLocationSetupStage.FAILED -> "重新定位"
+        InitialLocationSetupStage.FAILED -> if (onGpsRetry != null) "允许 GPS 定位" else "重新定位"
     }
     val action = when {
         stage == InitialLocationSetupStage.PERMISSION_DENIED && permissionNeedsSettings -> onOpenAppSettings
         stage == InitialLocationSetupStage.SERVICES_OFF -> onOpenLocationSettings
+        stage == InitialLocationSetupStage.FAILED && onGpsRetry != null -> onGpsRetry
         else -> onUseLocation
     }
     BoxWithConstraints(modifier.heightIn(max = 480.dp).zhishengDialogPanel(glass = true)) {

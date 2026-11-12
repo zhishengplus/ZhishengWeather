@@ -21,7 +21,7 @@ import kotlin.coroutines.resumeWithException
 // 定位（v0.0.2）——严格可选：
 // · 权限由 UI 主动申请；用户启用定位后，前台自动复核及当前位置刷新可请求位置
 // · 只用系统 LocationManager / Geocoder，不引入 Google Play 服务
-// · 默认只申请 COARSE；用户主动开启街道级定位时才同时请求 FINE
+// · 支持 COARSE；首次定位、街道级或用户主动 GPS 重试可同时请求 FINE
 // · 不申请后台位置；精确权限或街道反查不可用时自动降级到城市级
 object LocationSource {
 
@@ -82,7 +82,12 @@ object LocationSource {
         val preciseRequested = SettingsRepository.preciseLocationEnabled.first()
         val preciseGranted = preciseRequested && hasPrecisePermission(context)
         val loc = currentLocation(context, preferGps = preciseGranted)
-            ?: run { ServiceDiagnostics.noteLocation("timeout"); return Result.Failed("暂未取得位置，请检查系统定位及网络后重试，也可手动选择城市") }
+            ?: run {
+                ServiceDiagnostics.noteLocation("timeout")
+                return Result.Failed(if (!hasPrecisePermission(context))
+                    "网络定位暂不可用。可允许精确位置后用 GPS 重试，或手动选择城市。"
+                else "暂未取得位置。请到窗边或室外用 GPS 重试，也可手动选择城市。")
+            }
         ServiceDiagnostics.noteLocation("success")
         if (!hasPermission(context)) return Result.Failed("位置权限已关闭，已保留原地点")
         if (reminderDeliveryGate.contextVersion() != startVersion ||
@@ -172,8 +177,8 @@ object LocationSource {
     private suspend fun currentLocation(context: Context, preferGps: Boolean): LocationFix? {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
 
-        // Use single-fix requests: continuous coarse updates can be throttled for
-        // ten minutes, which is incompatible with a short startup timeout.
+        // Race single-fix requests with bounded active wake-ups below; some ROMs
+        // otherwise leave their location engine idle until another app uses it.
         val builtInPriority = if (preferGps) {
             listOf(FUSED_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
         } else {
@@ -191,24 +196,29 @@ object LocationSource {
         }
         val executor = ContextCompat.getMainExecutor(context)
         val approximatePermission = !hasPrecisePermission(context)
-        // Some OEM fused providers return null without waking their GNSS engine.
-        // A second, bounded active request is cancelled with the single-fix race.
-        val activeGps = if (!approximatePermission && LocationManager.GPS_PROVIDER in providers)
-            listOf(LocationFixRequest { onResult ->
+        // Some AOSP/OEM implementations return null for getCurrentLocation while
+        // their network/fused engine is idle. Actively wake every enabled source,
+        // independently of GNSS, and stop all listeners as soon as one succeeds.
+        val activeProviders = providers.filter {
+            it != LocationManager.GPS_PROVIDER || !approximatePermission || Build.VERSION.SDK_INT >= 31
+        }.map { provider -> LocationFixRequest { onResult ->
                 val listener = object : androidx.core.location.LocationListenerCompat {
                     override fun onLocationChanged(location: Location) {
                         val value = location.fix()
                         if (LocationFixPolicy.acceptsCallback(value, System.currentTimeMillis(),
-                                android.os.SystemClock.elapsedRealtimeNanos())) onResult(value)
+                                android.os.SystemClock.elapsedRealtimeNanos(), approximatePermission)) onResult(value)
                     }
+                    override fun onProviderDisabled(disabled: String) { if (disabled == provider) onResult(null) }
                 }
                 val request = androidx.core.location.LocationRequestCompat.Builder(1_000L)
-                    .setQuality(androidx.core.location.LocationRequestCompat.QUALITY_HIGH_ACCURACY)
-                    .setDurationMillis(25_000L).build()
-                try { LocationManagerCompat.requestLocationUpdates(lm, LocationManager.GPS_PROVIDER, request, executor, listener) }
+                    .setQuality(if (provider == LocationManager.GPS_PROVIDER && !approximatePermission)
+                        androidx.core.location.LocationRequestCompat.QUALITY_HIGH_ACCURACY
+                        else androidx.core.location.LocationRequestCompat.QUALITY_BALANCED_POWER_ACCURACY)
+                    .setDurationMillis(45_000L).build()
+                try { LocationManagerCompat.requestLocationUpdates(lm, provider, request, executor, listener) }
                 catch (error: Exception) { lm.removeUpdates(listener); throw error }
                 ({ lm.removeUpdates(listener) })
-            }) else emptyList()
+            } }
         android.util.Log.i("WeatherLocation", "request approximate=$approximatePermission providers=${providers.joinToString(",")}")
         val fix = acquireLocationFix(
             requests = providers.map { provider -> LocationFixRequest { onResult ->
@@ -222,12 +232,13 @@ object LocationSource {
                     throw error
                 }
                 ({ cancellation.cancel() })
-            } } + activeGps,
+            } } + activeProviders,
             cached = cached,
             approximate = approximatePermission,
             preferStreet = preferGps,
             nowMillis = System::currentTimeMillis,
             elapsedNanos = android.os.SystemClock::elapsedRealtimeNanos,
+            timeoutMillis = 45_000L,
         )
         android.util.Log.i("WeatherLocation", if (fix == null) "no usable fix" else
             "fix provider=${fix.provider} ageMs=${LocationFixPolicy.ageMillis(fix, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtimeNanos())} approximate=$approximatePermission")

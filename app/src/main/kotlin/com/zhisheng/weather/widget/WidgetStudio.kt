@@ -672,7 +672,11 @@ internal fun NativeWidgetPreview(style: WidgetStyle, kind: WidgetKind, config: W
     var results by remember { mutableStateOf(emptyList<City>()) }
     var searching by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
-    var recent by remember { mutableStateOf(WidgetStore.recentCities(context)) }
+    // 组合期同步读会与 Application 启动迁移竞跑（首载+两次 commit 落主线程），首读放 IO。
+    var recent by remember { mutableStateOf(emptyList<City>()) }
+    LaunchedEffect(Unit) {
+        recent = withContext(Dispatchers.IO) { WidgetStore.recentCities(context) }
+    }
     LaunchedEffect(query) {
         error = false
         if (query.trim().isEmpty()) { results = emptyList(); searching = false; return@LaunchedEffect }

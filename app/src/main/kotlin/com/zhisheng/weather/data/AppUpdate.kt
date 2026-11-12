@@ -392,7 +392,10 @@ object AppUpdate {
     internal fun isPublicApkName(name: String): Boolean {
         val lower = name.lowercase()
         if (!lower.endsWith(".apk")) return false
-        if (listOf("private", "parallel", "preview", "full", "owner").any { it in lower }) return false
+        if (listOf("private", "parallel", "full", "owner", "experience", "showcase").any { it in lower }) return false
+        // Community previews use the ordinary public package. Keep rejecting the
+        // older isolated preview APKs, which cannot upgrade a public installation.
+        if ("preview" in lower && !Regex("-v\\d+(?:\\.\\d+){2}preview(?:\\d+)?(?:-\\d+)?-public\\.apk$").containsMatchIn(lower)) return false
         return lower.contains("zhisheng-weather") ||
             lower.contains("zhishengweather") ||
             lower.contains("-public")
@@ -417,7 +420,7 @@ object AppUpdate {
     }
 
     private fun prereleaseSuffix(value: String): String? =
-        value.removePrefix("v").substringAfter('-', missingDelimiterValue = "")
+        value.removePrefix("v").dropWhile { it.isDigit() || it == '.' }.removePrefix("-")
             .trim().takeIf { it.isNotEmpty() }
 
     // 预发布串按 数字/非数字 分词逐位比：数字按数值（beta10 > beta6），数字优于字母，

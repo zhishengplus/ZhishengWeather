@@ -8,8 +8,8 @@ import com.zhisheng.weather.model.WeatherData
 
 internal data class CityPageWeather(val data: WeatherData?, val staleAgeMillis: Long?)
 
-internal fun citySwitchNeedsRefresh(savedAt: Long?, now: Long): Boolean =
-    savedAt == null || now < savedAt || now - savedAt >= 60_000L
+internal fun citySwitchNeedsRefresh(savedAt: Long?, now: Long, initialSelection: Boolean = false): Boolean =
+    initialSelection || savedAt == null || now < savedAt || now - savedAt >= 60_000L
 
 /** Both snapshot and preview must pass coordinate/provider checks before they count as content. */
 internal fun cityPageWeather(city: City, selectedKey: String?, live: WeatherData?, liveStaleAge: Long?,

@@ -6,6 +6,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CityPageWeatherTest {
+    @Test fun openingFetchesEvenWhenDiskCacheWasSavedLessThanASecondAgo() {
+        assertTrue(citySwitchNeedsRefresh(119_999, 120_000, initialSelection = true))
+        assertTrue(citySwitchNeedsRefresh(120_000, 120_000, initialSelection = true))
+    }
+    @Test fun laterCitySwitchStillReusesRecentCache() {
+        assertFalse(citySwitchNeedsRefresh(119_999, 120_000, initialSelection = false))
+        assertTrue(citySwitchNeedsRefresh(null, 120_000, initialSelection = true))
+    }
     @Test fun switchRefreshHonorsTheOneMinuteCacheAndClockRollback() {
         assertTrue(citySwitchNeedsRefresh(null, 120_000))
         assertFalse(citySwitchNeedsRefresh(60_001, 120_000))

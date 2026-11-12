@@ -9,14 +9,15 @@ class HomeModuleTest {
     fun unifiedAtlasPreservesOtherCustomModulePositions() {
         val saved = "aqi,hourly,daily,spacetime,precip,telemetry,indices,yesterday,typhoon"
         val order = HomeModule.orderFrom(saved)
-        assertEquals(saved, order.joinToString(",") { it.key })
+        assertEquals(saved, order.filterNot { it == HomeModule.OUTFIT }.joinToString(",") { it.key })
+        assertEquals(HomeModule.OUTFIT, order[order.indexOf(HomeModule.DAILY) + 1])
         assertEquals(1, order.count { it == HomeModule.SPACETIME })
     }
 
     @Test
     fun skyCoastAndToolsMergeAtFirstSavedPosition() {
         val order = HomeModule.orderFrom("aqi,sky,hourly,coast,spacetime,daily")
-        assertEquals(listOf(HomeModule.AQI, HomeModule.SPACETIME, HomeModule.HOURLY, HomeModule.DAILY), order.take(4))
+        assertEquals(listOf(HomeModule.AQI, HomeModule.SPACETIME, HomeModule.HOURLY, HomeModule.DAILY), order.filterNot { it == HomeModule.OUTFIT }.take(4))
         assertEquals(1, order.count { it == HomeModule.SPACETIME })
     }
 
@@ -45,7 +46,7 @@ class HomeModuleTest {
 
         val custom = HomeModule.orderFrom("daily,hourly,precip,spacetime")
         assertEquals(HomeModule.DAILY, custom.first())
-        assertEquals(HomeModule.HOURLY, custom[1])
+        assertEquals(HomeModule.HOURLY, custom.filterNot { it == HomeModule.OUTFIT }[1])
     }
 
     @Test
@@ -62,5 +63,15 @@ class HomeModuleTest {
         val order = HomeModule.orderFrom("aqi,history,radar,hourly")
         assertEquals(1, order.count { it == HomeModule.SPACETIME })
         assertEquals(HomeModule.SPACETIME, order[1])
+    }
+    @Test fun outfitAppearsAfterDailyWithoutReorderingAnySavedModule() {
+        val saved="v2:aqi,indices,daily,typhoon,hourly,precip,spacetime,telemetry,yesterday"
+        val order=HomeModule.orderFrom(saved)
+        assertEquals(saved.removePrefix("v2:"),order.filterNot {it==HomeModule.OUTFIT}.joinToString(",") {it.key})
+        assertEquals(HomeModule.OUTFIT,order[order.indexOf(HomeModule.DAILY)+1])
+    }
+    @Test fun explicitOutfitPositionIsPreservedOnEverySubsequentRead() {
+        val saved="v2:outfit,aqi,indices,daily,typhoon,hourly,precip,spacetime,telemetry,yesterday"
+        assertEquals(saved.removePrefix("v2:"),HomeModule.orderFrom(saved).joinToString(",") {it.key})
     }
 }

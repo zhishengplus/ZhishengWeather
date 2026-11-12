@@ -1,6 +1,5 @@
 package com.zhisheng.weather.ui
 
-import android.animation.ValueAnimator
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -47,15 +46,21 @@ import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import com.zhisheng.weather.ui.theme.isPhosphorVista
 import kotlinx.coroutines.launch
 
-internal const val WhatsNewVersion = "0.1.5-beta10.8"
-internal val WhatsNewVersionRange = "10.5 → 10.8"
+internal const val WhatsNewVersion = "0.1.6"
+internal val WhatsNewVersionRange = "0.1.5-beta10.8 → 0.1.6"
+// Public release notes are shown once even if an internal preview already used version 0.1.6.
+// Keep this edition stable across candidate rebuilds; it is not an installation/build counter.
+internal const val WhatsNewEdition = "0.1.6-formal-1"
 internal const val WhatsNewPreferenceFile = "zhisheng_whats_new"
 internal const val WhatsNewSeenKey = "last_seen_version"
+
+internal fun releaseNotesPending(lastSeenEdition: String?): Boolean = lastSeenEdition != WhatsNewEdition
 
 @Composable
 fun WhatsNewDialog(onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         WhatsNewDialogContent(onClose)
     }
 }
@@ -69,7 +74,7 @@ internal fun WhatsNewDialogContent(
 ) {
     val p = LocalZhishengPalette.current
     val shape = RoundedCornerShape(if (isPhosphorVista) 30.dp else 18.dp)
-    val motion = remember { runCatching { ValueAnimator.areAnimatorsEnabled() }.getOrDefault(true) }
+    val motion = rememberReleaseNotesMotionEnabled()
     var appeared by remember { mutableStateOf(!animateEntrance || !motion) }
     LaunchedEffect(Unit) { appeared = true }
     val entrance by animateFloatAsState(if (appeared) 1f else 0f,
@@ -98,7 +103,7 @@ internal fun WhatsNewDialogContent(
                     Text("枳生天气", color = p.textSecondary, fontSize = 13.sp, fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 }
-                Text("BETA ${WhatsNewVersion.substringAfter("beta")}", color = p.cyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                Text(WhatsNewVersion, color = p.cyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(p.cyan.copy(alpha = .07f))
                         .padding(horizontal = 9.dp, vertical = 6.dp))
                 if (largeText) Spacer(Modifier.weight(1f))
@@ -144,6 +149,10 @@ internal fun WhatsNewDialogContent(
                         }
                     }
                     }
+                }
+                if (category == ReleaseNotesCategory.ALL) {
+                    ReleaseNotesShowcase(Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                        animate = animateEntrance)
                 }
                 val contentCategories = ReleaseNotesCategory.entries.filter { it != ReleaseNotesCategory.ALL && releaseNotesFor(it).isNotEmpty() }
                 val tabs = if (contentCategories.size > 1) ReleaseNotesCategory.entries.filter { it == ReleaseNotesCategory.ALL || releaseNotesFor(it).isNotEmpty() } else listOf(ReleaseNotesCategory.ALL)
@@ -199,13 +208,14 @@ internal fun WhatsNewDialogContent(
 private fun ReleaseSection(section: ReleaseNotesSection) {
     val p = LocalZhishengPalette.current
     val icon = when (section.id) {
-        "sources" -> R.drawable.ph_cloud
-        "refresh" -> R.drawable.ph_clock
-        "widgets" -> R.drawable.ph_cloud
-        "cities" -> R.drawable.ph_map_pin
-        "weather" -> R.drawable.ph_cloud_rain
-        "atmosphere" -> R.drawable.ph_sun
-        "daily" -> R.drawable.ph_clock
+        "weather-outfit" -> R.drawable.ph_t_shirt
+        "first-light" -> R.drawable.ph_sparkle
+        "typhoon-tracking" -> R.drawable.ph_wind
+        "history-and-layout" -> R.drawable.ph_clock
+        "weather-sources" -> R.drawable.ph_cloud_rain
+        "cities-and-location" -> R.drawable.ph_map_pin
+        "everyday-polish" -> R.drawable.ph_sun
+        "widget-stability" -> R.drawable.ph_cloud
         else -> R.drawable.ph_arrow_right
     }
     Column {

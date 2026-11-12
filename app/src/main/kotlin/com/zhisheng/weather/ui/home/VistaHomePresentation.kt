@@ -13,7 +13,12 @@ internal fun vistaLocationHeading(cityName: String): Pair<String, String> =
 // Only a complete, recognized release title may be shortened. Never strip a
 // cancellation, an unknown advisory or trailing instructions from the source.
 internal fun vistaVisibleAlerts(alerts: List<AlertInfo>): List<AlertInfo> =
-    alerts.filter { it.title.isNotBlank() }
+    alerts.filter { it.title.isNotBlank() }.distinctBy {
+        // Preserve different issuing areas, warning types and publication times.
+        // Only exact duplicate notices should disappear from the collection.
+        listOf(it.title.trim(), it.detail.orEmpty().trim(), it.type.orEmpty().trim(),
+            it.severity.name, it.pubTime.orEmpty().trim())
+    }
 
 internal fun vistaAlertHeading(alert: AlertInfo): String =
     Regex("^.*?发布([^\\n。]+(?:蓝|黄|橙|红)色预警(?:信号)?)$")

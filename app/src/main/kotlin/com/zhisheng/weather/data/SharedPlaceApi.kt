@@ -1,14 +1,9 @@
 package com.zhisheng.weather.data
 
 import android.content.Context
-import com.zhisheng.weather.R
+import com.zhisheng.weather.BuildConfig
 import com.zhisheng.weather.model.City
-import java.security.KeyStore
-import java.security.cert.CertificateFactory
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManagerFactory
-import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,22 +11,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-/** Only this client trusts the location-service CA. Default IP/hostname verification is retained. */
+/** Community builds use a developer-configured HTTPS service and system certificate verification. */
 internal object SharedPlaceApi {
-    const val endpoint = "https://115.159.43.52"
+    val endpoint: String = BuildConfig.SHARED_SERVICE_ENDPOINT.trimEnd('/')
     @Volatile private var instance: OkHttpClient? = null
     private val json = Json { ignoreUnknownKeys = true }
 
     internal fun client(context: Context): OkHttpClient = instance ?: synchronized(this) {
         instance ?: run {
-            val certificate = context.resources.openRawResource(R.raw.place_service_ca).use {
-                CertificateFactory.getInstance("X.509").generateCertificate(it)
-            }
-            val anchors = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null); setCertificateEntry("place-service", certificate) }
-            val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(anchors) }
-                .trustManagers.filterIsInstance<X509TrustManager>().single()
-            val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
-            OkHttpClient.Builder().sslSocketFactory(tls.socketFactory, trust)
+            OkHttpClient.Builder()
                 .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
                 .connectTimeout(2, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).callTimeout(3500, TimeUnit.MILLISECONDS)
                 .build().also { instance = it }

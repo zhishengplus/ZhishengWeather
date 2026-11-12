@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.repeatOnLifecycle
 import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import com.zhisheng.weather.ui.theme.ZhishengCardBorder
 import com.zhisheng.weather.ui.theme.ZhishengOrange
@@ -163,12 +164,16 @@ internal fun FeatureBootLoader(
             visibleLines = count
         }
     }
-    LaunchedEffect(animate) {
+    // 光标闪烁是无期限循环：退后台必须停走，否则每 140ms 唤醒一次主线程。
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(animate, lifecycle) {
         if (!animate) return@LaunchedEffect
-        while (true) {
-            delay(140)
-            probe = (probe + 1) % 13
-            if (probe % 3 == 0) cursorVisible = !cursorVisible
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) {
+                delay(140)
+                probe = (probe + 1) % 13
+                if (probe % 3 == 0) cursorVisible = !cursorVisible
+            }
         }
     }
 

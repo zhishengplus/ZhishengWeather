@@ -57,6 +57,8 @@ internal fun InitialLocationSetupHost(
     var operation by remember { mutableStateOf<Job?>(null) }
     var permissionPreparation by remember { mutableStateOf<Job?>(null) }
     var sharedChoiceInProgress by rememberSaveable { mutableStateOf(false) }
+    var gpsRetryOnly by rememberSaveable { mutableStateOf(false) }
+    var gpsNeedsSettings by rememberSaveable { mutableStateOf(false) }
     fun locate(resuming: Boolean = false) {
         if (operation?.isActive == true) return
         if (!LocationSource.hasPermission(context)) {
@@ -113,7 +115,7 @@ internal fun InitialLocationSetupHost(
         stage = InitialLocationSetupStage.LOCATING
         permissionPreparation = scope.launch {
             try {
-                if (firstRun && LocationSource.hasPrecisePermission(context))
+                if (firstRun && !gpsRetryOnly && LocationSource.hasPrecisePermission(context))
                     com.zhisheng.weather.data.SettingsRepository.setPreciseLocationEnabled(true)
                 currentCoroutineContext().ensureActive()
                 locate()
@@ -122,7 +124,11 @@ internal fun InitialLocationSetupHost(
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-        if (granted[LocationSource.PERMISSION] == true || LocationSource.hasPermission(context)) {
+        if (gpsRetryOnly && !LocationSource.hasPrecisePermission(context)) {
+            gpsNeedsSettings = !ActivityCompat.shouldShowRequestPermissionRationale(activity, LocationSource.PRECISE_PERMISSION)
+            failureMessage = "系统未允许精确位置，GPS 暂不可用。可在应用的位置权限中允许，或手动选择城市。"
+            stage = InitialLocationSetupStage.FAILED
+        } else if (granted[LocationSource.PERMISSION] == true || LocationSource.hasPermission(context)) {
             permissionNeedsSettings = false
             locateAfterPermission()
         } else {
@@ -169,6 +175,7 @@ internal fun InitialLocationSetupHost(
     }
 
     fun requestLocation() {
+        gpsRetryOnly = false
         if (LocationSource.hasPermission(context) && (!firstRun || LocationSource.hasPrecisePermission(context))) {
             locateAfterPermission()
         }
@@ -225,6 +232,17 @@ internal fun InitialLocationSetupHost(
                     onOpenLocationSettings = { openSettings(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) },
                     onDismiss = { leave(onDismiss) },
                     modifier = Modifier.fillMaxWidth(),
+                    onGpsRetry = if (stage == InitialLocationSetupStage.FAILED && !LocationSource.hasPrecisePermission(context)) {
+                        {
+                            gpsRetryOnly = true
+                            if (gpsNeedsSettings) openSettings(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)))
+                            else {
+                                stage = InitialLocationSetupStage.REQUESTING_PERMISSION
+                                permission.launch(LocationSource.requestedPermissions(precise = true))
+                            }
+                        }
+                    } else null,
                 )
             }
         }

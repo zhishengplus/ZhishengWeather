@@ -310,7 +310,7 @@ data class WeatherData(
     val configurationFingerprint: String? = null,
     val moduleEvidence: Map<String, WeatherModuleEvidence> = emptyMap(),
     val sourceDiagnostics: Map<String, String> = emptyMap(),
-    // 参与本次融合的源（仅枳生天气源输出时非空；OM 多模型成员归并为 "OPEN-METEO"）。
+    // Providers contributing retained data to the branded source. Field name kept for cache compatibility.
     // 默认空保证旧缓存 JSON 无损反序列化。
     val fusionSources: List<String> = emptyList(),
     val locationMatch: WeatherLocationMatch? = null,

@@ -4,6 +4,11 @@ import com.zhisheng.weather.data.CachedWeather
 import com.zhisheng.weather.data.SourcePref
 import com.zhisheng.weather.model.CurrentWeather
 import com.zhisheng.weather.model.WeatherData
+import com.zhisheng.weather.model.City
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -45,6 +50,67 @@ class CityWeatherCachePolicyTest {
     @Test fun loadingOlderDiskDataCannotReplaceNewerMemory() {
         val fresh = cached(age = 1_000L)
         assertEquals(fresh, chooseCityWeatherCache(fresh, cached(age = 60_000L), SourcePref.XIAOMI, now))
+    }
+
+    @Test fun aLateSaveTimeCannotMakeAnOlderFetchReplaceNewerLiveWeather() = runBlocking {
+        val city = City("test", "", 39.9, 116.4, "test")
+        val fresh = cached(1_000).let { it.copy(data = it.data.copy(fetchedAt = now - 1_000)) }
+        val old = cached(60_000).let { it.copy(data = it.data.copy(fetchedAt = now - 60_000), savedAtMillis = now) }
+        val cache = mutableMapOf(city.locationKey to fresh)
+        assertEquals(fresh, mergeCityWeatherCache(cache, city, old, SourcePref.XIAOMI, { now }) { true })
+        assertEquals(fresh, cache[city.locationKey])
+    }
+
+    @Test fun aDelayedDiskValidationCannotOverwriteLiveWeatherThatArrivesFirst() = runBlocking {
+        withTimeout(5_000) {
+            val city = City("test", "", 39.9, 116.4, "test")
+            val cache = mutableMapOf<String, CachedWeather>()
+            val readingDisk = CompletableDeferred<Unit>()
+            val releaseDisk = CompletableDeferred<Unit>()
+            val old = cached(60_000)
+            val fresh = cached(1_000)
+            val diskJob = launch {
+                mergeCityWeatherCache(cache, city, old, SourcePref.XIAOMI, { now }) {
+                    if (it === old.data) { readingDisk.complete(Unit); releaseDisk.await() }
+                    true
+                }
+            }
+            readingDisk.await()
+            mergeCityWeatherCache(cache, city, fresh, SourcePref.XIAOMI, { now }) { true }
+            releaseDisk.complete(Unit)
+            diskJob.join()
+            assertEquals(fresh, cache[city.locationKey])
+        }
+    }
+
+    @Test fun rejectingOldMemoryAfterASuspensionCannotEraseNewLiveWeather() = runBlocking {
+        withTimeout(5_000) {
+            val city = City("test", "", 39.9, 116.4, "test")
+            val old = cached(60_000)
+            val fresh = cached(1_000)
+            val cache = mutableMapOf(city.locationKey to old)
+            val checkingOld = CompletableDeferred<Unit>()
+            val releaseOld = CompletableDeferred<Unit>()
+            val pruneJob = launch {
+                mergeCityWeatherCache(cache, city, null, SourcePref.XIAOMI, { now }) {
+                    if (it === old.data) { checkingOld.complete(Unit); releaseOld.await(); false } else true
+                }
+            }
+            checkingOld.await()
+            mergeCityWeatherCache(cache, city, fresh, SourcePref.XIAOMI, { now }) { true }
+            releaseOld.complete(Unit)
+            pruneJob.join()
+            assertEquals(fresh, cache[city.locationKey])
+        }
+    }
+
+    @Test fun incompatibleCandidatesDoNotReplaceValidLiveWeather() = runBlocking {
+        val city = City("test", "", 39.9, 116.4, "test")
+        val fresh = cached(1_000)
+        val wrongSource = cached(source = "OPEN-METEO")
+        val cache = mutableMapOf(city.locationKey to fresh)
+        mergeCityWeatherCache(cache, city, wrongSource, SourcePref.XIAOMI, { now }) { it.dataSource == "XIAOMI" }
+        assertEquals(fresh, cache[city.locationKey])
     }
 
     @Test fun freshSaveTimeCannotHideExpiredProviderObservation() {

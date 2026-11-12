@@ -9,6 +9,7 @@ import kotlinx.serialization.json.contentOrNull
 import com.zhisheng.weather.model.AlertInfo
 import com.zhisheng.weather.model.CurrentWeather
 import com.zhisheng.weather.model.DailyWeather
+import com.zhisheng.weather.model.HourlyWeather
 import com.zhisheng.weather.model.LifeIndexExtra
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.WeatherData
@@ -73,6 +74,7 @@ object TencentWeatherApi {
         val daily: List<TencentDaily>,
         val indices: List<TencentIndex>,
         val alarms: List<TencentAlarm>,
+        val hourly: List<HourlyWeather> = emptyList(),
     )
 
     /**
@@ -83,14 +85,14 @@ object TencentWeatherApi {
         try {
             val area = "province=${encode(province)}&city=${encode(city)}"
             val root = weatherAwaitJson(Request.Builder()
-                .url("$BASE?source=pc&weather_type=observe%7Cforecast_24h%7Cindex%7Calarm&$area")
+                .url("$BASE?source=pc&weather_type=observe%7Cforecast_24h%7Cforecast_1h%7Cindex%7Calarm&$area")
                 .header("User-Agent", UA).build())?.takeIf { it.primString("status") == "200" }
             val observe = parseObserve(root)
             val daily = parseDaily(root)
             val indices = parseIndex(root)
             val alarms = parseAlarm(root)
             if (observe == null && daily.isEmpty()) return@coroutineScope null
-            TencentBundle(observe, daily, indices, alarms)
+            TencentBundle(observe, daily, indices, alarms, parseHourly(root))
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Exception) {
@@ -134,6 +136,16 @@ object TencentWeatherApi {
                 )
             }
     }
+
+    internal fun parseHourly(root: JsonObject?): List<HourlyWeather> =
+        root?.dataObj()?.obj("forecast_1h")?.values.orEmpty().mapNotNull { value ->
+            val row = value as? JsonObject ?: return@mapNotNull null
+            val time = tencentTime(row.primString("update_time")) ?: return@mapNotNull null
+            val temperature = row.primDouble("degree")?.takeIf { it in -90.0..60.0 } ?: return@mapNotNull null
+            HourlyWeather(time, temperature = temperature,
+                condition = WeatherCondition.fromCode(normalizeTencentCode(row.primString("weather_code"))),
+                windDirectionDeg = NmcSource.windDirToDegree(row.primString("wind_direction")))
+        }.distinctBy { it.timeMillis }.sortedBy { it.timeMillis }
 
     internal fun parseIndex(root: JsonObject?): List<TencentIndex> {
         val container = root?.dataObj()?.obj("index") ?: return emptyList()
@@ -221,7 +233,7 @@ internal fun tencentToWeatherData(bundle: TencentWeatherApi.TencentBundle, nowMi
             humidity = o.humidity?.takeIf { it in 0.0..100.0 },
             pressure = o.pressure?.takeIf { it in 250.0..1100.0 },
             precipMm = o.precipMm?.takeIf { it >= 0.0 },
-            windSpeed = NmcSource.windPowerToSpeed(o.windPowerLevel),
+            windSpeed = null, // The site supplies a wind-force band, not an exact speed.
             windDirectionDeg = NmcSource.windDirToDegree(o.windDirectionName),
         )
     }
@@ -241,13 +253,22 @@ internal fun tencentToWeatherData(bundle: TencentWeatherApi.TencentBundle, nowMi
     return WeatherData(
         current = current,
         daily = daily,
+        hourly = bundle.hourly,
         alerts = alerts,
         extraIndices = bundle.indices.map { LifeIndexExtra(name = it.name, en = "tc:${it.en}", category = it.category.orEmpty()) },
         carWashOk = hintToOk(bundle.indices.firstOrNull { it.en == "carwash" }?.category),
         sportsOk = hintToOk(bundle.indices.firstOrNull { it.en == "sports" }?.category),
         yesterday = yesterday,
         utcOffsetSeconds = 28800,
+        updateTime = tencentTime(bundle.observe?.updateTime),
     )
+}
+
+internal fun tencentTime(raw: String?): Long? = raw?.let { value ->
+    listOf("yyyyMMddHHmmss", "yyyyMMddHHmm").firstNotNullOfOrNull { pattern ->
+        runCatching { java.time.LocalDateTime.parse(value, java.time.format.DateTimeFormatter.ofPattern(pattern))
+            .toInstant(java.time.ZoneOffset.ofHours(8)).toEpochMilli() }.getOrNull()
+    }
 }
 
 /** 腾讯编码与国标码同空间（"00"=晴、"01"=多云）。 */

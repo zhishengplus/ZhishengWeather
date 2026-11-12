@@ -50,41 +50,43 @@ internal fun CityWeatherList(ui: HomeUiState, modifier: Modifier, onAdd: () -> U
     }
     val clock = if (LocalVistaSoftGlow.current) LocalVistaGlowPhase.current
         else rememberVistaGlowPhase(active && ui.prefs.ambience != AmbienceLevel.OFF)
-    LaunchedEffect(active, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) }, ui.weather, ui.sourcePref, modules, priority) {
-        if (!active) return@LaunchedEffect
-        val now = System.currentTimeMillis()
-        suspend fun usable(city: City, entry: CachedWeather?, at: Long): CachedWeather? =
-            usableCityWeatherCache(entry, ui.sourcePref, at,
-                configurationCompatible = entry?.let { WeatherRepository.cacheCompatible(it.data, ui.sourcePref) } ?: false, city = city)
-        val savedKeys = ui.cities.map { it.locationKey }.toSet()
-        weather.keys.toList().forEach { key ->
-            val city = ui.cities.firstOrNull { it.locationKey == key }
-            if (key !in savedKeys || city == null || usable(city, weather[key], now) == null) weather.remove(key)
+    suspend fun merge(city: City, candidate: CachedWeather?) =
+        mergeCityWeatherCache(weather, city, candidate, ui.sourcePref) { data ->
+            WeatherRepository.cacheCompatible(data, ui.sourcePref)
         }
+    LaunchedEffect(active, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) }, ui.sourcePref, modules, priority) {
+        if (!active) return@LaunchedEffect
+        val savedKeys = ui.cities.map { it.locationKey }.toSet()
+        weather.keys.toList().filter { it !in savedKeys }.forEach { weather.remove(it) }
+        ui.cities.forEach { city -> merge(city, null) }
         ui.cities.forEach { city ->
             val disk = try {
                 withContext(Dispatchers.IO) { WeatherCache.load(context, city) }
             } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
-            val cached = listOfNotNull(usable(city, weather[city.locationKey], now), usable(city, disk, now)).maxByOrNull { it.savedAtMillis }
-            if (cached == null) weather.remove(city.locationKey) else weather[city.locationKey] = cached
+            merge(city, disk)
         }
-        ui.selectedCity?.let { city -> ui.weather?.let { data ->
-            val live = CachedWeather(data, data.fetchedAt ?: data.updateTime ?: now)
-            usable(city, live, now)?.let { weather[city.locationKey] = it }
-        } }
+        // 当前城 live 只由下方独立效应写入，不能在磁盘读取后回写本效应启动时的旧 ui。
         ui.cities.forEach { city ->
-            val existing = usable(city, weather[city.locationKey], now)
-            if (existing != null && now - existing.savedAtMillis < CITY_WEATHER_REFRESH_MS) return@forEach
+            val existing = merge(city, null)
+            if (existing != null && System.currentTimeMillis() - existing.savedAtMillis < CITY_WEATHER_REFRESH_MS) return@forEach
             try {
                 val result = withTimeoutOrNull(15_000) { WeatherRepository.fetchWeather(city, ui.sourcePref) }
-                val fetchedAt = System.currentTimeMillis()
-                val entry = result?.let { usable(city, CachedWeather(it, fetchedAt), fetchedAt) }
-                if (entry != null) {
-                    weather[city.locationKey] = entry
+                val entry = result?.let { CachedWeather(it, System.currentTimeMillis()) }
+                val accepted = merge(city, entry)
+                if (entry != null && accepted === entry) {
                     withContext(Dispatchers.IO) { WeatherCache.save(context, city.locationKey, entry.data) }
                 }
             } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { /* neutral card */ }
         }
+    }
+    // live 更新不重启邻城请求；所有磁盘、网络和 live 结果统一择新发布。
+    LaunchedEffect(active, ui.weather, ui.selectedCity?.let { com.zhisheng.weather.widget.weatherCityIdentity(it) },
+        ui.sourcePref, modules, priority) {
+        if (!active) return@LaunchedEffect
+        val data = ui.weather ?: return@LaunchedEffect
+        val city = ui.selectedCity ?: return@LaunchedEffect
+        val live = CachedWeather(data, data.fetchedAt ?: data.updateTime ?: System.currentTimeMillis())
+        merge(city, live)
     }
     CompositionLocalProvider(LocalVistaGlowPhase provides clock, LocalVistaSoftGlow provides true) {
         LazyColumn(modifier, state = list, verticalArrangement = Arrangement.spacedBy(12.dp),

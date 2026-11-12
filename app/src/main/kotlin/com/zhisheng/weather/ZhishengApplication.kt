@@ -15,6 +15,7 @@ import com.zhisheng.weather.widget.WidgetSkyBitmap
 class ZhishengApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        com.zhisheng.weather.ui.UiRefreshRate.install(this)
         // Compose controls app palettes. Keep platform resources on the system
         // configuration, including widgets and notification RemoteViews.
         if (android.os.Build.VERSION.SDK_INT >= 31) {
@@ -36,6 +37,7 @@ class ZhishengApplication : Application() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        com.zhisheng.weather.ui.badge.BadgeRenderSessions.trimMemory(level)
         // Android 17 enforces per-process memory limits. These are rebuildable
         // images only; keep city weather snapshots so paging stays populated.
         if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN || level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {

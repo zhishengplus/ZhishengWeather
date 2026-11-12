@@ -32,6 +32,7 @@ internal fun WeatherDialogWindow(overlay: Boolean = false) {
         val window = provider?.window
         if (window != null) {
             fun configureWindow() {
+            com.zhisheng.weather.ui.UiRefreshRate.applyWindow(window)
             WindowCompat.setDecorFitsSystemWindows(window, false)
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)

@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "status": "design-handoff-not-integrated",
+  "units": "arbitrary-scene-units",
+  "coordinateSystem": {
+    "up": "+Y",
+    "front": "+Z",
+    "right": "+X",
+    "source": "Blender exporter maps (x,y,z) to glTF (x,z,-y); do not rotate cabinet again"
+  },
+  "cabinet": {
+    "url": "assets/clear_sky_cabinet_only.glb",
+    "position": [
+      0,
+      0,
+      0
+    ],
+    "rotationRadians": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1,
+    "boundsApprox": {
+      "width": 5.05,
+      "height": 6.2,
+      "depth": 2.55
+    }
+  },
+  "camera": {
+    "type": "orthographic",
+    "position": [
+      0,
+      7.6,
+      13
+    ],
+    "target": [
+      0,
+      3.1,
+      -0.1
+    ],
+    "verticalSpan": 8.0,
+    "near": 0.1,
+    "far": 100,
+    "referenceRenderAspect": 0.6964285714285714,
+    "notes": "For another aspect, horizontalSpan=verticalSpan*aspect. Constrain composition container rather than showing whole phone aspect in 3D. Keep width>=5.55 scene units."
+  },
+  "slots": [
+    {
+      "id": "left",
+      "displayOrder": 0,
+      "exampleOnlyBadge": "early",
+      "badgeBottomCenter": [
+        -1.5,
+        1.42,
+        0.45
+      ],
+      "targetVisualWidth": 1.4,
+      "pedestalTop": 1.26
+    },
+    {
+      "id": "center",
+      "displayOrder": 1,
+      "exampleOnlyBadge": "sponsor",
+      "badgeBottomCenter": [
+        0,
+        2.57,
+        -0.28
+      ],
+      "targetVisualWidth": 1.72,
+      "pedestalTop": 2.41
+    },
+    {
+      "id": "right",
+      "displayOrder": 2,
+      "exampleOnlyBadge": "contribution",
+      "badgeBottomCenter": [
+        1.5,
+        1.42,
+        0.45
+      ],
+      "targetVisualWidth": 1.5,
+      "pedestalTop": 1.26
+    }
+  ],
+  "badgePlacement": {
+    "forward": "+Z",
+    "up": "+Y",
+    "anchor": "world-space bottom center of normalized, upright, front-facing model bounding box",
+    "steps": [
+      "Use existing badge adapter to orient each source model; do not assume raw source GLB up/front",
+      "Compute full world bounds after updating matrixWorld",
+      "Scale uniformly by targetVisualWidth / bounds width",
+      "Translate bottom-center of bounds to badgeBottomCenter",
+      "Do not apply parent and child transforms twice"
+    ],
+    "defaultAssignments": "Example only: use actual grants and persisted stable IDs, never assume all three owned."
+  },
+  "offlineStudioReference": {
+    "notRuntimeLights": true,
+    "areaLights": [
+      {
+        "position": [
+          -3,
+          8,
+          4
+        ],
+        "target": [
+          0,
+          2.5,
+          0
+        ],
+        "powerBlenderWatts": 850,
+        "size": 5,
+        "color": [
+          0.88,
+          0.95,
+          1
+        ]
+      },
+      {
+        "position": [
+          4,
+          5,
+          1
+        ],
+        "target": [
+          0,
+          2.5,
+          0
+        ],
+        "powerBlenderWatts": 550,
+        "size": 4,
+        "color": [
+          1,
+          0.86,
+          0.68
+        ]
+      },
+      {
+        "position": [
+          0,
+          7,
+          -2
+        ],
+        "target": [
+          0,
+          2.5,
+          0
+        ],
+        "powerBlenderWatts": 700,
+        "size": 3,
+        "color": [
+          0.8,
+          0.91,
+          1
+        ]
+      }
+    ]
+  },
+  "runtimeRecommendation": {
+    "environment": "Reuse existing clearsky environment/HDR if suitable; evaluate exposure on device",
+    "lights": "Use hemisphere/environment + one soft key. Offline area-light watts are not Three.js intensity values. Avoid three shadow-casting lights.",
+    "shadows": "Not baked into supplied GLB. Use baked contact AO/shadow texture as optional production step or one low-resolution contact shadow.",
+    "glass": "Two side fins use transmission; switch to non-transmissive tinted transparent approximation on low tier."
+  },
+  "performanceBudget": {
+    "cabinetTrianglesActual": 12720,
+    "cabinetBytesActual": 603060,
+    "cabinetMeshesActual": 15,
+    "materialsActual": 4,
+    "dprCap": 1.5,
+    "highDetailBadgeCount": 1,
+    "galleryPageSizeSuggested": 12,
+    "onDemandRendering": true,
+    "runtimeBenchmarked": false
+  }
+}

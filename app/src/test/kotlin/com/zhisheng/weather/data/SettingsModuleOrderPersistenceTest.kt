@@ -34,8 +34,11 @@ class SettingsModuleOrderPersistenceTest {
             val modules = order.split(',').map { key -> HomeModule.entries.first { it.key == key } }
             SettingsRepository.setModuleOrder(modules)
             val persisted = store.saved[stringPreferencesKey("home_module_order")]
-            assertEquals("v2:$order", persisted)
-            assertEquals(modules, HomeModule.orderFrom(persisted))
+            val expected = modules.toMutableList().apply {
+                if (HomeModule.OUTFIT !in this) add(indexOf(HomeModule.DAILY).let { if (it < 0) size else it + 1 }, HomeModule.OUTFIT)
+            }
+            assertEquals("v2:" + expected.joinToString(",") { it.key }, persisted)
+            assertEquals(expected, HomeModule.orderFrom(persisted))
         } finally {
             field.set(SettingsRepository, previous)
         }

@@ -7,6 +7,6 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 internal object PrivacyDefaults {
     val statistics = booleanPreferencesKey("device_version_statistics")
     val diagnostics = booleanPreferencesKey("optional_service_diagnostics_v1")
-    fun statisticsEnabled(prefs: Preferences) = prefs[statistics] ?: true
-    fun diagnosticsEnabled(prefs: Preferences) = prefs[diagnostics] ?: true
+    fun statisticsEnabled(prefs: Preferences) = !com.zhisheng.weather.BuildConfig.BADGE_EXPERIENCE && (prefs[statistics] ?: true)
+    fun diagnosticsEnabled(prefs: Preferences) = !com.zhisheng.weather.BuildConfig.BADGE_EXPERIENCE && (prefs[diagnostics] ?: true)
 }

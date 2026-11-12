@@ -9,6 +9,12 @@ import org.junit.Before
 import org.junit.Test
 
 class MoonCalcTest {
+    @Test fun waxingAndWaningKeepOppositeIlluminatedSidesIndependentlyOfTheme() {
+        for (date in listOf("2024-08-08", "2024-08-16"))
+            assertTrue(MoonCalc.isWaxing(Instant.parse("${date}T12:00:00Z").toEpochMilli()))
+        for (date in listOf("2024-08-22", "2024-08-29"))
+            assertTrue(!MoonCalc.isWaxing(Instant.parse("${date}T12:00:00Z").toEpochMilli()))
+    }
 
     private lateinit var originalTimeZone: TimeZone
 

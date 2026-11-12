@@ -17,7 +17,7 @@ class ClearSkyLayoutRegressionTest {
             com.zhisheng.weather.data.HomeModule.defaultOrder.filterNot { it == com.zhisheng.weather.data.HomeModule.DAILY }
         for (order in listOf(first, first.drop(1) + first.first())) {
             val saved = com.zhisheng.weather.data.HomeModule.orderFrom(order.joinToString(",") { it.key })
-            val blocks = vistaHomeBlocks(VistaHomeBlock.entries.toSet(), saved).drop(3)
+            val blocks = vistaHomeBlocks(VistaHomeBlock.entries.toSet(), saved).drop(3).filterNot { it == VistaHomeBlock.OUTFIT }
             if (order.first() == com.zhisheng.weather.data.HomeModule.DAILY) assertEquals(VistaHomeBlock.DAILY, blocks.first())
             else assertEquals(VistaHomeBlock.DAILY, blocks.last())
         }
@@ -39,6 +39,7 @@ class ClearSkyLayoutRegressionTest {
                 VistaHomeBlock.ALERTS,
                 VistaHomeBlock.HOURLY,
                 VistaHomeBlock.DAILY,
+                VistaHomeBlock.OUTFIT,
                 VistaHomeBlock.PRECIPITATION,
                 VistaHomeBlock.TELEMETRY,
                 VistaHomeBlock.AQI,

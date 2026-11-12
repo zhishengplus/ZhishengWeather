@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'self';connect-src 'self' blob:;img-src 'self' data: blob:;style-src 'unsafe-inline';font-src 'self';object-src 'none';base-uri 'none';frame-src 'none'">
+<style>
+@font-face{font-family:"JetBrains Mono";src:url("font.ttf") format("truetype");font-weight:500 600;font-display:swap}
+:root{--ink:#193c33;--muted:#52756a;--font-scale:1;color-scheme:light}
+html,body{position:fixed;inset:0;margin:0;width:100%;height:100%;overflow:hidden;background:transparent;font-family:system-ui,sans-serif}
+body[data-theme=classic],body[data-theme=night]{--ink:#e3efe9;--muted:#8aa79a;color-scheme:dark}
+canvas{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none;pointer-events:none;outline:none;z-index:1}
+[hidden]{display:none!important}#collection{position:absolute;inset:var(--stage-top,0px) var(--stage-right,0px) var(--stage-bottom,0px) var(--stage-left,0px);overflow:auto;overscroll-behavior:contain;scrollbar-width:none;z-index:2}
+#grid{display:grid;grid-template-columns:repeat(var(--columns,1),minmax(0,1fr));gap:36px 24px;padding:24px 24px 36px;max-width:var(--gallery-max-width,600px);margin:auto;box-sizing:border-box}
+.tile{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:24px;align-items:center;position:relative;border:0;background:transparent;color:var(--ink);padding:0;min-width:0;cursor:pointer;font:inherit;touch-action:pan-y;-webkit-tap-highlight-color:transparent}
+.medal{display:block;width:100%;aspect-ratio:1;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}.medal.dragging{cursor:grabbing}.caption,.name,.serial{display:block;text-align:center;overflow-wrap:anywhere}
+.name{font-size:calc(20px * var(--font-scale));line-height:1.5;font-weight:600}.serial{font:calc(11px * var(--font-scale))/2 "JetBrains Mono",monospace;color:var(--muted);letter-spacing:1px;margin-top:3px}
+.hint{display:block;color:var(--muted);font-size:calc(11px * var(--font-scale));line-height:1.8;letter-spacing:.3px;margin-top:12px;opacity:.9}
+.tile:not(.pending) .hint::before{content:'↔';margin-right:5px;font-size:15px}
+body[data-count="1"] .name{font-size:calc(24px * var(--font-scale));letter-spacing:2px}
+body[data-count="1"] .serial{font-size:calc(12px * var(--font-scale));letter-spacing:2px;margin-top:3px}
+.medal{position:relative}
+.tile.pending .medal::before,.tile.pending .medal::after{content:'';position:absolute;left:12%;top:12%;width:76%;height:76%;box-sizing:border-box;border-radius:50%;pointer-events:none}
+.tile.pending .medal::before{border:1px solid currentColor;opacity:.10;background:radial-gradient(ellipse at 30% 25%,rgba(163,200,184,.10),transparent 70%)}
+.tile.pending .medal::after{border:1.5px solid transparent;border-top-color:var(--muted);border-right-color:var(--muted);opacity:.42;animation:prepare-medal 2.4s cubic-bezier(.3,.1,.3,1) infinite}
+.tile.pending.failed .medal::after{animation:none;opacity:.18;transform:rotate(-35deg)}
+body[data-active="false"] .tile.pending .medal::after{animation-play-state:paused}
+body[data-reduced="true"] .tile.pending .medal::after{animation:none}
+@keyframes prepare-medal{to{transform:rotate(360deg)}}
+.tile:focus-visible{outline:2px solid #6cba98;outline-offset:5px;border-radius:12px}
+#detail{position:absolute;left:calc(var(--stage-left,0px) + 20px);right:calc(var(--stage-right,0px) + 20px);text-align:center;pointer-events:none;z-index:3;color:var(--ink)}
+#detail-title{font-size:calc(18px * var(--font-scale));font-weight:600;line-height:1.5}#detail-serial{font:calc(11px * var(--font-scale))/2 "JetBrains Mono",monospace;color:var(--muted);letter-spacing:1.5px}
+.owner,#detail-owner{display:block;color:var(--muted);font-size:calc(11px * var(--font-scale));line-height:1.7;overflow-wrap:anywhere;letter-spacing:.3px}#detail-owner{margin-top:2px}
+#design-note{max-width:310px;margin:18px auto 0;color:var(--muted)}
+.note-heading{font-size:calc(10px * var(--font-scale));line-height:1.7;letter-spacing:2px;opacity:.76}
+#design-note-text{margin:6px 0 0;font-size:calc(13px * var(--font-scale));line-height:1.85;text-wrap:pretty}
+#story-toggle{position:absolute;right:calc(var(--stage-right,0px) + 8px);top:calc(var(--stage-top,0px) + 8px);z-index:4;pointer-events:auto;appearance:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:44px;height:44px;border:1px solid rgba(116,160,140,.22);border-radius:12px;background:rgba(116,160,140,.055);color:var(--muted);font:10px/1.2 system-ui,sans-serif;padding:4px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+body[data-theme=classic] #story-toggle{border-radius:2px}
+#story-toggle:focus-visible{outline:2px solid #6cba98;outline-offset:3px}
+#status{position:fixed;inset:0;display:grid;place-items:center;font-size:14px;color:var(--muted);text-align:center;padding:24px;pointer-events:none;z-index:3}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.tile.pending .medal::after{animation:none}}
+body[data-compact="true"] #grid{padding-top:12px}
+</style></head>
+<body><canvas id="view" tabindex="0" aria-label="三维徽章，拖动翻转，双指缩放；更多菜单提供回正和翻面"></canvas><div id="collection"><div id="grid" role="group" aria-label="已拥有的徽章"></div></div><div id="detail" hidden><div id="detail-title"></div><div id="detail-serial"></div><div id="detail-owner" hidden></div><div id="design-note" hidden><div class="note-heading">设计手记</div><p id="design-note-text"></p></div></div><button id="story-toggle" type="button" hidden aria-label="阅读这枚徽章的设计手记" title="设计手记"><svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v15M12 5C9 3 6 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1Z"/></svg><span aria-hidden="true">手记</span></button><div id="status" role="status" hidden>正在准备徽章</div><script src="bootstrap.js"></script><script type="module" src="gallery-viewer.mjs"></script></body></html>

@@ -1,0 +1,14 @@
+# Copy to local.properties and configure your own Android SDK in Android Studio.
+# Optional service credentials; leave blank when not using the corresponding service.
+qw.host=
+qw.project_id=
+qw.kid=
+qw.private_key=
+tianditu.token=
+# Optional compatible shared service, using a publicly trusted HTTPS certificate.
+service.endpoint=https://example.invalid
+# Optional community contacts.
+community.qq_group=
+community.qq_group_1=
+community.qq_join_url=
+community.qq_join_url_1=

@@ -56,4 +56,37 @@ class CityPagerSelectionTest {
             assertTrue(position >= range.first && position <= range.last)
         }
     }
+    @Test fun selectionBeforeCityListIsNotLost() {
+        val state = CityPagerSelection()
+        state.observe("a", listOf("a"))
+        assertFalse(state.observe("new", listOf("a")))
+        assertTrue(state.observe("new", listOf("a", "new")))
+        assertFalse(state.observe("new", listOf("a", "new")))
+    }
+    @Test fun unavailablePageCanAlignAgainWhenItsRecordReturns() {
+        val state = CityPagerSelection()
+        state.observe("b", keys)
+        assertFalse(state.observe("b", listOf("a")))
+        assertTrue(state.observe("b", keys))
+    }
+    @Test fun programmaticAlignmentCannotCommitAnInterruptedOldPage() {
+        val state = CityPagerSelection()
+        state.observe("a", keys)
+        state.onMotion(true, false, "a", "a")
+        assertTrue(state.observe("d", keys))
+        assertNull(state.onMotion(true, true, "a", "d"))
+        assertNull(state.onMotion(false, true, "a", "d"))
+        assertNull(state.onMotion(false, false, "a", "d"))
+        assertNull(state.onMotion(false, false, "d", "d"))
+    }
+    @Test fun userCanSwipeAfterAlignmentIncludingInterruptingItsAnimation() {
+        val state = CityPagerSelection()
+        state.observe("d", keys)
+        state.onMotion(true, true, "a", "d")
+        state.onMotion(true, false, "b", "d")
+        assertEquals("b", state.onMotion(false, false, "b", "d"))
+        assertNull(state.onMotion(false, false, "b", "d"))
+        assertFalse(state.observe("b", keys))
+    }
+
 }

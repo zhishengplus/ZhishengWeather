@@ -22,20 +22,20 @@ private val Context.settingsStore: DataStore<Preferences> by preferencesDataStor
 // 需凭据的数据源只在开发者模式下可锁定；手动锁定时保持纯源，便于判断真实表现。
 enum class SourcePref(val key: String, val cn: String, val en: String, val desc: String) {
     AUTO("auto", "自动优选", "AUTO", "按功能优选·失败降级"),
-    // 自有品牌融合源：并发抓取小米/中央气象台/腾讯/天气网/Open-Meteo 多模型（有 key 时加和风/彩云），
-    // 端侧加权共识 + 实况纠偏 + 完整性补齐。它是唯一允许补缺的手动源——"融合+完整"就是它的identity。
-    ZHISHENG("zhisheng", "枳生天气源", "ZHISHENG", "多源共识·免配置"),
+    // 自有品牌源：并发读取公共源，保留一个来源的当前天气，仅补齐缺失模块和时段字段。
+    // 不将多模型平均值或来源间的一致程度作为实测准确率，也不自动调用个人订阅。
+    ZHISHENG("zhisheng", "枳生天气源", "ZHISHENG", "实况优先·按来源补缺"),
     NMC("nmc", "中央气象台", "NMC", "免配置·官方"),
     QWEATHER("qweather", "和风天气", "QWEATHER", "开发者·需凭据"),
     CAIYUN("caiyun", "彩云天气", "CAIYUN", "开发者·需 Token"),
     AMAP("amap", "高德天气", "AMAP", "用户 Key·区县实况与日预报"),
     BAIDU("baidu", "百度天气", "BAIDU", "用户 AK·区县天气·按授权返回"),
     TENCENT("tencent", "腾讯天气", "TENCENT", "免配置·城市天气·网站通道"),
-    WEATHERCN("weathercn", "中国天气网", "WEATHERCN", "免配置·城市实况与当日预报"),
+    WEATHERCN("weathercn", "中国天气网", "WEATHERCN", "免配置·城市天气·七天预报"),
     SENIVERSE("seniverse", "心知天气", "SENIVERSE", "个人 Key·免费版城市天气"),
     MOJI("moji", "墨迹天气", "MOJI", "个人 AppCode·按订阅返回"),
     XIAOMI("xiaomi", "小米公开接口", "XIAOMI", "免配置·国内"),
-    OPEN_METEO("openmeteo", "Open-Meteo", "OPEN-METEO", "免配置·全球");
+    OPEN_METEO("openmeteo", "Open-Meteo", "OPEN-METEO", "免配置·全球模型数据");
 
     companion object {
         // 旧版本持久化的 "amap"/"baidu" 因枚举已无对应项，经 from() 自动回落 AUTO
@@ -234,6 +234,16 @@ enum class HomeSurfaceStyle(val key: String, val cn: String) {
     }
 }
 
+/** 首页日月卡的两种画法：波形（原版）/ 同心弧（2026-10-23 新版）。卡片右上角按钮切换。 */
+enum class LuminaryStyle(val key: String) {
+    WAVE("wave"),
+    ARC("arc");
+
+    companion object {
+        fun from(v: String?): LuminaryStyle = entries.firstOrNull { it.key == v } ?: WAVE
+    }
+}
+
 // 强调色亮度只调整数据绿与线框蓝，橙/红等语义色保持稳定。
 enum class AccentTone(val key: String, val cn: String) {
     STANDARD("standard", "标准"),
@@ -245,16 +255,14 @@ enum class AccentTone(val key: String, val cn: String) {
 }
 
 enum class AppIconStyle(val key: String, val cn: String) {
-    CHARACTER("character", "天气娘"),
-    DARK("dark", "深色"),
-    LIGHT("light", "浅色"),
-    MINIMAL("minimal", "简约");
+    DEFAULT("default", "默认"),
+    CHARACTER("character", "天气娘");
 
     companion object {
         fun from(v: String?): AppIconStyle = when (v) {
-            // beta5 及更早版本使用 classic；无感迁移为同一枚深色图标。
-            "classic" -> DARK
-            else -> entries.firstOrNull { it.key == v } ?: CHARACTER
+            // 旧图标已下线，保留原组件兼容已固定的桌面入口。
+            "classic", "dark", "light", "minimal" -> DEFAULT
+            else -> entries.firstOrNull { it.key == v } ?: DEFAULT
         }
     }
 }
@@ -296,11 +304,12 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
     PRECIP("precip", "短时降水", "NOWCAST"),
     SPACETIME("spacetime", "气象视界", "WEATHER ATLAS"),
     DAILY("daily", "五天天气", "5-DAY FORECAST"),
+    OUTFIT("outfit", "穿搭", "OUTFIT"),
     TELEMETRY("telemetry", "遥测数据", "TELEMETRY"),
     AQI("aqi", "空气质量", "AIR QUALITY"),
     INDICES("indices", "生活指数", "INDICES"),
     YESTERDAY("yesterday", "昨日复盘", "RETRO"),
-    TYPHOON("typhoon", "台风关注", "TYPHOON");
+    TYPHOON("typhoon", "台风追踪", "TYPHOON");
 
     companion object {
         // 默认阅读顺序先回答用户最常看的三件事：接下来几小时、是否马上下雨、
@@ -310,6 +319,7 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
             HOURLY,
             PRECIP,
             DAILY,
+            OUTFIT,
             TELEMETRY,
             AQI,
             SPACETIME,
@@ -341,13 +351,20 @@ enum class HomeModule(val key: String, val cn: String, val en: String) {
                 // 旧版本曾把完整默认序列写入偏好；这不代表用户主动排序。
                 // 仅当它仍与旧默认完全一致时迁移到新默认，任何真实改动过的顺序都原样保留。
                 val previousDefault = listOf(HOURLY, PRECIP, DAILY, SPACETIME, TELEMETRY, AQI, INDICES, YESTERDAY, TYPHOON)
-                if (selected == entries.toList() || selected == previousDefault) return defaultOrder
+                val previousDeclaration = entries.filterNot { it == OUTFIT }
+                val previousReadingOrder = listOf(HOURLY, PRECIP, DAILY, TELEMETRY, AQI, SPACETIME, INDICES, YESTERDAY, TYPHOON)
+                if (selected == entries.toList() || selected == previousDeclaration || selected == previousDefault || selected == previousReadingOrder) return defaultOrder
                 // 旧版自定义顺序缺少专题时，以空气质量为锚；其余模块的相对顺序不变。
                 if (SPACETIME !in selected) {
                     val anchor = selected.indexOf(AQI).takeIf { it >= 0 } ?: selected.indexOf(TELEMETRY)
                     val insertion = if (anchor >= 0) anchor + 1 else selected.size
                     selected.add(insertion, SPACETIME)
                 }
+            }
+            // Add the new outfit module beside the daily forecast; preserve every old module's relative order.
+            if (OUTFIT !in selected) {
+                val daily = selected.indexOf(DAILY)
+                selected.add(if (daily >= 0) daily + 1 else selected.size, OUTFIT)
             }
             selected += defaultOrder.filterNot(selected::contains)
             return selected
@@ -403,6 +420,7 @@ object SettingsRepository {
     private val KEY_PRESSURE_UNIT = stringPreferencesKey("pressure_unit")
     private val KEY_SHOW_AQI = booleanPreferencesKey("show_aqi")
     private val KEY_SHOW_INDICES = booleanPreferencesKey("show_indices")
+    private val KEY_SHOW_OUTFIT = booleanPreferencesKey("show_outfit_v1")
     private val KEY_SHOW_YESTERDAY = booleanPreferencesKey("show_yesterday")
     private val KEY_SHOW_PRECIP = booleanPreferencesKey("show_precip")
     private val KEY_SHOW_TELEMETRY = booleanPreferencesKey("show_telemetry")
@@ -430,6 +448,7 @@ object SettingsRepository {
     private val KEY_LANDSCAPE_STANDBY_STYLE = stringPreferencesKey("landscape_standby_style")
     private val KEY_TELEMETRY_METRICS = stringPreferencesKey("telemetry_metrics")
     private val KEY_LIFE_INDEX_METRICS = stringPreferencesKey("life_index_metrics")
+    private val KEY_LUMINARY_STYLE = stringPreferencesKey("luminary_style")
 
     fun init(context: Context) {
         store = context.applicationContext.settingsStore
@@ -455,7 +474,7 @@ object SettingsRepository {
     val softGlowLevel: Flow<SoftGlowLevel> by lazy { store.data.map { SoftGlowLevel.from(it[KEY_SOFT_GLOW_LEVEL]) }.distinctUntilChanged() }
     // 定位总开关：关闭时 App 完全不碰位置权限（默认关，兑现「不主动获取权限」）
     val locationEnabled: Flow<Boolean> by lazy { store.data.map { it[KEY_LOCATION_ENABLED] ?: false } }
-    // 街道级定位为单独的可选能力；关闭时仍只使用粗略位置。
+    // 街道级反查为单独的可选能力；GPS 城市定位不会自动开启街道显示。
     val preciseLocationEnabled: Flow<Boolean> by lazy {
         store.data.map { it[KEY_PRECISE_LOCATION] ?: false }.distinctUntilChanged()
     }
@@ -468,6 +487,7 @@ object SettingsRepository {
     val pressureUnit: Flow<String> by lazy { store.data.map { it[KEY_PRESSURE_UNIT] ?: "hpa" } }
     val showAqi: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_AQI] ?: true } }
     val showIndices: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_INDICES] ?: true } }
+    val showOutfit: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_OUTFIT] ?: true } }
     val showYesterday: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_YESTERDAY] ?: true } }
     val showPrecip: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_PRECIP] ?: true } }
     val showTelemetry: Flow<Boolean> by lazy { store.data.map { it[KEY_SHOW_TELEMETRY] ?: true } }
@@ -496,6 +516,9 @@ object SettingsRepository {
     }
     val lifeIndexMetrics: Flow<Set<LifeIndexMetric>> by lazy {
         store.data.map { LifeIndexMetric.selectionFrom(it[KEY_LIFE_INDEX_METRICS]) }.distinctUntilChanged()
+    }
+    val luminaryStyle: Flow<LuminaryStyle> by lazy {
+        store.data.map { LuminaryStyle.from(it[KEY_LUMINARY_STYLE]) }.distinctUntilChanged()
     }
     // 主题模式（v0.0.5）：默认深色
     val themeMode: Flow<ThemeMode> by lazy {
@@ -582,6 +605,7 @@ object SettingsRepository {
     suspend fun setPressureUnit(v: String) = store.edit { it[KEY_PRESSURE_UNIT] = v }
     suspend fun setShowAqi(v: Boolean) = store.edit { it[KEY_SHOW_AQI] = v }
     suspend fun setShowIndices(v: Boolean) = store.edit { it[KEY_SHOW_INDICES] = v }
+    suspend fun setShowOutfit(v: Boolean) = store.edit { it[KEY_SHOW_OUTFIT] = v }
     suspend fun setShowYesterday(v: Boolean) = store.edit { it[KEY_SHOW_YESTERDAY] = v }
     suspend fun setShowPrecip(v: Boolean) = store.edit { it[KEY_SHOW_PRECIP] = v }
     suspend fun setShowTelemetry(v: Boolean) = store.edit { it[KEY_SHOW_TELEMETRY] = v }
@@ -598,6 +622,7 @@ object SettingsRepository {
     suspend fun setTelemetryMetrics(selection: Set<TelemetryMetric>) = store.edit {
         it[KEY_TELEMETRY_METRICS] = TelemetryMetric.selectionKey(selection)
     }
+    suspend fun setLuminaryStyle(style: LuminaryStyle) = store.edit { it[KEY_LUMINARY_STYLE] = style.key }
     suspend fun setLifeIndexMetrics(selection: Set<LifeIndexMetric>) = store.edit {
         it[KEY_LIFE_INDEX_METRICS] = LifeIndexMetric.selectionKey(selection)
     }

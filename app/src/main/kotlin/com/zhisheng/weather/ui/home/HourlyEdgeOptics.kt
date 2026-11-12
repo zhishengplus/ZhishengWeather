@@ -9,6 +9,12 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 @RequiresApi(33)
 internal class HourlyEdgeOptics {
     private val shader = RuntimeShader(EDGE_OPTICS)
+    private val effects = HourlyEdgeEffectCache { key ->
+        shader.setFloatUniform("resolution", key.width, key.height)
+        shader.setFloatUniform("edgeWidth", key.edgeWidth)
+        shader.setFloatUniform("exits", if (key.hasLeft) 1f else 0f, if (key.hasRight) 1f else 0f)
+        RenderEffect.createRuntimeShaderEffect(shader, "content").asComposeRenderEffect()
+    }
 
     fun effect(
         width: Float,
@@ -16,11 +22,30 @@ internal class HourlyEdgeOptics {
         edgeWidth: Float,
         hasLeft: Boolean,
         hasRight: Boolean,
-    ): androidx.compose.ui.graphics.RenderEffect {
-        shader.setFloatUniform("resolution", width.coerceAtLeast(1f), height.coerceAtLeast(1f))
-        shader.setFloatUniform("edgeWidth", edgeWidth.coerceAtLeast(1f))
-        shader.setFloatUniform("exits", if (hasLeft) 1f else 0f, if (hasRight) 1f else 0f)
-        return RenderEffect.createRuntimeShaderEffect(shader, "content").asComposeRenderEffect()
+    ): androidx.compose.ui.graphics.RenderEffect = effects.get(HourlyEdgeEffectKey(
+        width.coerceAtLeast(1f), height.coerceAtLeast(1f), edgeWidth.coerceAtLeast(1f), hasLeft, hasRight,
+    ))
+}
+
+/** Bounded to the current viewport; size and density changes never reuse stale uniforms. */
+internal data class HourlyEdgeEffectKey(
+    val width: Float,
+    val height: Float,
+    val edgeWidth: Float,
+    val hasLeft: Boolean,
+    val hasRight: Boolean,
+)
+
+internal class HourlyEdgeEffectCache<T : Any>(private val create: (HourlyEdgeEffectKey) -> T) {
+    private var currentKey: HourlyEdgeEffectKey? = null
+    private var currentEffect: T? = null
+
+    fun get(key: HourlyEdgeEffectKey): T {
+        currentEffect?.let { if (currentKey == key) return it }
+        return create(key).also {
+            currentKey = key
+            currentEffect = it
+        }
     }
 }
 

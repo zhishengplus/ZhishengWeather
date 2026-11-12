@@ -15,6 +15,15 @@ import org.junit.Test
 import java.time.Instant
 
 class VistaHomePresentationTest {
+    @Test fun laterWindWarningSurvivesRepeatedFogNoticesAndMoreThanThreeIssuers() {
+        val fog = AlertInfo("沙河市气象台发布大雾黄色预警", type = "大雾", pubTime = "2026-10-31T16:44+08:00")
+        val province = fog.copy(title = "河北省气象台发布大雾黄色预警")
+        val city = fog.copy(title = "邢台市气象台发布大雾黄色预警")
+        val wind = AlertInfo("沙河市气象台发布大风蓝色预警", type = "大风")
+        val thunder = AlertInfo("沙河市气象台发布雷电黄色预警", type = "雷电")
+        assertEquals(listOf(fog, province, city, wind, thunder),
+            vistaVisibleAlerts(listOf(fog, fog, province, city, wind, thunder)))
+    }
     @Test fun longLocationSeparatesCityFromStreetWithoutLosingAddress() {
         assertEquals("金川区" to "金川路街道·金川路", vistaLocationHeading("金川区·金川路街道·金川路"))
         assertEquals("金昌市" to "", vistaLocationHeading("金昌市"))

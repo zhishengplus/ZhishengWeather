@@ -210,7 +210,7 @@ private fun sourceChoiceHint(source: SourcePref, module: WeatherModule?): String
     if (module == WeatherModule.FORECAST && !WeatherSourceCapabilities.map.getValue(source).hourly) return "仅提供每日预报"
     return when (source) {
         SourcePref.AUTO -> "自动选择可用来源，失败时换用备用数据"
-        SourcePref.ZHISHENG -> "综合多个来源，补齐天气信息"
+        SourcePref.ZHISHENG -> "保留主源实况，按真实时段补充缺失数据"
         SourcePref.XIAOMI -> "国内天气 · 实况、预报与短时降水"
         SourcePref.NMC -> "官方实况、预报与预警"
         SourcePref.OPEN_METEO -> "全球覆盖 · 模型预报"
@@ -218,8 +218,8 @@ private fun sourceChoiceHint(source: SourcePref, module: WeatherModule?): String
         SourcePref.CAIYUN -> "使用你已接入的彩云服务"
         SourcePref.AMAP -> "区县实况和每日预报"
         SourcePref.BAIDU -> "数据范围取决于服务授权"
-        SourcePref.TENCENT -> "城市日预报 · 网站通道"
-        SourcePref.WEATHERCN -> "城市实况与当日预报 · 网站通道"
+        SourcePref.TENCENT -> "逐小时与日预报 · 网站通道"
+        SourcePref.WEATHERCN -> "七天与逐三小时预报 · 网站通道"
         SourcePref.SENIVERSE -> "个人免费版城市天气 · 3天日预报"
         SourcePref.MOJI -> "个人订阅 · 实况与日预报"
     }

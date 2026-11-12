@@ -61,81 +61,8 @@ import com.zhisheng.weather.ui.theme.ZhishengTextSecondary
 import com.zhisheng.weather.ui.theme.ZhishengTextTertiary
 import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 
-// 赞助排名（按赞助金额降序、同额按首次赞助时间升序）。
-private val sponsorRanking = listOf(
-    "披着牛皮的糖",
-    "摆渡人",
-    "Spark",
-    "😀",
-    "皮",
-    "饕餮梼杌獬豸",
-    "&",
-    "追光者",
-    "👁_👁",
-    "Past-Present-Future",
-    "雾岛笙南",
-    "苍茫",
-    "CK",
-    "豆腐佬喔",
-    "洛儿阿茶",
-    "半夏",
-    "大寶",
-    "支持枳生的老板",
-    "李勇",
-    "bluebone",
-    "深海罗非鱼",
-    "轻轻飘过的落叶",
-    "一月光含千世界",
-    "JamoC",
-    "野鸭子Evan",
-    "白日梦想家",
-    "YOGA",
-    "Adrian",
-    "Mrmuscle",
-    "ayida999",
-    "关",
-    "AiFuL",
-    "施工单位狗人力",
-    "意难平",
-    "钟福燕",
-    "∮",
-    "ScottZzz",
-    "*年",
-    "凉粉",
-    "浩然一切随缘",
-    "十二",
-    "2026",
-    "偏我来时不逢春",
-    "西伯利亚狼",
-    "江湖暂过住",
-    "亦世凡华",
-    "llb",
-    "屿光",
-    "阿良",
-    "中未⬆️",
-    "十三”画",
-    "润物无声",
-    "PickGear",
-    "以后升级纯靠举报加经验太好玩了",
-    "酷我哥哥",
-    "李玄子",
-    "果丽橙",
-    "烟花易冷",
-    "Ali",
-    "如此而已",
-    "小豪科1212",
-)
-
-// 固定席位：Sh4d0W 永远第 6 位，名次不随金额与时间变化。
-private const val pinnedSponsor = "Sh4d0W"
-private const val pinnedRank = 6
-
-// 赞助榜单（顺序即名次）：仅第 1 名保留奖牌。
-internal val SponsorBoard: List<String> = buildList {
-    addAll(sponsorRanking.take(pinnedRank - 1))
-    add(pinnedSponsor)
-    addAll(sponsorRanking.drop(pinnedRank - 1))
-}
+// The source distribution does not bundle a personal sponsor roster.
+internal val SponsorBoard: List<String> = emptyList()
 
 @Composable
 fun SponsorDialog(onClose: () -> Unit) {
@@ -143,6 +70,7 @@ fun SponsorDialog(onClose: () -> Unit) {
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -192,7 +120,7 @@ fun SponsorDialog(onClose: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        "枳生天气一直免费，也没有广告，以后也会是。如果你用着觉得舒服，想请作者喝杯奶茶，扫下面的码就好——不方便也没关系，能用得开心就是最大的支持。",
+                        "源码版未附收款码。支持与交流请访问项目公开仓库。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = ZhishengTextSecondary,
                     )
@@ -264,6 +192,7 @@ fun SponsorBoardDialog(onClose: () -> Unit) {
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         Box(
             modifier = Modifier
                 .fillMaxSize()

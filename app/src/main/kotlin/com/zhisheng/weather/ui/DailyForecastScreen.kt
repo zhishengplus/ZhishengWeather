@@ -128,9 +128,10 @@ fun DailyForecastScreen(
     hourly: List<com.zhisheng.weather.model.HourlyWeather> = emptyList(),
 ) {
     val nowMillis = weatherPresentationTime()
+    val (vertical, setVertical) = rememberForecastVertical()
     val visibleDays = days.take(15)
     if (isPhosphorVista) {
-        VistaForecastScreen(city, visibleDays, yesterday, tempUnit, windUnit, utcOffsetSeconds, onBack, hourly = hourly)
+        VistaForecastScreen(city, visibleDays, yesterday, tempUnit, windUnit, utcOffsetSeconds, onBack, hourly = hourly, vertical = vertical, onVertical = setVertical)
         return
     }
     val trackDays = listOfNotNull(yesterdayForecastDay(yesterday, utcOffsetSeconds, nowMillis)) + visibleDays
@@ -166,6 +167,7 @@ fun DailyForecastScreen(
         }
 
         ForecastMeta(city, visibleDays.size, tempUnit)
+        ForecastLayoutToggle(vertical, setVertical)
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
             contentPadding = PaddingValues(bottom = 24.dp),
@@ -175,7 +177,8 @@ fun DailyForecastScreen(
                 TerminalPanel(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 ) {
-                    ForecastWorkbench(
+                    if (vertical) ForecastDayList(trackDays, selectedDay?.dateMillis, tempUnit, windUnit, utcOffsetSeconds) { selectedMillis = it }
+                    else ForecastWorkbench(
                         trackDays, tempUnit, windUnit, utcOffsetSeconds,
                         selectedMillis = selectedDay?.dateMillis,
                         onSelect = { selectedMillis = it },

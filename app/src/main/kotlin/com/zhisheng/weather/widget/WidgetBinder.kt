@@ -117,7 +117,7 @@ object WidgetBinder {
             else -> minOf(if (instance.kind == WidgetKind.BAND) 20 else 16,
                 ((stripHeight - stripMinimumContent) / 2).coerceAtLeast(2))
         }
-        val pulseInset = if (instance.kind == WidgetKind.PULSE && compact) ((height - 40) / 2).coerceIn(2, 8) else 0
+        val pulseInset = if (instance.kind == WidgetKind.PULSE && compact) ((height - 40) / 2).coerceIn(0, 8) else 0
         val classicCurrentWeek = instance.style == WidgetStyle.CLASSIC && instance.kind == WidgetKind.WEEK && !config.showForecast
         // The forecast-free card reserves city/footer widths and gives all
         // remaining vertical room to the complete current temperature.

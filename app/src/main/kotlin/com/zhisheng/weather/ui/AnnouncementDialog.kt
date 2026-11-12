@@ -23,6 +23,7 @@ import com.zhisheng.weather.BuildConfig
 import com.zhisheng.weather.data.AppAnnouncement
 import com.zhisheng.weather.data.Announcements
 import com.zhisheng.weather.data.eligibleAnnouncements
+import com.zhisheng.weather.data.announcementQueueAllowsReward
 import com.zhisheng.weather.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -35,7 +36,7 @@ import java.util.Locale
 internal fun AnnouncementDialog(announcement: AppAnnouncement, onClose: (confirmed: Boolean) -> Unit) {
     val maxHeight = (LocalConfiguration.current.screenHeightDp * .55f).coerceAtLeast(100f).dp
     AlertDialog(onDismissRequest = { onClose(false) }, containerColor = zhishengOverlayColor(),
-        title = { Text("枳生公告", color = ZhishengMint) },
+        title = { com.zhisheng.weather.ui.HighRefreshDialogContent(); Text("枳生公告", color = ZhishengMint) },
         text = { Column(Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
             Text(announcement.title, color = ZhishengText, style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(12.dp))
@@ -47,7 +48,7 @@ internal fun AnnouncementDialog(announcement: AppAnnouncement, onClose: (confirm
 }
 
 @Composable
-internal fun AnnouncementHost(lifecycle: Lifecycle, canPresent: Boolean) {
+internal fun AnnouncementHost(lifecycle: Lifecycle, canPresent: Boolean, onQueueReady: (Boolean) -> Unit = {}) {
     val context = LocalContext.current.applicationContext
     val preview = LocalView.current.isInEditMode
     val snapshot by Announcements.state.collectAsState()
@@ -56,14 +57,25 @@ internal fun AnnouncementHost(lifecycle: Lifecycle, canPresent: Boolean) {
     var selected by remember { mutableStateOf<AppAnnouncement?>(null) }
     var dismissed by remember { mutableStateOf(emptySet<String>()) }
     var nextEligibleAt by remember { mutableLongStateOf(0L) }
+    var foregroundVerified by remember { mutableStateOf(false) }
     LaunchedEffect(lifecycle, preview) {
         if (!preview) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            foregroundVerified = false
+            launch {
+                Announcements.refresh(context)
+                // The SSE collector can also satisfy the fresh-response requirement.
+                foregroundVerified = true
+            }
             launch { Announcements.follow(context) }
             launch {
                 Announcements.state.collect { Announcements.syncReceipts(context) }
             }
         }
     }
+    val freshFeed = snapshot.verifiedAt > 0 && SystemClock.elapsedRealtime() - snapshot.verifiedAt in 0..60_000L
+    val pending = eligibleAnnouncements(snapshot.feed, System.currentTimeMillis(), BuildConfig.VERSION_CODE)
+        .any { it.id !in read && it.id !in dismissed }
+    SideEffect { onQueueReady(announcementQueueAllowsReward(canPresent, foregroundVerified, freshFeed, pending, selected != null)) }
     LaunchedEffect(canPresent, snapshot, read, dismissed) {
         if (!canPresent || selected != null) return@LaunchedEffect
         delay((nextEligibleAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
@@ -81,7 +93,11 @@ internal fun AnnouncementHost(lifecycle: Lifecycle, canPresent: Boolean) {
         AnnouncementDialog(message) { confirmed ->
             dismissed = dismissed + message.id
             selected = null
-            nextEligibleAt = SystemClock.elapsedRealtime() + 60_000L
+            val remaining = eligibleAnnouncements(snapshot.feed, System.currentTimeMillis(), BuildConfig.VERSION_CODE)
+                .any { it.id !in read && it.id !in dismissed }
+            // Drain already-pending startup notices before the badge presentation.
+            // A newly arriving announcement still observes the original cooldown.
+            nextEligibleAt = SystemClock.elapsedRealtime() + if (remaining) 350L else 60_000L
             scope.launch { Announcements.dismiss(context, message.id, confirmed); Announcements.syncReceipts(context) }
         }
     }

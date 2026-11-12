@@ -26,16 +26,15 @@ object OpenMeteoSource {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val okHttp = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
         .build()
 
     private suspend inline fun <reified T> get(url: String): T? = withContext(Dispatchers.IO) {
         try {
-            okHttp.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-                val body = resp.body?.string()
-                if (!resp.isSuccessful || body == null) null else json.decodeFromString<T>(body)
-            }
+            val body = weatherAwaitText(okHttp, Request.Builder().url(url).build())
+            body?.let { json.decodeFromString<T>(it) }
         } catch (ce: kotlinx.coroutines.CancellationException) {
             throw ce
         } catch (_: Exception) {
@@ -66,13 +65,13 @@ object OpenMeteoSource {
                         "&forecast_days=16&forecast_hours=24&forecast_minutely_15=9&timezone=auto$cellSelection"
                 )
             }
-            val aqiDeferred = async {
+            val aqiDeferred = async { kotlinx.coroutines.withTimeoutOrNull(4_000L) {
                 get<OmAirResult>(
                     "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$lat&longitude=$lon" +
                         "&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi" +
                         "&timezone=auto$cellSelection"
                 )
-            }
+            } }
 
             val m = mainDeferred.await() ?: return@coroutineScope WeatherData(error = "公共源请求失败")
             val air = aqiDeferred.await()
@@ -103,7 +102,7 @@ object OpenMeteoSource {
                     windDirectionDeg = it.wind_direction_10m,
                     // 遥测的“气压”统一使用站点/地面气压。金川等高海拔地区若误用
                     // pressure_msl，会比彩云和小米的站点气压高约 170 hPa，看起来像源在打架。
-                    pressure = it.surface_pressure ?: it.pressure_msl,
+                    pressure = it.surface_pressure,
                     // 当前紫外线必须使用当前时刻值；daily.uv_index_max 是全天峰值，
                     // 夜间拿它冒充实况会显示“紫外线很强”。
                     uvIndex = it.uv_index?.let { u -> Math.round(u).toInt() },
@@ -214,9 +213,11 @@ object OpenMeteoSource {
                 // 不编 rainNowcast：接口没有短时降水文案。主屏一句话走分钟序列/温差。
                 rainMinutes = if (precip.size >= 2) precip else emptyList(),
                 rainMeta = precip.takeIf { it.size >= 2 }?.let {
-                    RainMeta("OPEN-METEO", 15, System.currentTimeMillis())
+                    RainMeta("OPEN-METEO", 15, epochOf(cur?.time))
                 },
                 dataSource = "OPEN-METEO",
+                moduleEvidence = aqiInfo?.let { mapOf("air" to com.zhisheng.weather.model.WeatherModuleEvidence(
+                    "OPEN-METEO", epochOf(air?.current?.time), locationScope = "空气质量模型网格")) }.orEmpty(),
                 blockSources = mapOf("current" to "OPEN-METEO", "hourly" to "OPEN-METEO", "daily" to "OPEN-METEO", "minutely" to "OPEN-METEO"),
                 locationMatch = WeatherLocationMatch(
                     requestedLatitude = lat,
@@ -226,6 +227,7 @@ object OpenMeteoSource {
                     preciseGps = city.isPreciseLocation,
                     matchedLatitude = m.latitude,
                     matchedLongitude = m.longitude,
+                    dataResolution = "天气模型网格",
                 ),
                 utcOffsetSeconds = m.utc_offset_seconds,
             )
@@ -362,6 +364,7 @@ data class OmAirResult(val current: OmAirCurrent? = null)
 
 @Serializable
 data class OmAirCurrent(
+    val time: String? = null,
     val pm10: Double? = null,
     val pm2_5: Double? = null,
     val carbon_monoxide: Double? = null,

@@ -67,6 +67,7 @@ private fun FeedbackDialog(kind: WidgetKind, style: WidgetStyle, title: String, 
     Dialog(onDismissRequest = { close(onDismiss) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.apply {
+            com.zhisheng.weather.ui.UiRefreshRate.applyWindow(this)
             setDimAmount(0f)
             decorView.systemUiVisibility = if (style == WidgetStyle.VISTA)
                 android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0
@@ -161,6 +162,7 @@ internal fun WidgetAddHelp(state: WidgetPinState, kind: WidgetKind, style: Widge
                 Box {
                     TextButton(onClick = { menu = true }, contentPadding = PaddingValues(0.dp)) { Text("${guide.title}  ▾", fontSize = 13.sp) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        com.zhisheng.weather.ui.HighRefreshDialogContent()
                         WidgetHomeGuide.entries.forEach { item ->
                             DropdownMenuItem(text = { Text(item.title) }, onClick = { guide = item; menu = false })
                         }

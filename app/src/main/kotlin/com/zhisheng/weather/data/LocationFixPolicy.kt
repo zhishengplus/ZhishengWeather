@@ -68,3 +68,7 @@ internal fun applyResolvedLabel(
 
 internal fun shouldApplyLocation(startedKey: String?, selectedKey: String?): Boolean =
     startedKey == selectedKey
+
+/** Automatic checks update the location being viewed, never replace an explicit saved city. */
+internal fun shouldAutoFollowLocation(selectedKey: String?, locatedKey: String?): Boolean =
+    selectedKey == null || selectedKey == locatedKey

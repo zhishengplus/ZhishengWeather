@@ -1,6 +1,8 @@
 package com.zhisheng.weather.data
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 // 小米天气 API 响应模型（精简为需要的字段）
 
@@ -130,7 +132,20 @@ data class XiaomiForecastResult(
     val indices: XiaomiIndices? = null,
     val yesterday: XiaomiYesterday? = null,
     val typhoon: List<XiaomiTyphoon>? = null,
+    val sourceMaps: JsonObject? = null,
 )
+
+// A location key identifies the place, not the provider of each weather field.
+// Hong Kong/Macau accu keys can carry weatherbj codes; blocks may also differ.
+internal fun XiaomiForecastResult.weatherCodeKey(block: String, fallback: String?): String? {
+    val provider = ((sourceMaps?.get(block) as? JsonObject)?.get("weather") as? JsonPrimitive)
+        ?.content?.substringBefore('(')?.trim()?.lowercase(java.util.Locale.ROOT)
+    return when (provider) {
+        "weatherbj", "weathercn" -> "weathercn:"
+        "accu" -> "accu:"
+        else -> fallback
+    }
+}
 
 @Serializable
 data class XiaomiMinutely(

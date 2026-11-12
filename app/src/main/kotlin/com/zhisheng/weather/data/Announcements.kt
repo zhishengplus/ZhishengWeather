@@ -29,6 +29,12 @@ internal data class AppAnnouncement(val id: String, val title: String, val body:
     val publishedAt: Long, val expiresAt: Long, val minVersionCode: Int)
 internal data class AnnouncementFeed(val revision: Long, val etag: String, val items: List<AppAnnouncement>)
 internal data class AnnouncementSnapshot(val feed: AnnouncementFeed? = null, val verifiedAt: Long = 0L)
+/** A failed foreground announcement check must not hold unrelated rewards forever.
+ * Cached notices still never become popups; a fresh pending/shown notice keeps priority. */
+internal fun announcementQueueAllowsReward(canPresent: Boolean, foregroundCheckFinished: Boolean,
+    freshFeed: Boolean, pending: Boolean, showing: Boolean): Boolean =
+    canPresent && foregroundCheckFinished && !showing && (!freshFeed || !pending)
+
 internal val announcementIdPattern = Regex("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 
 internal fun parseAnnouncements(raw: String): AnnouncementFeed {

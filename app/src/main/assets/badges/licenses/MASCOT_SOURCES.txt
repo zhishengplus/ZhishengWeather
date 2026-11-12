@@ -1,0 +1,16 @@
+Original ZhishengWeather weather-girl artwork.
+Commit: 1b558bb7b2dd1d7bae7ae38d67beb73114e54aae
+
+ic_launcher_character_art.png
+Source: https://github.com/zhishengplus/ZhishengWeather/blob/1b558bb7b2dd1d7bae7ae38d67beb73114e54aae/app/src/main/res/drawable-nodpi/ic_launcher_character_art.png
+Raw: https://raw.githubusercontent.com/zhishengplus/ZhishengWeather/1b558bb7b2dd1d7bae7ae38d67beb73114e54aae/app/src/main/res/drawable-nodpi/ic_launcher_character_art.png
+Dimensions: (432, 432) mode RGBA
+Alpha range: (220, 255)
+SHA256: 53728ac8b7f2c93a3a2d9e9d85353d93baae3712fa448b89d79d10a8a829cebe
+
+weather_girl_emote_sunny.png
+Source: https://github.com/zhishengplus/ZhishengWeather/blob/1b558bb7b2dd1d7bae7ae38d67beb73114e54aae/app/src/main/res/drawable-nodpi/weather_girl_emote_sunny.png
+Raw: https://raw.githubusercontent.com/zhishengplus/ZhishengWeather/1b558bb7b2dd1d7bae7ae38d67beb73114e54aae/app/src/main/res/drawable-nodpi/weather_girl_emote_sunny.png
+Dimensions: (256, 256) mode RGBA
+Alpha range: (0, 255)
+SHA256: 8daf04348a6d155d0f7e1ac6a2e7e4a8ceed9ef57c881c22179d63adf06f6720

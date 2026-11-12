@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -121,17 +122,39 @@ private fun Modifier.homeGlass(shape: Shape, light: Boolean, compact: Boolean, s
                 Color.White.copy(alpha = .08f),
                 Color.White.copy(alpha = if (light) .50f else .24f)),
                 start = Offset.Zero, end = Offset(size.width, size.height))
+            // A retained display list refers to the live child layer; an updated sky does
+            // not require the same sampling commands to be recorded again. This cache is
+            // rebuilt with size, density, shape, light or source changes. Vertical motion
+            // still records the exact new offset, without rounding or reducing resolution.
+            var recordedOffset = Offset.Unspecified
+            var recordedSource: androidx.compose.ui.graphics.layer.GraphicsLayer? = null
+            var recordedFieldSize = Size.Unspecified
+            var fieldSize = Size.Unspecified
+            var fieldBrush: Brush? = null
             onDrawWithContent {
                 val offset = origin.value - (backdrop?.origin ?: Offset.Zero)
-                capture.record(size = captureSize) {
-                    translate(padding - offset.x, padding - offset.y) {
-                        if (backdrop != null) drawLayer(backdrop.layer)
-                        // Configuration excludes system bars on older target SDKs. A full-screen
-                        // dialog can therefore extend beyond it; keep its reading field opaque.
-                        else drawGlassPageField(light, androidx.compose.ui.geometry.Size(
-                            maxOf(screenSize.width, view.rootView.width.toFloat()),
-                            maxOf(screenSize.height, view.rootView.height.toFloat())))
+                val source = backdrop?.layer
+                // Configuration excludes system bars on older target SDKs. A full-screen
+                // dialog can therefore extend beyond it; keep its reading field opaque.
+                val currentFieldSize = if (source == null) Size(
+                    maxOf(screenSize.width, view.rootView.width.toFloat()),
+                    maxOf(screenSize.height, view.rootView.height.toFloat())) else Size.Zero
+                if (source == null && fieldSize != currentFieldSize) {
+                    fieldSize = currentFieldSize
+                    fieldBrush = glassPageFieldBrush(light, currentFieldSize)
+                }
+                if (recordedOffset != offset || recordedSource !== source ||
+                    recordedFieldSize != currentFieldSize || capture.size != captureSize) {
+                    val brush = fieldBrush
+                    capture.record(size = captureSize) {
+                        translate(padding - offset.x, padding - offset.y) {
+                            if (source != null) drawLayer(source)
+                            else drawRect(checkNotNull(brush), size = currentFieldSize)
+                        }
                     }
+                    recordedOffset = offset
+                    recordedSource = source
+                    recordedFieldSize = currentFieldSize
                 }
                 val glassEffect = effect ?: compatibleBlur
                 capture.renderEffect = if (Build.VERSION.SDK_INT >= 33)
@@ -152,6 +175,9 @@ private fun Modifier.homeGlass(shape: Shape, light: Boolean, compact: Boolean, s
                 drawContent()
             }
         }
+        // Keep static text, charts and artwork outside the animated optical
+        // recording scope. Auto retains commands without a page-size texture.
+        .graphicsLayer()
 }
 
 /** A floating action island uses the same sampled optics as the page, with a continuous capsule rim. */
@@ -160,12 +186,10 @@ internal fun Modifier.zhishengGlassActionBar(light: Boolean): Modifier =
     homeGlass(RoundedCornerShape(percent = 50), light, compact = true, selected = false)
 
 /** The same window-sized field is also the optical source for secondary pages without a sky. */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGlassPageField(
-    light: Boolean, fieldSize: androidx.compose.ui.geometry.Size,
-) {
+private fun glassPageFieldBrush(light: Boolean, fieldSize: Size): Brush {
     val field = if (light) listOf(Color(0xFFC9DFED), Color(0xFFE2F0F7), Color(0xFFD3E6F1))
         else listOf(Color(0xFF172838), Color(0xFF141F2B), Color(0xFF0F1B29))
-    drawRect(Brush.verticalGradient(field, endY = fieldSize.height), size = fieldSize)
+    return Brush.verticalGradient(field, endY = fieldSize.height)
 }
 
 /** One window-anchored field. Scrolling cards sample the same light as their surroundings. */

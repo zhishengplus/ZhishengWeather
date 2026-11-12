@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
@@ -120,12 +119,8 @@ internal fun vistaAstroClockFraction(clockMinutes: Int): Float =
 
 @Composable
 internal fun VistaLuminary(today: DailyWeather, utcOffsetSeconds: Int?) {
-    val nowMinutes = vistaNowMinutes(weatherPresentationTime(), utcOffsetSeconds)
     val phase = Fmt.moonPhaseZh(today.moonPhase)
     val illumination = MoonCalc.illuminationFraction(weatherPresentationTime()).coerceIn(0.0, 1.0)
-    val orange = ZhishengOrange
-    val cyan = ZhishengCyan
-    val rail = LocalZhishengPalette.current.cardBorder.copy(alpha = 0.55f)
     Column(
         Modifier.fillMaxWidth().semantics {
             contentDescription = buildString {
@@ -146,6 +141,18 @@ internal fun VistaLuminary(today: DailyWeather, utcOffsetSeconds: Int?) {
                 Text(phase, style = MaterialTheme.typography.bodySmall, color = ZhishengTextSecondary)
             }
         }
+        VistaAstroWaveBody(today, utcOffsetSeconds)
+    }
+}
+
+/** 波形卡片去掉标题行后的主体，供可切换卡片在动画里复用。 */
+@Composable
+internal fun VistaAstroWaveBody(today: DailyWeather, utcOffsetSeconds: Int?) {
+    val nowMinutes = vistaNowMinutes(weatherPresentationTime(), utcOffsetSeconds)
+    val orange = ZhishengOrange
+    val cyan = ZhishengCyan
+    val rail = LocalZhishengPalette.current.cardBorder.copy(alpha = 0.55f)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         VistaAstroWave(
             riseText = today.sunrise,
             setText = today.sunset,
@@ -315,24 +322,32 @@ private fun VistaAstroCaption(time: String, label: String, modifier: Modifier) {
 @Composable
 internal fun VistaMoonDisc(fraction: Double, modifier: Modifier = Modifier) {
     val palette = LocalZhishengPalette.current
-    val lit = if (palette.isLight) palette.textSecondary else palette.text
-    val dark = if (palette.isLight) palette.cardBorder else palette.surface
+    // Moonlight has the same physical meaning in both themes; text colours invert.
+    val lit = Color(0xFFF0F4EB)
+    val dark = Color(0xFF35434C)
+    val waxing = MoonCalc.isWaxing(weatherPresentationTime())
     Canvas(modifier.semantics { contentDescription = "月面照明约 ${(fraction * 100).toInt()}%" }) {
         val radius = size.minDimension * 0.46f
         drawCircle(dark, radius, center)
         val illumination = fraction.coerceIn(0.0, 1.0).toFloat()
-        val step = 1.dp.toPx()
-        var yy = -radius
-        while (yy <= radius) {
-            val limb = sqrt((radius * radius - yy * yy).coerceAtLeast(0f))
-            drawLine(
-                lit,
-                Offset(center.x + (1 - 2 * illumination) * limb, center.y + yy),
-                Offset(center.x + limb, center.y + yy),
-                step,
-            )
-            yy += step
+        val illuminated = Path().apply {
+            // One filled contour avoids the striped appearance of 1dp scanlines.
+            for (i in 0..64) {
+                val yy = radius * (i / 32f - 1f)
+                val limb = sqrt((radius * radius - yy * yy).coerceAtLeast(0f))
+                val x = if (waxing) (1 - 2 * illumination) * limb else -limb
+                if (i == 0) moveTo(center.x + x, center.y + yy)
+                else lineTo(center.x + x, center.y + yy)
+            }
+            for (i in 64 downTo 0) {
+                val yy = radius * (i / 32f - 1f)
+                val limb = sqrt((radius * radius - yy * yy).coerceAtLeast(0f))
+                val x = if (waxing) limb else -(1 - 2 * illumination) * limb
+                lineTo(center.x + x, center.y + yy)
+            }
+            close()
         }
+        drawPath(illuminated, lit)
         drawCircle(palette.textTertiary.copy(alpha = 0.7f), radius, center, style = Stroke(1.dp.toPx()))
     }
 }

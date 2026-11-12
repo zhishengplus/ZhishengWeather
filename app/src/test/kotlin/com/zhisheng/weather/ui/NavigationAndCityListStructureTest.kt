@@ -19,7 +19,7 @@ class NavigationAndCityListStructureTest {
     @Test
     fun cityDrawerKeepsActionsVisibleAndCitiesScrollable() {
         val home = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/home/HomeScreen.kt").readText()
-        val drawer = home.substringAfter("private fun CityDrawer(").substringBefore("private fun formatAlertTime")
+        val drawer = home.substringAfter("internal fun CityDrawer(").substringBefore("internal fun formatAlertTime")
 
         assertTrue(drawer.contains("LazyColumn("))
         assertTrue(drawer.contains("Modifier.weight(1f).fillMaxWidth()"))
@@ -44,8 +44,8 @@ class NavigationAndCityListStructureTest {
         val home = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/home/HomeScreen.kt").readText()
         val alerts = home.substringAfter("private fun AlertSection(").substringBefore("private fun hazardStripes")
 
-        assertTrue(alerts.contains("alerts.forEachIndexed { index, alert ->"))
-        assertTrue(alerts.contains("if (index == alerts.lastIndex) 0.dp else 8.dp"))
+        assertTrue(alerts.contains("visible.forEachIndexed { index, alert ->"))
+        assertTrue(alerts.contains("if (index == visible.lastIndex) 0.dp else 8.dp"))
     }
 
     @Test

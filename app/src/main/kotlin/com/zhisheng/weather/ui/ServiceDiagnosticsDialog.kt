@@ -18,7 +18,7 @@ internal fun ServiceDiagnosticsDialog(enabled: Boolean, onDismiss: () -> Unit) {
     var privacy by remember { mutableStateOf(false) }
     if (privacy) ServicePrivacyDialog { privacy = false }
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, containerColor = zhishengOverlayColor(),
-        title = { Text("帮助改进服务", color = ZhishengText) },
+        title = { com.zhisheng.weather.ui.HighRefreshDialogContent(); Text("帮助改进服务", color = ZhishengText) },
         text = { Column {
             Text("上传机型、系统、应用版本、屏幕规格及定位状态，用于改善兼容性与使用体验；不包含坐标、个人 Key、搜索记录或页面操作。", color = ZhishengTextSecondary)
             TextButton(onClick = { privacy = true }) { Text("查看隐私说明", color = ZhishengMint) }

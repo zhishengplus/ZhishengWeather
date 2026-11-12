@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -118,6 +120,14 @@ internal fun CitySharedChromeHost(
     val reverseDrag = LocalLayoutDirection.current != LayoutDirection.Rtl
     Box(Modifier.fillMaxSize().clipToBounds().onGloballyPositioned { state.rootTop = it.positionInRoot().y },
         contentAlignment = Alignment.TopCenter) {
+        // The shared hero is outside the list's clipping hierarchy. Match the non-floating
+        // list viewport, whose top inset is this same measured header height, while keeping
+        // the glass header's existing underlay visible. Read the boundary only while drawing.
+        Box(Modifier.fillMaxSize().then(if (floating) Modifier else Modifier.drawWithContent {
+            clipRect(top = state.headerHeight.toFloat().coerceIn(0f, size.height)) {
+                this@drawWithContent.drawContent()
+            }
+        }), contentAlignment = Alignment.TopCenter) {
         for (index in setOf(segment.from, segment.to)) {
             val city = cities.getOrNull(index) ?: continue
             val entry = state.entries[city.locationKey] ?: continue
@@ -140,6 +150,7 @@ internal fun CitySharedChromeHost(
                     }
                 }
             }
+        }
         }
         Box(Modifier.widthIn(max = chrome.contentMaxWidth).fillMaxWidth()
             .onSizeChanged { state.headerHeight = it.height }) {

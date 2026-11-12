@@ -1,7 +1,10 @@
 package com.zhisheng.weather.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -16,12 +19,25 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.ResolverStyle
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 @Serializable
 data class TyphoonStorm(
@@ -42,7 +58,7 @@ data class TyphoonWindRadii(
     val northWestKm: Double? = null,
 ) {
     val available: Boolean
-        get() = listOf(northEastKm, southEastKm, southWestKm, northWestKm).any { it != null && it > 0.0 }
+        get() = listOf(northEastKm, southEastKm, southWestKm, northWestKm).any { it != null && it.isFinite() && it > 0.0 }
 }
 
 @Serializable
@@ -81,19 +97,25 @@ data class TyphoonLoad<T>(
     val fromCache: Boolean = false,
     val cacheAgeMillis: Long? = null,
     val error: String? = null,
+    val fetchedAt: Long? = null,
+    val stale: Boolean = false,
 )
 
 private val typhoonJson = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
+private val typhoonZone = ZoneId.of("Asia/Shanghai")
+private val typhoonIdPattern = Regex("(?:[0-9]{6}|[0-9]{8})")
+internal const val FIRST_TYPHOON_YEAR = 1949
+internal fun currentTyphoonYear(): Int = java.time.ZonedDateTime.now(typhoonZone).year
 
 object TyphoonRepository {
     private const val BASE = "https://typhoon.slt.zj.gov.cn/Api"
     private const val REFERER = "https://typhoon.slt.zj.gov.cn/"
-    private const val CATALOG_CACHE = "typhoon_catalog_v1.json"
-    private const val DETAIL_PREFIX = "typhoon_detail_v1_"
+    private const val CATALOG_PREFIX = "typhoon_catalog_v2_"
+    private const val DETAIL_PREFIX = "typhoon_detail_v2_"
     private const val CATALOG_FALLBACK_AGE = 6L * 60L * 60L * 1_000L
     private const val DETAIL_FALLBACK_AGE = 90L * 60L * 1_000L
 
-    private val zone = ZoneId.of("Asia/Shanghai")
+    private const val HISTORY_FALLBACK_AGE = 30L * 24L * 60L * 60L * 1_000L
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(16, TimeUnit.SECONDS)
@@ -101,21 +123,34 @@ object TyphoonRepository {
         .retryOnConnectionFailure(true)
         .build()
 
-    suspend fun loadCatalog(context: Context, force: Boolean = false): TyphoonLoad<List<TyphoonStorm>> =
+    suspend fun loadCatalog(
+        context: Context,
+        force: Boolean = false,
+        year: Int = currentTyphoonYear(),
+    ): TyphoonLoad<List<TyphoonStorm>> =
         withContext(Dispatchers.IO) {
             if (!ReleaseFeatures.typhoon) return@withContext TyphoonLoad(error = "功能暂未开放")
-            val cache = File(context.cacheDir, CATALOG_CACHE)
-            if (!force) readCache<List<TyphoonStorm>>(cache, 10 * 60_000L)?.let { return@withContext it }
-            runCatching {
-                val year = java.time.ZonedDateTime.now(zone).year
+            if (year !in FIRST_TYPHOON_YEAR..currentTyphoonYear()) {
+                return@withContext TyphoonLoad(error = "该年份暂无可查询的台风资料")
+            }
+            val cache = File(context.cacheDir, "$CATALOG_PREFIX$year.json")
+            if (!force) readCache<List<TyphoonStorm>>(cache, 10 * 60_000L)
+                ?.takeIf { load -> load.value?.all { it.id.take(4).toIntOrNull() == year } == true }
+                ?.let { return@withContext it }
+            try {
                 val payload = get("$BASE/TyphoonList/$year")
                 val parsed = parseCatalogPayload(payload)
-                require(parsed.isNotEmpty()) { "官方列表暂时没有返回台风资料" }
+                require(parsed.all { it.id.take(4).toIntOrNull() == year }) { "台风列表年份与请求不符" }
+                coroutineContext.ensureActive()
                 writeCache(cache, parsed)
-                TyphoonLoad(parsed)
-            }.getOrElse { cause ->
-                readCache<List<TyphoonStorm>>(cache, CATALOG_FALLBACK_AGE, staleFallback = true)?.copy(
-                    error = "实时资料连接失败，正在显示最近缓存：${cause.message.orEmpty()}",
+                TyphoonLoad(parsed, fetchedAt = System.currentTimeMillis())
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (_: Exception) {
+                val fallbackAge = if (year < currentTyphoonYear()) HISTORY_FALLBACK_AGE else CATALOG_FALLBACK_AGE
+                readCache<List<TyphoonStorm>>(cache, fallbackAge, staleFallback = true)
+                    ?.takeIf { load -> load.value?.all { it.id.take(4).toIntOrNull() == year } == true }?.copy(
+                    error = "台风列表刷新失败，正在显示最近缓存",
                 ) ?: TyphoonLoad(error = "暂时无法连接台风资料源，请稍后重试")
             }
         }
@@ -123,33 +158,42 @@ object TyphoonRepository {
     suspend fun loadDetail(context: Context, storm: TyphoonStorm, force: Boolean = false): TyphoonLoad<TyphoonDetail> =
         withContext(Dispatchers.IO) {
             if (!ReleaseFeatures.typhoon) return@withContext TyphoonLoad(error = "功能暂未开放")
-            val safeId = storm.id.filter(Char::isLetterOrDigit)
+            val safeId = storm.id.takeIf(typhoonIdPattern::matches)
+                ?: return@withContext TyphoonLoad(error = "台风编号无效，请刷新列表")
             val cache = File(context.cacheDir, "$DETAIL_PREFIX$safeId.json")
-            if (!force) readCache<TyphoonDetail>(cache, 10 * 60_000L)?.let { return@withContext it }
-            runCatching {
+            if (!force) readCache<TyphoonDetail>(cache, 10 * 60_000L)
+                ?.takeIf { load -> load.value?.let { cachedTyphoonDetailIsCurrent(it, storm) } == true }
+                ?.let { return@withContext it }
+            try {
                 val payload = get("$BASE/TyphoonInfo/$safeId")
                 val parsed = parseDetailPayload(payload, storm, System.currentTimeMillis())
                 require(parsed.observed.isNotEmpty()) { "官方详情暂时没有返回路径点" }
+                coroutineContext.ensureActive()
                 writeCache(cache, parsed)
-                TyphoonLoad(parsed)
-            }.getOrElse { cause ->
-                readCache<TyphoonDetail>(cache, DETAIL_FALLBACK_AGE, staleFallback = true)?.copy(
-                    error = "实时路径连接失败，正在显示最近缓存：${cause.message.orEmpty()}",
+                TyphoonLoad(parsed, fetchedAt = parsed.fetchedAt)
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (_: Exception) {
+                val fallbackAge = if (storm.active) DETAIL_FALLBACK_AGE else HISTORY_FALLBACK_AGE
+                readCache<TyphoonDetail>(cache, fallbackAge, staleFallback = true)
+                    ?.takeIf { load ->
+                        val cached = load.value
+                        cached != null && cached.storm.id == storm.id && cached.observed.isNotEmpty() &&
+                            (!cached.storm.active || (load.cacheAgeMillis ?: Long.MAX_VALUE) <= DETAIL_FALLBACK_AGE)
+                    }?.copy(
+                    error = "台风路径刷新失败，正在显示最近缓存",
                 ) ?: TyphoonLoad(error = "暂时无法取得这场台风的路径，请稍后重试")
             }
         }
 
-    private fun get(url: String): String {
+    private suspend fun get(url: String): String {
         val request = Request.Builder()
             .url(url)
             .header("Referer", REFERER)
             .header("User-Agent", "ZhishengWeather/${com.zhisheng.weather.BuildConfig.VERSION_NAME} Android")
             .get()
             .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("HTTP ${response.code}")
-            return response.body?.string()?.takeIf(String::isNotBlank) ?: error("空响应")
-        }
+        return typhoonAwaitPayload(client.newCall(request))
     }
 
     private inline fun <reified T> readCache(
@@ -158,31 +202,78 @@ object TyphoonRepository {
         staleFallback: Boolean = false,
     ): TyphoonLoad<T>? = runCatching {
         if (!file.isFile) return null
+        if (file.length() > 8L * 1024 * 1024) return null
         val age = System.currentTimeMillis() - file.lastModified()
         if (age !in 0..maxAge) return null
         TyphoonLoad(
             typhoonJson.decodeFromString<T>(file.readText()),
-            fromCache = staleFallback,
+            fromCache = true,
             cacheAgeMillis = age,
+            fetchedAt = file.lastModified(),
+            stale = staleFallback,
         )
     }.getOrNull()
 
     private inline fun <reified T> writeCache(file: File, value: T) {
-        runCatching { file.writeText(typhoonJson.encodeToString(value)) }
+        // A cancelled/failed download never replaces the previous complete response.
+        runCatching {
+            val temporary = File.createTempFile(file.name, ".tmp", file.parentFile)
+            try {
+                temporary.writeText(typhoonJson.encodeToString(value))
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                temporary.delete()
+            }
+        }
     }
 }
+
+/** A fresh catalog can invalidate a ten-minute detail cache before its normal TTL expires. */
+internal fun cachedTyphoonDetailIsCurrent(detail: TyphoonDetail, selected: TyphoonStorm): Boolean {
+    if (detail.storm.id != selected.id || detail.storm.active != selected.active) return false
+    val latestTime = detail.observed.lastOrNull()?.let { parseTyphoonTime(it.time) } ?: return false
+    val catalogTime = parseTyphoonTime(selected.endTime)
+    return catalogTime == null || latestTime >= catalogTime
+}
+
+/** Disconnect the socket when a different year/storm is selected; bound data before JSON parsing. */
+internal suspend fun typhoonAwaitPayload(call: Call, maxBytes: Long = 8L * 1024 * 1024): String =
+    suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val payload = response.use {
+                        if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+                        val source = it.body?.source() ?: throw IOException("空响应")
+                        if (source.request(maxBytes + 1)) throw IOException("台风资料超出大小限制")
+                        source.readUtf8().takeIf(String::isNotBlank) ?: throw IOException("空响应")
+                    }
+                    if (continuation.isActive) continuation.resume(payload)
+                } catch (e: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+            }
+        })
+    }
 
 internal fun parseCatalogPayload(payload: String): List<TyphoonStorm> {
     val root = typhoonJson.parseToJsonElement(payload)
     val rows = when (root) {
         is JsonArray -> root
-        is JsonObject -> root.array("data", "list", "typhoons") ?: JsonArray(listOf(root))
-        else -> JsonArray(emptyList())
+        is JsonObject -> root.array("data", "list", "typhoons")
+            ?: if (root.string("tfid", "id", "code") != null) JsonArray(listOf(root))
+            else error("台风列表格式不可识别")
+        else -> error("台风列表格式不可识别")
     }
-    return rows.mapNotNull { element ->
+    val storms = rows.mapNotNull { element ->
         val obj = element as? JsonObject ?: return@mapNotNull null
         val id = obj.string("tfid", "id", "code")?.trim().orEmpty()
-        if (id.isBlank()) return@mapNotNull null
+        if (!typhoonIdPattern.matches(id)) return@mapNotNull null
         TyphoonStorm(
             id = id,
             name = obj.string("name", "cname", "typhoonCname")?.ifBlank { "热带低压" } ?: "热带低压",
@@ -192,10 +283,12 @@ internal fun parseCatalogPayload(payload: String): List<TyphoonStorm> {
             active = obj.string("isactive", "active")?.let { it == "1" || it.equals("true", true) } ?: false,
             warningLevel = obj.string("warnlevel", "warningLevel")?.takeIf(String::isNotBlank),
         )
-    }.sortedWith(
+    }.distinctBy(TyphoonStorm::id).sortedWith(
         compareByDescending<TyphoonStorm> { it.active }
             .thenByDescending { parseTyphoonTime(it.startTime) ?: Long.MIN_VALUE },
-    ).take(12)
+    )
+    require(rows.isEmpty() || storms.isNotEmpty()) { "台风列表未包含有效编号" }
+    return storms
 }
 
 internal fun parseDetailPayload(payload: String, fallback: TyphoonStorm, fetchedAt: Long): TyphoonDetail {
@@ -211,14 +304,18 @@ internal fun parseDetailPayload(payload: String, fallback: TyphoonStorm, fetched
         englishName = root.string("enname", "ename") ?: fallback.englishName,
         active = root.string("isactive", "active")?.let { it == "1" || it.equals("true", true) } ?: fallback.active,
         warningLevel = root.string("warnlevel", "warningLevel") ?: fallback.warningLevel,
+        startTime = root.string("starttime", "startTime") ?: fallback.startTime,
+        endTime = root.string("endtime", "endTime") ?: fallback.endTime,
     )
+    require(storm.id == fallback.id) { "台风详情编号与请求不符" }
     val observed = (root.array("points", "track", "path") ?: JsonArray(emptyList()))
         .mapNotNull(::parseTrackPoint)
-        .distinctBy { "${it.time}/${it.latitude}/${it.longitude}" }
+        .distinctBy { parseTyphoonTime(it.time) }
         .sortedBy { parseTyphoonTime(it.time) ?: Long.MIN_VALUE }
     val latestRaw = (root.array("points", "track", "path") ?: JsonArray(emptyList()))
         .mapNotNull { it as? JsonObject }
-        .maxByOrNull { parseTyphoonTime(it.string("time", "datetime")) ?: Long.MIN_VALUE }
+        .filter { parseTrackPoint(it) != null }
+        .maxByOrNull { parseTyphoonTime(it.string("time", "datetime", "forecasttime")) ?: Long.MIN_VALUE }
     val forecasts = (latestRaw?.array("forecast", "forecasts") ?: JsonArray(emptyList()))
         .mapNotNull { forecastElement ->
             val forecast = forecastElement as? JsonObject ?: return@mapNotNull null
@@ -226,6 +323,11 @@ internal fun parseDetailPayload(payload: String, fallback: TyphoonStorm, fetched
             val points = (forecast.array("forecastpoints", "points", "path") ?: JsonArray(emptyList()))
                 .mapNotNull(::parseTrackPoint)
                 .filterNot { point -> observed.lastOrNull()?.let { samePoint(it, point) } == true }
+                .filter { point ->
+                    val latestTime = observed.lastOrNull()?.let { parseTyphoonTime(it.time) }
+                    latestTime == null || (parseTyphoonTime(point.time) ?: Long.MIN_VALUE) > latestTime
+                }
+                .distinctBy { parseTyphoonTime(it.time) }
                 .sortedBy { parseTyphoonTime(it.time) ?: Long.MIN_VALUE }
             TyphoonForecastTrack(agency, points).takeIf { points.isNotEmpty() && isCmaForecastAgency(agency) }
         }
@@ -243,16 +345,20 @@ private fun parseTrackPoint(element: JsonElement): TyphoonTrackPoint? {
     val lat = obj.double("lat", "latitude") ?: return null
     val lon = obj.double("lng", "lon", "longitude") ?: return null
     if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+    val time = obj.string("time", "datetime", "forecasttime") ?: return null
+    if (parseTyphoonTime(time) == null) return null
+    val moveSpeed = obj.double("movespeed", "moveSpeed")?.takeIf { it in 0.0..200.0 }
+    val moveDirection = obj.string("movedirection", "moveDirection")?.trim()?.takeIf(String::isNotBlank)
     return TyphoonTrackPoint(
-        time = obj.string("time", "datetime", "forecasttime").orEmpty(),
+        time = time,
         latitude = lat,
         longitude = lon,
-        windLevel = obj.int("power", "windlevel", "windLevel"),
-        windSpeedMs = obj.double("speed", "windspeed", "windSpeed"),
-        pressureHpa = obj.int("pressure", "pres"),
-        intensity = obj.string("strong", "type", "intensity"),
-        moveDirection = obj.string("movedirection", "moveDirection"),
-        moveSpeedKmh = obj.double("movespeed", "moveSpeed"),
+        windLevel = obj.int("power", "windlevel", "windLevel")?.takeIf { it in 1..25 },
+        windSpeedMs = obj.double("speed", "windspeed", "windSpeed")?.takeIf { it > 0.0 && it <= 150.0 },
+        pressureHpa = obj.int("pressure", "pres")?.takeIf { it in 800..1100 },
+        intensity = obj.string("strong", "type", "intensity")?.trim()?.takeIf(String::isNotBlank),
+        moveDirection = if (moveDirection == "0" && moveSpeed == 0.0) "原地少动" else moveDirection,
+        moveSpeedKmh = moveSpeed,
         radius7 = obj.windRadii("radius7"),
         radius10 = obj.windRadii("radius10"),
         radius12 = obj.windRadii("radius12"),
@@ -268,12 +374,16 @@ private fun samePoint(a: TyphoonTrackPoint, b: TyphoonTrackPoint): Boolean {
 
 internal fun parseTyphoonTime(text: String?): Long? {
     if (text.isNullOrBlank()) return null
-    val clean = text.trim().replace('T', ' ').removeSuffix("Z")
-    val patterns = listOf("yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy/M/d H:mm:ss", "yyyy/M/d H:mm")
+    val value = text.trim()
+    // An explicit offset is authoritative. Offset-free Zhejiang observations use Beijing time.
+    runCatching { return Instant.parse(value).toEpochMilli() }
+    runCatching { return OffsetDateTime.parse(value.replace(' ', 'T')).toInstant().toEpochMilli() }
+    val clean = value.replace('T', ' ')
+    val patterns = listOf("uuuu-MM-dd HH:mm:ss", "uuuu-MM-dd HH:mm", "uuuu/M/d H:mm:ss", "uuuu/M/d H:mm")
     for (pattern in patterns) {
         runCatching {
-            return LocalDateTime.parse(clean, DateTimeFormatter.ofPattern(pattern))
-                .atZone(ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli()
+            return LocalDateTime.parse(clean, DateTimeFormatter.ofPattern(pattern, Locale.ROOT).withResolverStyle(ResolverStyle.STRICT))
+                .atZone(typhoonZone).toInstant().toEpochMilli()
         }
     }
     return null
@@ -300,7 +410,7 @@ private fun JsonObject.obj(vararg keys: String): JsonObject? = keys.firstNotNull
 }
 
 private fun JsonObject.windRadii(key: String): TyphoonWindRadii? {
-    fun positive(value: Double?): Double? = value?.takeIf { it > 0.0 }
+    fun positive(value: Double?): Double? = value?.takeIf { it > 0.0 && it <= 2_000.0 }
     val quadrant = obj("${key}_quad", "${key}Quad") ?: obj(key)
     if (quadrant != null) {
         return TyphoonWindRadii(
@@ -314,11 +424,12 @@ private fun JsonObject.windRadii(key: String): TyphoonWindRadii? {
     val parts = string(key)?.split('|', ',', ';')
         ?.map { positive(it.trim().toDoubleOrNull()) }
         .orEmpty()
-    if (parts.size >= 4) {
+    if (parts.size == 4) {
         // 浙江台风接口的字符串顺序为东北、东南、西南、西北。
         return TyphoonWindRadii(parts[0], parts[1], parts[2], parts[3])
             .takeIf(TyphoonWindRadii::available)
     }
+    if (parts.size > 1) return null // Do not invent missing quadrants from an incomplete radius string.
     val uniform = parts.firstOrNull() ?: double(key)?.let(::positive)
     return uniform?.let { TyphoonWindRadii(it, it, it, it) }
 }

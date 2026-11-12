@@ -30,7 +30,7 @@ class WeatherPriorityTest {
         assertEquals("XIAOMI", result.moduleEvidence.getValue("current").source)
     }
     private val city = City("清华大学", "北京", 40.002, 116.326, "geo:test")
-    private fun stamped(data: WeatherData) = stampModules(data, city)
+    private fun stamped(data: WeatherData) = stampModules(data.copy(updateTime = data.updateTime ?: time("2026-10-22T03:00:00Z")), city)
     @Test fun preservesPrimaryValuesAndZeroRainWhenFillingMissingFields() {
         val base = stamped(WeatherData(current = CurrentWeather(temperature = 20.0, precipMm = 0.0), dataSource = "XIAOMI"))
         val donor = stamped(WeatherData(current = CurrentWeather(temperature = 99.0, humidity = 60.0, precipMm = 9.0), dataSource = "OPEN-METEO"))

@@ -389,8 +389,9 @@ object CityRepository {
         editCityContext { prefs ->
             val cities = prefs.cities()
             val selectedKey = cities.firstOrNull { it.locationKey == prefs[KEY_SELECTED] }?.locationKey
-            // A user selection queued during startup takes precedence over restoration.
-            if (!shouldApplyLocation(expectedSelectedKey, selectedKey)) return@editCityContext
+            // Check both selection and location-following inside the same transaction.
+            if (!shouldApplyLocation(expectedSelectedKey, selectedKey) ||
+                !shouldAutoFollowLocation(selectedKey, prefs[KEY_LOCATED])) return@editCityContext
             val located = cities.firstOrNull { it.locationKey == prefs[KEY_LOCATED] } ?: return@editCityContext
             prefs[KEY_SELECTED] = located.locationKey
             restored = located

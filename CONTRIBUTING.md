@@ -1,78 +1,10 @@
-# 贡献指南 // CONTRIBUTING
+# 贡献指南
 
-感谢你对 **枳生天气 // ZHISHENG WEATHER TERMINAL** 的兴趣。
-项目不大，规矩也简单，说几点：
+1. Fork 公开仓库，以公开源码分支为基础创建修改分支。
+2. 保留现有 Kotlin / Compose 代码风格，将界面状态与数据处理分开。
+3. 只提交与本次修改有关的代码。不要提交个人配置、凭据、签名文件、日志或构建产物。
+4. 提 PR 时说明问题、修改结果和实际完成的验证。界面修改附前后截图；天气规则修改说明数据依据。
 
-*Thanks for the interest in **Zhisheng Weather // ZHISHENG WEATHER TERMINAL**.
-Small project, simple rules — a few notes below.*
+需要检查时可运行 `./gradlew :app:testDebugUnitTest :app:lintDebug`，Windows 使用 `gradlew.bat`。这些命令不会自动上传或发布应用。
 
-## 01// 参与方式 WAYS TO CONTRIBUTE
-
-- **报缺陷**：用 Issue 模板描述清楚——版本、设备、复现步骤、期望行为和实际行为。最好附截图。
-  *Report bugs — fill the issue template properly: version, device, repro steps, expected vs. actual. Screenshots help.*
-- **提想法**：先在 Discussions 里聊聊，聊透了再开 Feature Request，省得做了半天方向不对。
-  *Propose ideas — talk it through in Discussions first, then open a Feature Request once the direction is settled. Saves everyone a wasted weekend.*
-- **交代码**：Fork → 开分支 → 自己测过 → Pull Request。改了界面的话附前后对比截图。
-  *Send code — fork, branch, test it yourself, open a PR. UI changes need before/after screenshots.*
-- **画图标**：美术贡献有风格要求，见 05//。
-  *Draw glyphs — art contributions have a style bar; see 05//.*
-
-## 02// 开发环境 SETUP
-
-- 需要 JDK 17、Android SDK 34，Gradle Wrapper 自带，clone 下来直接 `./gradlew assembleDebug` 就能跑。
-  *Needs JDK 17 and Android SDK 34; the wrapper is included — clone and `./gradlew assembleDebug` just runs.*
-- 用和风天气的话，在根目录建 `local.properties` 填凭据（见 README 的“从源码构建”）；不填也能编译。
-  *For the QWeather feed, put your credentials in the root-level `local.properties` file (see “Build from source” in the README); the project also builds without them.*
-- 主题色统一引用 `ui/theme/Color.kt`，别硬编码色值。
-  *Pull theme colors from `ui/theme/Color.kt`; never hardcode hex values.*
-- 网络模型和领域模型分开（`data/*Models.kt` vs `model/Weather.kt`）。
-  *Keep wire models and domain models apart (`data/*Models.kt` vs `model/Weather.kt`).*
-- Compose 状态尽量上提到 ViewModel，别堆在组件里。
-  *Hoist Compose state into the ViewModel; don't let it pile up inside widgets.*
-
-## 03// 提交信息 COMMITS
-
-一行描述清楚就行，建议带类型前缀：
-
-*One clear line is enough; a type prefix is appreciated:*
-
-| 前缀 / Prefix | 含义 / Meaning |
-|:--|:--|
-| `feat` | 新功能 / new feature |
-| `fix` | 缺陷修复 / bug fix |
-| `docs` | 文档 / documentation |
-| `style` | UI / 美术 / UI & art |
-| `refactor` | 重构（行为不变）/ refactor, no behavior change |
-| `chore` | 构建 / 工具链 / build & tooling |
-
-例 / *e.g.*：`fix: 修复同名城市串台` / `fix: stop same-named cities cross-wiring`
-
-## 04// 代码风格 CODE STYLE
-
-- 遵循 Kotlin 官方编码规范；Compose 状态上提至 `ViewModel`
-  *Follow the official Kotlin coding conventions; hoist Compose state into the `ViewModel`.*
-- 主题色一律引用 `ui/theme/Color.kt`（PhosphorGreen / SignalOrange / WireframeCyan），禁止硬编码色值
-  *Theme colors come from `ui/theme/Color.kt` (PhosphorGreen / SignalOrange / WireframeCyan); hardcoded values get rejected.*
-- 界面文案沿用磷光终端风格：节号 `01// 02// …`，区块 `中文 // ENGLISH`
-  *UI copy keeps the phosphor-terminal voice: numbered sections `01// 02// …`, blocks labelled `中文 // ENGLISH`.*
-- 网络模型与领域模型分离（`data/*Models.kt` vs `model/Weather.kt`）
-  *Wire models stay separate from domain models (`data/*Models.kt` vs `model/Weather.kt`).*
-
-## 05// 图标与美术 ASSETS
-
-默认启动图标是带经典天气发卡的天气娘头像，并保留原版天气图标作为可切换选项；两者都使用黑底、磷光青和信号橙。应用内 15 枚天气图标以青色为主，统一放在 `drawable-nodpi`。提交新图标时请先检查 48 px 下是否仍然清楚，并附上深色背景预览。
-
-*The default launcher icon is the weather character portrait with the classic weather mark as a hair clip; the original icon remains selectable. Both use black, phosphor cyan, and signal orange. The 15 in-app weather glyphs are primarily cyan and live in `drawable-nodpi`. Check new artwork at 48 px and include a dark-background preview with the PR.*
-
-## 06// 安全红线 SECURITY
-
-- **永不提交** `local.properties`、私有签名文件、任何 Key / 私钥 / 口令；仓库中的 `keystore/public.jks` 是公开构建专用的例外
-  *Never commit `local.properties`, private signing files, keys, private keys, or passwords. The in-repo `keystore/public.jks` is the deliberate public-build exception.*
-- 发现已泄露凭据：先轮换密钥，再走 SECURITY.md 通道私下联系维护者，别在 Issue 里喊
-  *If you find leaked credentials: rotate them first, then contact the maintainer privately via the SECURITY.md channel — not in a public issue.*
-
-## 07// 许可 LICENSE
-
-提交代码即视为同意以本项目许可证（MIT，见 [LICENSE](LICENSE)）发布。
-
-*Contributing code means you agree to release it under this project's license (MIT, see [LICENSE](LICENSE)).*
+提交代码即同意按项目 MIT 许可证发布，第三方素材沿用其原始许可。

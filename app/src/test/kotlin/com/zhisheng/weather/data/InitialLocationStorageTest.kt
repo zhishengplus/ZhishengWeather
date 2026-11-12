@@ -241,6 +241,44 @@ class InitialLocationStorageTest {
         }
     }
 
+    @Test fun automaticRestorationPreservesAnExplicitCityAndItsStoredRecords() = runBlocking {
+        val encoded = json.encodeToString(serializer, listOf(beijing, chosen))
+        val original = mutablePreferencesOf(cities to encoded, backup to encoded,
+            selected to chosen.locationKey, located to beijing.locationKey, locationEnabled to true)
+        withStore(original) { store ->
+            repeat(3) { assertNull(CityRepository.restoreLocatedCity(chosen.locationKey)) }
+            assertEquals(original, store.saved)
+            assertFalse(shouldAutoFollowLocation(chosen.locationKey, beijing.locationKey))
+            assertFalse(shouldAutoFollowLocation(chosen.locationKey, null))
+        }
+    }
+
+    @Test fun automaticRestorationStillSupportsTheLocationPageAndMissingSelection() = runBlocking {
+        val encoded = json.encodeToString(serializer, listOf(beijing, chosen))
+        withStore(mutablePreferencesOf(cities to encoded, backup to encoded, located to beijing.locationKey)) { store ->
+            assertTrue(shouldAutoFollowLocation(null, beijing.locationKey))
+            assertEquals(beijing, CityRepository.restoreLocatedCity(null))
+            assertEquals(beijing.locationKey, store.saved[selected])
+            assertTrue(shouldAutoFollowLocation(beijing.locationKey, beijing.locationKey))
+            assertEquals(beijing, CityRepository.restoreLocatedCity(beijing.locationKey))
+        }
+    }
+
+    @Test fun queuedManualSelectionWinsInsideAutomaticRestorationTransaction() = runBlocking {
+        val encoded = json.encodeToString(serializer, listOf(beijing, chosen))
+        val initial = mutablePreferencesOf(cities to encoded, backup to encoded,
+            selected to beijing.locationKey, located to beijing.locationKey)
+        withStore(initial) { store ->
+            store.beforeNextWrite = {
+                store.saved = mutablePreferencesOf(cities to encoded, backup to encoded,
+                    selected to chosen.locationKey, located to beijing.locationKey)
+            }
+            assertNull(CityRepository.restoreLocatedCity(beijing.locationKey))
+            assertEquals(chosen.locationKey, store.saved[selected])
+            assertEquals(encoded, store.saved[cities])
+        }
+    }
+
     private class MemoryStore(initial: Preferences) : DataStore<Preferences> {
         var saved: Preferences = initial
         val writes = mutableListOf<Preferences>()

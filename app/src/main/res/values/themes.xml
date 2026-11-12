@@ -12,4 +12,8 @@
         <!-- 关掉 MIUI / 系统强制深色反转，避免磷光深色被洗成浅色、浅色被涂黑（v0.0.6） -->
         <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
     </style>
+    <style name="Theme.ZhishengWeather.Badge" parent="Theme.ZhishengWeather">
+        <!-- Keep the existing page until the badge Activity paints its actual theme. -->
+        <item name="android:windowDisablePreview">true</item>
+    </style>
 </resources>

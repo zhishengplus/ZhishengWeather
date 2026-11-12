@@ -111,7 +111,10 @@ object CaiyunSource {
         utcOffsetSeconds: Int? = null,
         providerUpdateTime: Long? = null,
     ): WeatherData {
-        val rt = r.realtime
+        val rt = r.realtime?.takeIf { it.status == null || it.status.equals("ok", true) }
+        val hourlyBlock = r.hourly?.takeIf { it.status == null || it.status.equals("ok", true) }
+        val dailyBlock = r.daily?.takeIf { it.status == null || it.status.equals("ok", true) }
+        val alertBlock = r.alert?.takeIf { it.status == null || it.status.equals("ok", true) }
         val fetchedAt = System.currentTimeMillis()
         val now = (providerUpdateTime ?: fetchedAt) / Nowcast.MINUTE_MS * Nowcast.MINUTE_MS
         val minutely = r.minutely?.takeIf { it.status == null || it.status.equals("ok", true) }
@@ -142,40 +145,38 @@ object CaiyunSource {
                     windDirectionDeg = it.wind?.direction,
                     pressure = it.pressure?.div(100.0),
                     uvIndex = it.lifeIndex?.ultraviolet?.index?.roundToInt(),
+                    // 请求固定 metric:v2；官方单位表中能见度已经是公里。
                     visibility = it.visibility,
                     cloudCover = ratioToPercent(it.cloudrate),
                     precipMm = it.precipitation?.local?.intensity,
                 )
             },
-            hourly = r.hourly?.let { h ->
-                val n = maxOf(
-                    h.temperature?.size ?: 0,
-                    h.apparentTemperature?.size ?: 0,
-                    h.skycon?.size ?: 0,
-                    h.wind?.size ?: 0,
-                    h.precipitation?.size ?: 0,
-                    h.humidity?.size ?: 0,
-                    h.pressure?.size ?: 0,
-                    h.visibility?.size ?: 0,
-                    h.cloudrate?.size ?: 0,
-                    h.airQuality?.aqi?.size ?: 0,
-                // 首页只展示未来24小时；多保留一天用于跨发布时间刷新，避免把15天逐时全量写入缓存。
-                ).coerceAtMost(48)
-                (0 until n).mapNotNull { i ->
-                    val temp = h.temperature?.getOrNull(i)
-                    val apparent = h.apparentTemperature?.getOrNull(i)
-                    val sky = h.skycon?.getOrNull(i)
-                    val wind = h.wind?.getOrNull(i)
-                    val precip = h.precipitation?.getOrNull(i)
-                    val humidity = h.humidity?.getOrNull(i)
-                    val pressure = h.pressure?.getOrNull(i)
-                    val visibility = h.visibility?.getOrNull(i)
-                    val cloudrate = h.cloudrate?.getOrNull(i)
-                    val air = h.airQuality?.aqi?.getOrNull(i)
-                    val rawTime = temp?.datetime ?: apparent?.datetime ?: sky?.datetime ?: wind?.datetime
-                        ?: precip?.datetime ?: humidity?.datetime ?: pressure?.datetime
-                        ?: visibility?.datetime ?: cloudrate?.datetime ?: air?.datetime
-                    val timeMillis = parseTime(rawTime, offsetHint) ?: return@mapNotNull null
+            hourly = hourlyBlock?.let { h ->
+                fun <T> index(values: List<T>?, time: (T) -> String?) = datedValues(values) { parseTime(time(it), offsetHint) }
+                val temps = index(h.temperature) { it.datetime }
+                val apparents = index(h.apparentTemperature) { it.datetime }
+                val skies = index(h.skycon) { it.datetime }
+                val winds = index(h.wind) { it.datetime }
+                val precips = index(h.precipitation) { it.datetime }
+                val humidities = index(h.humidity) { it.datetime }
+                val pressures = index(h.pressure) { it.datetime }
+                val visibilities = index(h.visibility) { it.datetime }
+                val clouds = index(h.cloudrate) { it.datetime }
+                val airs = index(h.airQuality?.aqi) { it.datetime }
+                // Each array carries its own timestamp. Missing samples must not
+                // move rain/wind from another hour onto the temperature row.
+                (temps.keys + apparents.keys + skies.keys + winds.keys + precips.keys + humidities.keys +
+                    pressures.keys + visibilities.keys + clouds.keys + airs.keys).sorted().take(48).map { timeMillis ->
+                    val temp = temps[timeMillis]
+                    val apparent = apparents[timeMillis]
+                    val sky = skies[timeMillis]
+                    val wind = winds[timeMillis]
+                    val precip = precips[timeMillis]
+                    val humidity = humidities[timeMillis]
+                    val pressure = pressures[timeMillis]
+                    val visibility = visibilities[timeMillis]
+                    val cloudrate = clouds[timeMillis]
+                    val air = airs[timeMillis]
                     HourlyWeather(
                         timeMillis = timeMillis,
                         temperature = temp?.value,
@@ -194,38 +195,38 @@ object CaiyunSource {
                     )
                 }
             }.orEmpty(),
-            daily = r.daily?.let { daily ->
-                val n = maxOf(
-                    daily.temperature?.size ?: 0,
-                    daily.skycon?.size ?: 0,
-                    daily.skyconDay?.size ?: 0,
-                    daily.skyconNight?.size ?: 0,
-                    daily.astro?.size ?: 0,
-                    daily.precipitation?.size ?: 0,
-                    daily.precipitationDay?.size ?: 0,
-                    daily.precipitationNight?.size ?: 0,
-                    daily.humidity?.size ?: 0,
-                    daily.cloudrate?.size ?: 0,
-                    daily.wind?.size ?: 0,
-                    daily.windDay?.size ?: 0,
-                    daily.windNight?.size ?: 0,
-                ).coerceAtMost(15)
-                (0 until n).mapNotNull { i ->
-                    val temp = daily.temperature?.getOrNull(i)
-                    val sky = daily.skycon?.getOrNull(i)
-                    val daySky = daily.skyconDay?.getOrNull(i)?.value
-                    val nightSky = daily.skyconNight?.getOrNull(i)?.value
-                    val astro = daily.astro?.getOrNull(i)
-                    val precip = daily.precipitation?.getOrNull(i)
-                    val precipDay = daily.precipitationDay?.getOrNull(i)
-                    val precipNight = daily.precipitationNight?.getOrNull(i)
-                    val humidity = daily.humidity?.getOrNull(i)
-                    val cloudrate = daily.cloudrate?.getOrNull(i)
-                    val wind = daily.wind?.getOrNull(i)
-                    val windDay = daily.windDay?.getOrNull(i)
-                    val windNight = daily.windNight?.getOrNull(i)
-                    val rawDate = temp?.date ?: sky?.datetime ?: sky?.date ?: astro?.date ?: precip?.date
-                    val dateMillis = parseTime(rawDate, offsetHint) ?: return@mapNotNull null
+            daily = dailyBlock?.let { daily ->
+                fun <T> index(values: List<T>?, date: (T) -> String?) = datedValues(values) { dailyDate(date(it), offsetHint) }
+                val temps = index(daily.temperature) { it.date }
+                val skies = index(daily.skycon) { it.date ?: it.datetime }
+                val daySkies = index(daily.skyconDay) { it.date ?: it.datetime }
+                val nightSkies = index(daily.skyconNight) { it.date ?: it.datetime }
+                val astros = index(daily.astro) { it.date }
+                val precips = index(daily.precipitation) { it.date }
+                val dayPrecips = index(daily.precipitationDay) { it.date }
+                val nightPrecips = index(daily.precipitationNight) { it.date }
+                val humidities = index(daily.humidity) { it.date }
+                val clouds = index(daily.cloudrate) { it.date }
+                val winds = index(daily.wind) { it.date }
+                val dayWinds = index(daily.windDay) { it.date }
+                val nightWinds = index(daily.windNight) { it.date }
+                val uvs = index(daily.lifeIndex?.ultraviolet) { it.date }
+                (temps.keys + skies.keys + daySkies.keys + nightSkies.keys + astros.keys + precips.keys +
+                    dayPrecips.keys + nightPrecips.keys + humidities.keys + clouds.keys + winds.keys +
+                    dayWinds.keys + nightWinds.keys + uvs.keys).sorted().take(15).map { dateMillis ->
+                    val temp = temps[dateMillis]
+                    val sky = skies[dateMillis]
+                    val daySky = daySkies[dateMillis]?.value
+                    val nightSky = nightSkies[dateMillis]?.value
+                    val astro = astros[dateMillis]
+                    val precip = precips[dateMillis]
+                    val precipDay = dayPrecips[dateMillis]
+                    val precipNight = nightPrecips[dateMillis]
+                    val humidity = humidities[dateMillis]
+                    val cloudrate = clouds[dateMillis]
+                    val wind = winds[dateMillis]
+                    val windDay = dayWinds[dateMillis]
+                    val windNight = nightWinds[dateMillis]
                     val dayNight = dailyDayNight(daySky, nightSky, sky?.value)
                     MoonCalc.enrich(DailyWeather(
                         dateMillis = dateMillis,
@@ -250,7 +251,7 @@ object CaiyunSource {
                         ).maxOrNull(),
                         humidity = ratioToPercent(humidity?.avg),
                         cloudCover = ratioToPercent(cloudrate?.avg),
-                        uvIndex = daily.lifeIndex?.ultraviolet?.getOrNull(i)?.index?.toDoubleOrNull()?.roundToInt(),
+                        uvIndex = uvs[dateMillis]?.index?.toDoubleOrNull()?.roundToInt(),
                         // metric:v2 的 daily.precipitation.max 是峰值雨强 mm/h，不是日累计。
                         // 没有日合计就留空，不用峰值冒充全天降水量。
                     ), city.latitude, city.longitude)
@@ -270,7 +271,7 @@ object CaiyunSource {
                     pollutantUnits = WeatherRepository.CHINA_POLLUTANT_UNITS,
                 )
             },
-            alerts = r.alert?.content.orEmpty().mapNotNull { a ->
+            alerts = alertBlock?.content.orEmpty().mapNotNull { a ->
                 val title = a.title?.trim().orEmpty()
                 if (title.isEmpty()) null
                 else AlertInfo(
@@ -297,10 +298,10 @@ object CaiyunSource {
             rainDistanceKm = rt?.precipitation?.nearest?.distance
                 ?.takeIf { it.isFinite() && it >= 0.0 }
                 ?.div(1_000.0),
-            extraIndices = mapLifeIndices(r.daily?.lifeIndex),
+            extraIndices = mapLifeIndices(dailyBlock?.lifeIndex),
             dataSource = "CAIYUN",
             blockSources = mapOf("current" to "CAIYUN", "hourly" to "CAIYUN", "daily" to "CAIYUN", "minutely" to "CAIYUN") +
-                if (r.alert != null) mapOf("alerts" to "CAIYUN") else emptyMap(),
+                if (alertBlock != null) mapOf("alerts" to "CAIYUN") else emptyMap(),
             locationMatch = WeatherLocationMatch(
                 requestedLatitude = city.latitude,
                 requestedLongitude = city.longitude,
@@ -310,6 +311,19 @@ object CaiyunSource {
             ),
             utcOffsetSeconds = offsetHint,
         )
+    }
+
+    private fun <T> datedValues(values: List<T>?, time: (T) -> Long?): Map<Long, T> =
+        values.orEmpty().mapNotNull { item -> time(item)?.let { it to item } }
+            .groupBy({ it.first }, { it.second })
+            .mapNotNull { (date, items) -> items.distinct().singleOrNull()?.let { date to it } }.toMap()
+
+    private fun dailyDate(raw: String?, offset: Int?): Long? {
+        val zone = java.time.ZoneOffset.ofTotalSeconds(offset ?: 8 * 3_600)
+        val instant = parseTime(raw, offset)
+        val date = instant?.let { java.time.Instant.ofEpochMilli(it).atOffset(zone).toLocalDate() }
+            ?: runCatching { java.time.LocalDate.parse(raw) }.getOrNull() ?: return null
+        return date.atStartOfDay().toInstant(zone).toEpochMilli()
     }
 
     internal fun mapLifeIndices(life: CaiyunLifeIndex?): List<LifeIndexExtra> {
@@ -434,7 +448,8 @@ object CaiyunSource {
         "LIGHT_HAZE", "MODERATE_HAZE", "HEAVY_HAZE" -> "霾"
         "LIGHT_RAIN" -> "小雨"
         "MODERATE_RAIN" -> "中雨"
-        "HEAVY_RAIN", "STORM_RAIN" -> "大雨"
+        "HEAVY_RAIN" -> "大雨"
+        "STORM_RAIN" -> "暴雨"
         "FOG" -> "雾"
         "LIGHT_SNOW" -> "小雪"
         "MODERATE_SNOW", "HEAVY_SNOW", "STORM_SNOW" -> "雪"

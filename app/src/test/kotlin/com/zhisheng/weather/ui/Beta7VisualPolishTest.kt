@@ -12,7 +12,7 @@ class Beta7VisualPolishTest {
 
     @Test fun launcherShortcutsKeepSeparateEntries() {
         val document = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-            .newDocumentBuilder().parse(source("src/main/res/xml/shortcuts.xml").byteInputStream())
+            .newDocumentBuilder().parse(source("src/main/shortcuts.xml").byteInputStream())
         val shortcuts = document.getElementsByTagName("shortcut")
         val android = "http://schemas.android.com/apk/res/android"
         val actions = mutableSetOf<String>()

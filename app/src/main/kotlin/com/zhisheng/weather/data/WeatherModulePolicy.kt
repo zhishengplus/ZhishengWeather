@@ -7,7 +7,7 @@ import java.security.MessageDigest
 
 enum class WeatherModule(val key: String, val cn: String, val blocks: Set<String>) {
     CURRENT("current", "实况", setOf("current", "current-supplement")),
-    FORECAST("forecast", "逐时与逐日预报", setOf("hourly", "daily", "hourly-precip-supplement", "daily-supplement")),
+    FORECAST("forecast", "逐时与逐日预报", setOf("hourly", "daily", "hourly-supplement", "hourly-precip-supplement", "daily-supplement")),
     MINUTELY("minutely", "短时降水", setOf("minutely")),
     ALERTS("alerts", "气象预警", setOf("alerts")),
     INDICES("indices", "生活指数", setOf("indices")),
@@ -48,8 +48,8 @@ object WeatherSourceCapabilities {
         SourcePref.OPEN_METEO to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.MINUTELY, WeatherModule.AIR), note = "短时数据为15分钟模型桶；没有官方预警和生活指数"),
         SourcePref.AMAP to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST), hourly = false, note = "区县级实况与日预报；不提供逐小时、短时降水、预警、指数、空气"),
         SourcePref.BAIDU to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.ALERTS, WeatherModule.INDICES, WeatherModule.AIR), note = "区县级；逐小时和空气等字段仅在用户已有授权且响应提供时使用"),
-        SourcePref.TENCENT to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.INDICES), hourly = false, note = "网站城市天气通道，无官方 API 稳定性保证；只有日预报，不是街道级天气"),
-        SourcePref.WEATHERCN to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.ALERTS, WeatherModule.INDICES, WeatherModule.AIR), hourly = false, note = "网站城市天气通道；预报仅当日，不提供逐小时与短时降水"),
+        SourcePref.TENCENT to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.INDICES), note = "网站城市天气通道，含逐小时与日预报；无官方 API 稳定性保证，不是街道级天气"),
+        SourcePref.WEATHERCN to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.ALERTS, WeatherModule.INDICES, WeatherModule.AIR), note = "网站城市天气通道；提供七天和逐三小时预报，不提供分钟级降水"),
         SourcePref.SENIVERSE to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST, WeatherModule.INDICES), hourly = false, note = "个人免费版：主要城市实况、3天日预报和基础指数；不提供街道级天气"),
         SourcePref.MOJI to SourceCapabilities(setOf(WeatherModule.CURRENT, WeatherModule.FORECAST), hourly = false, note = "个人阿里云市场订阅，仅接实况与日预报；非永久免费，字段与时效依权限"),
     )
@@ -58,7 +58,7 @@ object WeatherSourceCapabilities {
 
 /** Empty arrays are retained as actual zero-alert results only when the API acknowledged that block. */
 internal fun modulePresent(data: WeatherData, module: WeatherModule): Boolean = when (module) {
-    WeatherModule.CURRENT -> data.current != null
+    WeatherModule.CURRENT -> data.current?.temperature != null
     WeatherModule.FORECAST -> data.hourly.isNotEmpty() || data.daily.isNotEmpty()
     WeatherModule.MINUTELY -> data.rainMinutes.isNotEmpty() || !data.rainNowcast.isNullOrBlank()
     WeatherModule.ALERTS -> {
@@ -94,6 +94,28 @@ internal fun stampModules(data: WeatherData, city: City): WeatherData {
 
 internal fun replaceModule(base: WeatherData, donor: WeatherData, module: WeatherModule): WeatherData {
     if (donor.error != null || !modulePresent(donor, module)) return base
+    if (module == WeatherModule.FORECAST) {
+        // A daily-only subscription must not erase the working hourly forecast (and vice versa).
+        val replaced = buildSet {
+            if (donor.hourly.isNotEmpty()) addAll(setOf("hourly", "hourly-supplement", "hourly-precip-supplement"))
+            if (donor.daily.isNotEmpty()) addAll(setOf("daily", "daily-supplement"))
+        }
+        val sources = base.blockSources.filterKeys { it !in replaced } +
+            donor.blockSources.filterKeys { it in replaced } + buildMap {
+                if (donor.hourly.isNotEmpty() && "hourly" !in donor.blockSources) put("hourly", donor.dataSource ?: "未知")
+                if (donor.daily.isNotEmpty() && "daily" !in donor.blockSources) put("daily", donor.dataSource ?: "未知")
+            }
+        val evidence = donor.moduleEvidence[module.key] ?: base.moduleEvidence[module.key]
+        val labels = listOfNotNull(
+            sources["hourly"] ?: base.dataSource?.takeIf { donor.hourly.isEmpty() && base.hourly.isNotEmpty() },
+            sources["daily"] ?: base.dataSource?.takeIf { donor.daily.isEmpty() && base.daily.isNotEmpty() },
+        ).distinct().joinToString(" + ")
+        return base.copy(hourly = donor.hourly.ifEmpty { base.hourly }, daily = donor.daily.ifEmpty { base.daily },
+            forecastSummary = donor.forecastSummary ?: base.forecastSummary,
+            yesterday = donor.yesterday ?: base.yesterday, utcOffsetSeconds = base.utcOffsetSeconds ?: donor.utcOffsetSeconds,
+            blockSources = sources, moduleEvidence = base.moduleEvidence +
+                listOfNotNull(evidence?.copy(source = labels)?.let { module.key to it }).toMap())
+    }
     var result = when (module) {
         WeatherModule.CURRENT -> base.copy(current = donor.current, updateTime = donor.updateTime,
             locationMatch = donor.locationMatch, error = null, dataSource = base.dataSource ?: donor.dataSource)
@@ -117,9 +139,9 @@ internal fun replaceModule(base: WeatherData, donor: WeatherData, module: Weathe
 
 internal fun weatherConfigurationFingerprint(primary: SourcePref, policy: ModuleSourcePolicy, developer: Boolean, credentials: List<String>): String {
     // Length-prefix each field to avoid ambiguous boundaries; only the digest leaves this function.
-    // 10.6 changes observation/forecast alignment and AQI provenance. Older processed weather
+    // 0.1.6 changes freshness checks and automatic selection. Older processed weather
     // must be fetched again; this changes only weather snapshots, never cities or preferences.
-    val values = listOf("module-v2-accuracy10.6", primary.key, policy.encode(), developer.toString()) + credentials
+    val values = listOf("module-v4-provider-time0.1.6", primary.key, policy.encode(), developer.toString()) + credentials
     val bytes = values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
     return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

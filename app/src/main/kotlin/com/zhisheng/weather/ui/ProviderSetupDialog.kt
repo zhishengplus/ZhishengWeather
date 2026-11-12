@@ -168,6 +168,7 @@ fun ProviderWizard(kind: ProviderWizardKind, onClose: () -> Unit) {
             decorFitsSystemWindows = false,
         ),
     ) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()

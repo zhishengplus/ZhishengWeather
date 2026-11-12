@@ -28,6 +28,7 @@ import com.zhisheng.weather.model.City
 import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.ui.theme.zhishengDialogPanel
 import com.zhisheng.weather.ui.components.WeatherOverlayDialog
+import java.util.Locale
 import androidx.compose.ui.graphics.Color
 import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import kotlinx.coroutines.CancellationException
@@ -133,6 +134,9 @@ internal fun WeatherModuleSettingsContent(
                     Text("天气覆盖：$resolution${weather.locationMatch.matchedRegionName?.let { " · $it" }.orEmpty()}。设备定位误差不代表天气分辨率。", color = palette.textSecondary, style = captionStyle)
                 }
                 weather?.sourceDiagnostics?.get("location")?.let { Text(it, color = palette.textSecondary, style = captionStyle) }
+                listOf("selection", "coverage", "current-time", "pressure-reference").forEach { key ->
+                    weather?.sourceDiagnostics?.get(key)?.let { Text(it, color = palette.textSecondary, style = captionStyle) }
+                }
                 WeatherModule.entries.forEach { module ->
                     val selected = policy[module]
                     val evidence = weather?.moduleEvidence?.get(module.key)
@@ -171,7 +175,7 @@ private fun moduleSourceName(raw: String): String = raw.split('+').map { it.trim
 private fun moduleEvidenceTime(millis: Long, offsetSeconds: Int?): String {
     val offset = offsetSeconds?.takeIf { it in -18 * 3600..18 * 3600 }
     val zone = offset?.let(ZoneOffset::ofTotalSeconds) ?: ZoneId.systemDefault()
-    return DateTimeFormatter.ofPattern("MM-dd HH:mm").format(Instant.ofEpochMilli(millis).atZone(zone)) +
+    return DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.US).format(Instant.ofEpochMilli(millis).atZone(zone)) +
         if (offset == null) "（手机时间）" else "（地点时间）"
 }
 
@@ -265,5 +269,5 @@ internal fun commonComparisonHour(rows: List<WeatherRepository.SourceComparison>
 private fun comparisonTime(millis: Long?, city: City): String {
     // For global coordinates the actual provider offset is passed by the row below where possible;
     // UTC labels keep all providers on one unambiguous clock and avoid phone-timezone substitution.
-    return millis?.let { DateTimeFormatter.ofPattern("MM-dd HH:mm 'UTC'").format(Instant.ofEpochMilli(it).atOffset(ZoneOffset.UTC)) } ?: "上游未提供"
+    return millis?.let { DateTimeFormatter.ofPattern("MM-dd HH:mm 'UTC'", Locale.US).format(Instant.ofEpochMilli(it).atOffset(ZoneOffset.UTC)) } ?: "上游未提供"
 }

@@ -38,7 +38,7 @@ private fun fillHour(base: HourlyWeather, extra: HourlyWeather): HourlyWeather {
         windGust = base.windGust ?: extra.windGust,
         precipMm = base.precipMm ?: extra.precipMm,
         humidity = base.humidity ?: extra.humidity,
-        pressure = base.pressure ?: extra.pressure,
+        pressure = base.pressure, // Do not mix surface pressure with sea-level pressure.
         visibility = base.visibility ?: extra.visibility,
         dewPoint = base.dewPoint ?: extra.dewPoint,
         cloudCover = base.cloudCover ?: extra.cloudCover,
@@ -80,7 +80,7 @@ private fun combinedSources(vararg sources: String?): String = sources.filterNot
     .flatMap { it.split(" + ") }.map(String::trim).filter(String::isNotEmpty).distinct().joinToString(" + ")
 
 /** Never replaces an existing value, including zero rainfall and confirmed zero alerts. */
-internal fun fillMissingWeather(base: WeatherData, donor: WeatherData): WeatherData {
+internal fun fillMissingWeather(base: WeatherData, donor: WeatherData, allowCurrentFields: Boolean = true): WeatherData {
     if (donor.error != null) return base
     var result = base
     WeatherModule.entries.filter { !modulePresent(result, it) && modulePresent(donor, it) }.forEach {
@@ -131,7 +131,10 @@ internal fun fillMissingWeather(base: WeatherData, donor: WeatherData): WeatherD
     }
     val current = result.current
     val extra = donor.current
-    if (current != null && extra != null) {
+    val baseTime = result.moduleEvidence["current"]?.observationTime ?: result.updateTime
+    val donorTime = donor.moduleEvidence["current"]?.observationTime ?: donor.updateTime
+    val alignedCurrent = baseTime != null && donorTime != null && kotlin.math.abs(baseTime - donorTime) <= 60 * 60_000L
+    if (allowCurrentFields && alignedCurrent && current != null && extra != null) {
         val filled = current.copy(
             temperature = current.temperature ?: extra.temperature,
             feelsLike = current.feelsLike ?: extra.feelsLike,
@@ -140,7 +143,8 @@ internal fun fillMissingWeather(base: WeatherData, donor: WeatherData): WeatherD
             humidity = current.humidity ?: extra.humidity,
             windSpeed = current.windSpeed ?: extra.windSpeed,
             windDirectionDeg = current.windDirectionDeg ?: extra.windDirectionDeg,
-            pressure = current.pressure ?: extra.pressure,
+            // Pressure reference (surface/sea level) differs across providers. Do not splice it.
+            pressure = current.pressure,
             uvIndex = current.uvIndex ?: extra.uvIndex,
             visibility = current.visibility ?: extra.visibility,
             dewPoint = current.dewPoint ?: extra.dewPoint,

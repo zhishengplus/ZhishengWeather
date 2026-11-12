@@ -98,7 +98,8 @@ import com.zhisheng.weather.ui.systemAnimationsEnabled
 import com.zhisheng.weather.ui.updateOpeningSpec
 import com.zhisheng.weather.ui.WhatsNewPreferenceFile
 import com.zhisheng.weather.ui.WhatsNewSeenKey
-import com.zhisheng.weather.ui.WhatsNewVersion
+import com.zhisheng.weather.ui.WhatsNewEdition
+import com.zhisheng.weather.ui.releaseNotesPending
 import com.zhisheng.weather.ui.InterfaceStyleChoiceDialog
 import com.zhisheng.weather.ui.InitialLocationSetupHost
 import com.zhisheng.weather.ui.InterfaceStyleChoicePreferenceFile
@@ -154,8 +155,9 @@ class MainActivity : ComponentActivity() {
             // 主题模式（v0.0.5）：深色 / 浅色 / 跟随系统三档，切换立即生效
             val themeMode by SettingsRepository.themeMode.collectAsState(initial = initialThemeMode())
             val accentTone by SettingsRepository.accentTone.collectAsState(initial = AccentTone.STANDARD)
-            val softGlow by SettingsRepository.softGlow.collectAsState(initial = false)
-            val softGlowLevel by SettingsRepository.softGlowLevel.collectAsState(initial = com.zhisheng.weather.data.SoftGlowLevel.SUBTLE)
+            // 这些开关的 DataStore 缺省值都是 true；initial 必须一致，否则首帧闪“关”再跳变。
+            val softGlow by SettingsRepository.softGlow.collectAsState(initial = true)
+            val softGlowLevel by SettingsRepository.softGlowLevel.collectAsState(initial = com.zhisheng.weather.data.SoftGlowLevel.FLOWING)
             val interfaceStyle by SettingsRepository.interfaceStyle.collectAsState(
                 initial = InterfaceStyle.PHOSPHOR_VISTA,
             )
@@ -223,7 +225,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val initialWhatsNew = remember { shouldShowWhatsNew() }
-                var showWhatsNew by rememberSaveable(key = "notes_$WhatsNewVersion") { mutableStateOf(initialWhatsNew) }
+                var showWhatsNew by rememberSaveable(key = "notes_$WhatsNewEdition") { mutableStateOf(initialWhatsNew) }
                 val previousNotesVersion = remember {
                     getSharedPreferences(WhatsNewPreferenceFile, MODE_PRIVATE).getString(WhatsNewSeenKey, null)
                 }
@@ -231,7 +233,7 @@ class MainActivity : ComponentActivity() {
                 var autoOpeningPending by rememberSaveable(key = "opening_${BuildConfig.VERSION_CODE}") {
                     mutableStateOf(shouldAutoPlayUpdateOpening(BuildConfig.VERSION_CODE,
                         getSharedPreferences(UpdateOpeningPreferenceFile, MODE_PRIVATE).getInt(UpdateOpeningHandledKey, 0),
-                        initialWhatsNew, systemAnimationsEnabled()))
+                        initialWhatsNew, shouldAnimateReleaseNotes()))
                 }
                 var openingSpec by remember { mutableStateOf<UpdateOpeningSpec?>(null) }
                 var openingHandedOff by remember { mutableStateOf(false) }
@@ -243,9 +245,11 @@ class MainActivity : ComponentActivity() {
                 }
                 var availableUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
                 var automaticUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
+                var announcementsReady by remember { mutableStateOf(false) }
+                var homeBadgeVisible by remember { mutableStateOf(false) }
                 val notices = remember { UpdateNotices(this@MainActivity) }
                 val statistics = remember { UsageStatistics(this@MainActivity) }
-                val diagnosticsEnabled by SettingsRepository.serviceDiagnostics.collectAsState(initial = false)
+                val diagnosticsEnabled by SettingsRepository.serviceDiagnostics.collectAsState(initial = true)
                 LaunchedEffect(diagnosticsEnabled) {
                     if (diagnosticsEnabled) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                         delay(15_000)
@@ -253,7 +257,7 @@ class MainActivity : ComponentActivity() {
                         awaitCancellation()
                     }
                 }
-                val usageEnabled by SettingsRepository.usageStatistics.collectAsState(initial = false)
+                val usageEnabled by SettingsRepository.usageStatistics.collectAsState(initial = true)
                 LaunchedEffect(usageEnabled, showWhatsNew) {
                     if (usageEnabled && !showWhatsNew) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -264,6 +268,29 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val uiState by vm.uiState.collectAsState()
+                val pendingSearchCity by vm.pendingSearchCityKey.collectAsState()
+                val citySelectionError by vm.citySelectionError.collectAsState()
+                var readyHomeCity by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(pendingSearchCity, readyHomeCity, screen, uiState.selectedCity?.locationKey) {
+                    val target = pendingSearchCity ?: return@LaunchedEffect
+                    if (screen == AppScreen.SEARCH && readyHomeCity == target && uiState.selectedCity?.locationKey == target) {
+                        // Reveal the already laid-out target, not the old city beneath search.
+                        androidx.compose.runtime.withFrameNanos { }
+                        cityPickedRequest++
+                        choosingInitialCity = false
+                        screen = AppScreen.HOME
+                        vm.completeSearchSelection(target)
+                    }
+                }
+                LaunchedEffect(screen) {
+                    if (screen != AppScreen.SEARCH) vm.cancelSearchSelection()
+                }
+                LaunchedEffect(citySelectionError) {
+                    citySelectionError?.let {
+                        android.widget.Toast.makeText(this@MainActivity, it, android.widget.Toast.LENGTH_SHORT).show()
+                        vm.clearCitySelectionError()
+                    }
+                }
                 LaunchedEffect(initialLocationSetupRequired, uiState.selectedCity?.locationKey, uiState.locating) {
                     if (initialLocationSetupRequired == false && uiState.selectedCity != null && !uiState.locating) {
                         // An explicit city from search or a widget also completes
@@ -273,6 +300,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val command by shortcutCommand.collectAsState()
+                // 冷启动旋转策略要求待机首帧按“关”处理（PortraitColdStartRegressionTest 钉住），
+                // 与 DataStore 缺省 true 不同属有意首帧保守值，不是漏改。
                 val landscapeStandby by SettingsRepository.landscapeStandby.collectAsState(initial = false)
                 val landscapeStandbyStyle by SettingsRepository.landscapeStandbyStyle.collectAsState(
                     initial = LandscapeStandbyStyle.WEATHER_CORE,
@@ -285,9 +314,9 @@ class MainActivity : ComponentActivity() {
                 // 横屏只在主页展示待机时钟；从时钟进入设置后仍保持横向，
                 // 但恢复系统栏并展示完整设置，返回主页再回到待机界面。
                 val standbyVisible = standbyActive && screen == AppScreen.HOME
-                LaunchedEffect(availableUpdate, screen, standbyVisible, showWhatsNew, startupPromptsSuppressed, showInterfaceStyleChoice, locationSetupHoldsStartup) {
+                LaunchedEffect(availableUpdate, screen, standbyVisible, showWhatsNew, startupPromptsSuppressed, showInterfaceStyleChoice, locationSetupHoldsStartup, announcementsReady, homeBadgeVisible) {
                     val info = availableUpdate
-                    if (info != null && screen == AppScreen.HOME && !standbyVisible && !showWhatsNew && !startupPromptsSuppressed && !showInterfaceStyleChoice && !locationSetupHoldsStartup) {
+                    if (info != null && screen == AppScreen.HOME && !standbyVisible && !showWhatsNew && !startupPromptsSuppressed && !showInterfaceStyleChoice && !locationSetupHoldsStartup && announcementsReady && !homeBadgeVisible) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                             delay(3_000)
                             while (SystemClock.elapsedRealtime() - lastInteraction < 3_000) delay(500)
@@ -309,15 +338,9 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(isLight, themeMode) {
                     getSharedPreferences(PREFS_SPLASH, MODE_PRIVATE).edit().putString("theme_mode", themeMode.key).apply()
                     persistSplashBackground(isLight)
-                    // 天气娘是用户明确选择的独立图标，不参与主题联动。
-                    // 深/浅图标则在 App 主题变化（含跟随系统）时同步切换。
+                    // 默认与天气娘独立于主题；启动时协调升级后的兼容别名。
                     val selectedIcon = SettingsRepository.appIconStyle.first()
-                    if (selectedIcon != AppIconStyle.CHARACTER && selectedIcon != AppIconStyle.MINIMAL) {
-                        val themedIcon = if (isLight) AppIconStyle.LIGHT else AppIconStyle.DARK
-                        if (AppIconManager.apply(this@MainActivity, themedIcon) && selectedIcon != themedIcon) {
-                            SettingsRepository.setAppIconStyle(themedIcon)
-                        }
-                    }
+                    AppIconManager.apply(this@MainActivity, selectedIcon)
                 }
 
                 DisposableEffect(standbyVisible) {
@@ -367,6 +390,7 @@ class MainActivity : ComponentActivity() {
                             screen = AppScreen.HOME
                             // onNewIntent can reuse an already resumed Activity, so
                             // a launcher re-entry must not rely solely on ON_RESUME.
+                            vm.refresh(force = false)
                             vm.autoLocateIfEnabled()
                         }
                         ACTION_WIDGET_WEATHER -> {
@@ -413,7 +437,7 @@ class MainActivity : ComponentActivity() {
 
                 // 系统返回键：搜索/设置页退回主屏，而不是直接退出 App（v0.0.2）
                 BackHandler(enabled = screen != AppScreen.HOME) {
-                    if (screen == AppScreen.SEARCH) choosingInitialCity = false
+                    if (screen == AppScreen.SEARCH) { choosingInitialCity = false; vm.cancelSearchSelection() }
                     screen = if (screen == AppScreen.ATMOSPHERE_LAB) AppScreen.SETTINGS else AppScreen.HOME
                 }
 
@@ -439,8 +463,8 @@ class MainActivity : ComponentActivity() {
                 // 每次打开 / 回到前台按所选间隔刷新；失败仅短暂退避。
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                     vm.refresh(force = false)
-                    // A fixed-city widget tap is an explicit city choice. Ordinary
-                    // app entry still follows the saved location when enabled.
+                    // Resume refreshes the viewed city; manual and widget choices
+                    // are preserved even when automatic location is enabled.
                     if (command.action != ACTION_WIDGET_WEATHER) vm.autoLocateIfEnabled()
                 }
 
@@ -489,6 +513,7 @@ class MainActivity : ComponentActivity() {
                             viewModel = vm,
                             ambienceActive = screen == AppScreen.HOME,
                             dismissCitiesRequest = cityPickedRequest,
+                            onCityReady = { readyHomeCity = it },
                             onSearchClick = {
                                 if (initialLocationSetupRequired == true) {
                                     choosingInitialCity = true
@@ -559,7 +584,7 @@ class MainActivity : ComponentActivity() {
                                             // 设置页手动重看更新说明时不重复打断用户选择界面风格。
                                             showStyleChoiceAfterWhatsNew = false
                                             startupPromptsSuppressed = false
-                                            if (openingSpec == null && systemAnimationsEnabled()) {
+                                            if (openingSpec == null && shouldAnimateReleaseNotes()) {
                                                 openingHandedOff = false
                                                 openingSpec = updateOpeningSpec(BuildConfig.VERSION_NAME,
                                                     previousNotesVersion, upgrade = false)
@@ -622,11 +647,9 @@ class MainActivity : ComponentActivity() {
                                     AppScreen.SEARCH -> SearchScreen(
                                         onCityPicked = { city: City ->
                                             vm.addCityAndSelect(city)
-                                            cityPickedRequest++
-                                            choosingInitialCity = false
-                                            screen = AppScreen.HOME
                                         },
                                         onBack = {
+                                            vm.cancelSearchSelection()
                                             choosingInitialCity = false
                                             screen = AppScreen.HOME
                                         },
@@ -729,11 +752,19 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
+                val homePromptsCanPresent = hostResumed && screen == AppScreen.HOME && !standbyVisible &&
+                    !startupPromptsSuppressed && openingSpec == null && !autoOpeningPending &&
+                    !showWhatsNew && !showInterfaceStyleChoice && !locationSetupHoldsStartup && automaticUpdate == null
                 com.zhisheng.weather.ui.AnnouncementHost(
                     lifecycle = lifecycle,
-                    canPresent = hostResumed && screen == AppScreen.HOME && !standbyVisible &&
-                        !startupPromptsSuppressed && openingSpec == null && !autoOpeningPending &&
-                        !showWhatsNew && !showInterfaceStyleChoice && !locationSetupHoldsStartup && automaticUpdate == null,
+                    canPresent = homePromptsCanPresent,
+                    onQueueReady = { announcementsReady = it },
+                )
+                com.zhisheng.weather.ui.badge.BadgeHomeAwardHost(
+                    lifecycle = lifecycle,
+                    canCheck = hostResumed,
+                    canPresent = homePromptsCanPresent && announcementsReady,
+                    onVisible = { homeBadgeVisible = it },
                 )
                 if (ReleaseFeatures.classicTheme && showInterfaceStyleChoice && !showWhatsNew && !standbyVisible && hostResumed && !startupPromptsSuppressed && openingSpec == null && !locationSetupHoldsStartup) {
                     InterfaceStyleChoiceDialog(
@@ -808,14 +839,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun shouldShowWhatsNew(): Boolean =
+    private fun shouldShowWhatsNew(): Boolean = releaseNotesPending(
         getSharedPreferences(WhatsNewPreferenceFile, MODE_PRIVATE)
-            .getString(WhatsNewSeenKey, null) != WhatsNewVersion
+            .getString(WhatsNewSeenKey, null))
+
+    private fun shouldAnimateReleaseNotes(): Boolean = systemAnimationsEnabled() &&
+        (getSystemService(ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager)
+            ?.isTouchExplorationEnabled != true
 
     private fun markWhatsNewSeen() {
         getSharedPreferences(WhatsNewPreferenceFile, MODE_PRIVATE)
             .edit()
-            .putString(WhatsNewSeenKey, WhatsNewVersion)
+            .putString(WhatsNewSeenKey, WhatsNewEdition)
             .apply()
     }
 

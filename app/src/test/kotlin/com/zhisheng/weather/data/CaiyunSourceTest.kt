@@ -218,6 +218,9 @@ class CaiyunSourceTest {
         assertEquals(1008.0, mapped.current?.pressure ?: -1.0, 0.0001)
         assertEquals(18.0, mapped.current?.windSpeed ?: -1.0, 0.0001)
         assertEquals(2.5, mapped.rainDistanceKm ?: -1.0, 0.0001)
+        // https://docs.caiyunapp.com/weather-api/v2/v2.6/tables/unit.html：metric:v2 能见度为公里。
+        assertEquals(7.2, mapped.current?.visibility ?: -1.0, 0.0001)
+        assertEquals(7.2, mapped.hourly.single().visibility ?: -1.0, 0.0001)
         assertEquals(65.0, mapped.hourly.single().humidity ?: -1.0, 0.0001)
         assertEquals(1008.0, mapped.hourly.single().pressure ?: -1.0, 0.0001)
         assertEquals(35, mapped.hourly.single().precipProb)
@@ -225,5 +228,30 @@ class CaiyunSourceTest {
         assertEquals(70.0, mapped.daily.single().humidity ?: -1.0, 0.0001)
         assertNull(mapped.daily.single().precipMm)
         assertEquals(providerTimeSeconds * 1_000L / 60_000L * 60_000L, mapped.rainMeta?.updateTime)
+    }
+
+    @Test
+    fun metricV2VisibilityKeepsDocumentedKilometersForClearFogAndZeroValues() {
+        // 官方实况示例为 7.8 km；低能见度和 0 也不能缩小千倍或丢弃。
+        // https://docs.caiyunapp.com/weather-api/v2/v2.6/1-realtime.html
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        listOf(7.8, 0.3, 0.0).forEach { visibilityKm ->
+            val body = json.decodeFromString<CaiyunWeatherResponse>("""
+                {"status":"ok","unit":"metric:v2","tzshift":28800,"result":{
+                  "realtime":{"temperature":20,"visibility":$visibilityKm},
+                  "hourly":{"visibility":[{"datetime":"2026-10-25T12:00:00+08:00","value":$visibilityKm}]}
+                }}
+            """.trimIndent())
+            val mapped = CaiyunSource.map(body.result!!, minuteCity, utcOffsetSeconds = body.tzshift)
+            assertEquals(visibilityKm, mapped.current!!.visibility!!, 0.000001)
+            assertEquals(visibilityKm, mapped.hourly.single().visibility!!, 0.000001)
+        }
+    }
+
+    @Test
+    fun stormRainLabelsAsRainstormNotHeavyRain() {
+        // profile 已定为 EXTREME，文案不能低报成“大雨”。
+        assertEquals("暴雨", CaiyunSource.skyconLabel("STORM_RAIN"))
+        assertEquals("大雨", CaiyunSource.skyconLabel("HEAVY_RAIN"))
     }
 }

@@ -25,8 +25,11 @@ private data class LocalPlaceManifest(val schema: Int, val count: Int, val sha25
 /** Point gazetteer for explicit search, never an administrative containment test. */
 internal class LocalPlaceIndex private constructor(records: List<LocalPlaceRecord>) {
     private data class Entry(val place: LocalPlaceRecord, val terms: Set<String>, val context: Set<String>)
-    private val entries = records.map { place ->
-        val aliases = place.aliases + place.name
+    private val entries = records.map { original ->
+        val localNames = hongKongMacauPlaceNames[original.id].orEmpty()
+        val place = original.copy(name = localNames.firstOrNull() ?: original.name)
+        val aliases = (place.aliases + original.name + place.name + localNames).distinct()
+        val regionContexts = hongKongMacauRegionNames(place.id).flatMap { region -> aliases.map { region + it } }
         val initials = aliases.mapNotNull { value ->
             val words = value.trim().split(Regex("\\s+"))
             if (words.size in 2..8 && words.all { word -> word.all { it in 'a'..'z' || it in 'A'..'Z' } }) {
@@ -34,7 +37,7 @@ internal class LocalPlaceIndex private constructor(records: List<LocalPlaceRecor
             } else null
         }
         Entry(place, (aliases + initials).map(::normalizePlaceTerm).filter(String::isNotBlank).toSet(),
-            (listOf(place.affiliation + place.name) + place.affiliation.split('·').flatMap { parent ->
+            (regionContexts + listOf(place.affiliation + place.name) + place.affiliation.split('·').flatMap { parent ->
                 listOf(parent + place.name, parent.removeSuffix("省").removeSuffix("市") + place.name)
             }).map(::normalizePlaceTerm).toSet())
     }
@@ -67,7 +70,7 @@ internal class LocalPlaceIndex private constructor(records: List<LocalPlaceRecor
         return places.filter {
             when (province) {
                 "香港" -> it.id.startsWith("HK:") && it.level == "ADM1"
-                "澳门" -> it.id.startsWith("MO:") && it.level == "ADM1"
+                "澳门", "澳門" -> it.id.startsWith("MO:") && it.level == "ADM1"
                 "台湾" -> it.id.startsWith("TW:") && it.name != "台湾" &&
                     (it.level == "ADM2" || it.level == "ADM1" && it.name.endsWith("市"))
                 else -> it.id.startsWith("CN:") && it.level == "ADM2" &&

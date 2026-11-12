@@ -86,7 +86,7 @@ class MapWeatherSourceTest {
         }
     }
 
-    @Test fun dailyOnlyModuleDonorRemainsWithoutHourlyAfterOfflineRealignment() {
+    @Test fun dailyOnlyModuleOverrideKeepsRealPrimaryHoursAfterOfflineRealignment() {
         val now = Instant.parse("2026-10-09T04:00:00Z").toEpochMilli()
         val donor = parseAmapWeather(
             root("""{"status":"1","lives":[{"adcode":"341226","temperature":"20"}]}"""),
@@ -95,9 +95,9 @@ class MapWeatherSourceTest {
         val primary = stampModules(WeatherData(current = CurrentWeather(temperature = 22.0),
             hourly = listOf(HourlyWeather(now + 3_600_000, temperature = 23.0)), dataSource = "XIAOMI"), city)
         val result = replaceModule(primary, stampModules(WeatherConsistency.align(donor, now), city), WeatherModule.FORECAST)
-        assertTrue(result.hourly.isEmpty())
-        assertTrue(WeatherConsistency.align(result, now).hourly.isEmpty())
-        assertEquals("AMAP", result.moduleEvidence.getValue("forecast").source)
+        assertEquals(primary.hourly, result.hourly)
+        assertEquals(primary.hourly, WeatherConsistency.align(result, now).hourly)
+        assertEquals("XIAOMI + AMAP", result.moduleEvidence.getValue("forecast").source)
         assertEquals(primary.current, result.current)
     }
 }

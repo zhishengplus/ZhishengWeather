@@ -1,0 +1,145 @@
+{
+  "schema": 1,
+  "name": "初光 · 澄空香氛空间",
+  "units": "metres",
+  "coordinateSystem": "glTF +Y up, +Z front",
+  "assets": {
+    "scene": "assets/clearsky-atelier.glb",
+    "badge": "assets/first-light.glb",
+    "environment": "assets/atelier-softboxes-1k.hdr",
+    "contactShadow": "assets/contact-shadow.png"
+  },
+  "palette": {
+    "porcelain": "#BCDCD8",
+    "mint": "#D4F1E7",
+    "water": "#D8F0F2",
+    "blue": "#94C7D7",
+    "pearl": "#E8F4EA",
+    "warmLight": "#FFF2DF"
+  },
+  "camera": {
+    "fov": 34,
+    "near": 0.1,
+    "far": 60,
+    "position": [
+      0,
+      2.05,
+      9.58
+    ],
+    "target": [
+      0,
+      1.65,
+      0
+    ],
+    "fitBadgeWidth": 0.64,
+    "minDistance": 8.0,
+    "safeTopFraction": 0.18,
+    "safeBottomFraction": 0.2
+  },
+  "badge": {
+    "diameter": 2.0,
+    "position": [
+      0,
+      1.5,
+      0
+    ],
+    "initialEulerDegrees": [
+      -7,
+      -16,
+      -4
+    ],
+    "zoomMin": 0.72,
+    "zoomMax": 3.2
+  },
+  "environment": {
+    "intensity": 0.7,
+    "rotationY": 0,
+    "pmremSize": 256
+  },
+  "lighting": [
+    {
+      "name": "Warm pearl key",
+      "type": "RectAreaLight",
+      "position": [
+        -3.4,
+        5.0,
+        3.5
+      ],
+      "target": [
+        0,
+        1.4,
+        0
+      ],
+      "color": "#fff2df",
+      "intensity": 2.6,
+      "width": 4.5,
+      "height": 4.5,
+      "blenderWatts": 450
+    },
+    {
+      "name": "Blue silk fill",
+      "type": "RectAreaLight",
+      "position": [
+        3.6,
+        2.8,
+        2.6
+      ],
+      "target": [
+        0,
+        1.5,
+        0
+      ],
+      "color": "#dceff8",
+      "intensity": 1.4,
+      "width": 3.0,
+      "height": 4.0,
+      "blenderWatts": 140
+    },
+    {
+      "name": "Warm white rim",
+      "type": "RectAreaLight",
+      "position": [
+        0.8,
+        4.0,
+        -2.5
+      ],
+      "target": [
+        0,
+        1.3,
+        0
+      ],
+      "color": "#fff1d9",
+      "intensity": 3.0,
+      "width": 2.0,
+      "height": 3.4,
+      "blenderWatts": 240
+    }
+  ],
+  "renderer": {
+    "toneMapping": "ACESFilmic",
+    "exposure": 0.95,
+    "maxPixelRatio": 1.5,
+    "transmissionResolutionScale": 0.5,
+    "shadowMap": false,
+    "postprocessing": false,
+    "antialias": true,
+    "idle": "render on demand"
+  },
+  "mobileLow": {
+    "maxPixelRatio": 1.0,
+    "transmissionResolutionScale": 0.25
+  },
+  "contactShadow": {
+    "position": [
+      0,
+      0.109,
+      0
+    ],
+    "size": [
+      3.0,
+      1.7
+    ],
+    "opacity": 0.24,
+    "method": "local soft opacity map; adjusts to orientation and zoom; not a ray-traced moving shadow"
+  }
+}

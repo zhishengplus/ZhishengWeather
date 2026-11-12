@@ -119,7 +119,9 @@ internal object DomesticWeatherSource {
             val mojiMsg = now.domesticText("msg") ?: now.domesticText("message")
             return WeatherData(error = "墨迹返回错误：" + (mojiMsg ?: ("code=" + now.domesticText("code"))))
         }
-        val daily = if (verifyOnly || creds.dailyEndpoint.isBlank()) null else mojiRequest(city, creds, true)?.let { weatherAwaitJson(it, client) }
+        val daily = if (verifyOnly || creds.dailyEndpoint.isBlank()) null else kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+            mojiRequest(city, creds, true)?.let { weatherAwaitJson(it, client) }
+        }
         return parseMojiWeather(now, daily, city, System.currentTimeMillis())
     }
 
@@ -129,14 +131,11 @@ internal object DomesticWeatherSource {
             ?: return WeatherData(error = "腾讯网站天气通道暂不可用，请检查城市覆盖与网络")
         val data = tencentToWeatherData(bundle.copy(alarms = emptyList()), System.currentTimeMillis())
             ?: return WeatherData(error = "腾讯未返回有效天气")
-        val update = bundle.observe?.updateTime?.let { runCatching {
-            java.time.LocalDateTime.parse(it, java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
-                .toInstant(java.time.ZoneOffset.ofHours(8)).toEpochMilli()
-        }.getOrNull() }?.takeIf { it <= System.currentTimeMillis() + 300_000L }
-        return data.copy(current = data.current?.copy(windSpeed = null), updateTime = update,
+        return data.copy(
             dataSource = "TENCENT", blockSources = buildMap {
                 if (data.current != null) put("current", "TENCENT")
                 if (data.daily.isNotEmpty()) put("daily", "TENCENT")
+                if (data.hourly.isNotEmpty()) put("hourly", "TENCENT")
                 if (data.extraIndices.isNotEmpty()) put("indices", "TENCENT")
             }, sourceDiagnostics = mapOf("location" to "按${area.second}查询城市天气；未向此网站通道发送设备坐标"))
     }
@@ -148,12 +147,13 @@ internal object DomesticWeatherSource {
             blockSources = buildMap {
                 if (data.current != null) put("current", "WEATHERCN")
                 if (data.daily.isNotEmpty()) put("daily", "WEATHERCN")
+                if (data.hourly.isNotEmpty()) put("hourly", "WEATHERCN")
                 if (data.alerts.isNotEmpty()) put("alerts", "WEATHERCN")
                 if (data.extraIndices.isNotEmpty()) put("indices", "WEATHERCN")
                 if (data.aqi != null) put("air", "WEATHERCN")
             }, moduleEvidence = data.moduleEvidence.mapValues { (_, evidence) -> evidence.copy(
                 requestedLatitude = city.latitude, requestedLongitude = city.longitude) },
-            sourceDiagnostics = mapOf("location" to "按网站城市编号查询，预报仅当日；不是街道级天气"))
+            sourceDiagnostics = mapOf("location" to "按网站城市编号查询，提供网页实际返回的七天/逐三小时预报；不是街道级天气"))
     }
 }
 

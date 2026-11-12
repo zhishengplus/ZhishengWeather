@@ -178,7 +178,8 @@ internal fun AtlasTideChart(coast: CoastalForecast?, height: Dp = 76.dp, selecte
                 drawLine(palette.textSecondary, Offset(xx, 0f), Offset(xx, size.height), 1.dp.toPx())
                 if (it.seaLevelM?.isFinite() == true) drawCircle(palette.text, 4.dp.toPx(), at(it))
             }
-            listOfNotNull(coast?.nextHigh, coast?.nextLow).filter { it.timeMillis in first..last }.forEach { turning ->
+            listOfNotNull(coast?.nextHigh, coast?.nextLow)
+                .filter { it.timeMillis in first..last && it.heightM.isFinite() }.forEach { turning ->
                 val point = at(MarinePoint(turning.timeMillis, turning.heightM))
                 drawCircle(palette.card, 5.dp.toPx(), point)
                 drawCircle(palette.orange, 3.dp.toPx(), point)

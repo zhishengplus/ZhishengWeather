@@ -4,6 +4,15 @@ import org.junit.Test
 import kotlinx.serialization.json.*
 
 class AnnouncementsTest {
+    @Test fun failedAnnouncementCheckReleasesRewardsButFreshNoticesKeepPriority() {
+        assertFalse(announcementQueueAllowsReward(true, false, false, false, false))
+        assertFalse(announcementQueueAllowsReward(false, true, false, false, false))
+        assertTrue(announcementQueueAllowsReward(true, true, false, false, false))
+        assertTrue(announcementQueueAllowsReward(true, true, false, true, false))
+        assertFalse(announcementQueueAllowsReward(true, true, true, true, false))
+        assertFalse(announcementQueueAllowsReward(true, true, false, false, true))
+        assertTrue(announcementQueueAllowsReward(true, true, true, false, false))
+    }
     private val id = "12345678-1234-1234-1234-123456789abc"
     private fun message(change: JsonObjectBuilder.() -> Unit = {}) = buildJsonObject {
         put("id", id); put("title", "服务公告"); put("body", "第一行\n第二行 <b>也是普通文字</b>")

@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -114,19 +116,26 @@ object WeatherComCnApi {
         val indices: List<WcnIndex>,
         val alarms: List<WcnAlarm>,
         val indexTime: String? = null,
+        val forecast: WeatherCnForecast = WeatherCnForecast(),
     )
 
     internal suspend fun fetch(city: City): WcnBundle? = try {
         val zones = loadZones() ?: return null
         val zone = matchZone(city, zones) ?: return null
-        withContext(Dispatchers.IO) {
+        coroutineScope {
             // 实测 https 可用（免明文流量限制）；Referer 必须带，否则被拒
-            val skText = getText("https://d1.weather.com.cn/sk_2d/${zone.areaId}.html")
-            val idxText = getText("https://d1.weather.com.cn/weather_index/${zone.areaId}.html")
-            if (skText == null && idxText == null) return@withContext null
+            val skRequest = async { getText("https://d1.weather.com.cn/sk_2d/${zone.areaId}.html") }
+            val idxRequest = async { getText("https://d1.weather.com.cn/weather_index/${zone.areaId}.html") }
+            val forecastRequest = async { getText("https://www.weather.com.cn/weather/${zone.areaId}.shtml") }
+            val skText = skRequest.await()
+            val idxText = idxRequest.await()
+            val forecast = forecastRequest.await()?.let { parseWeatherCnForecast(it, zone.areaId, System.currentTimeMillis()) }
+                ?: WeatherCnForecast()
+            if (skText == null && idxText == null && forecast.daily.isEmpty()) return@coroutineScope null
             val parsed = idxText?.let { parseIndexText(it) }
             WcnBundle(
                 areaId = zone.areaId,
+                forecast = forecast,
                 current = skText?.let { parseSk(it) },
                 today = parsed?.first,
                 alarms = parsed?.second.orEmpty(),
@@ -351,8 +360,8 @@ internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long
     val offset = java.time.ZoneOffset.ofHours(8)
     val today = cityDate(nowMillis, 28800)
     val currentTime = bundle.current?.let { c -> wcnCurrentTime(c.date, c.time, nowMillis) }
-    val forecastTime = wcnPublishedTime(bundle.today?.forecastTime, nowMillis)
-    val forecastDate = forecastTime?.let { cityDate(it, 28800) }
+    val forecastTime = bundle.forecast.publishedAt ?: wcnPublishedTime(bundle.today?.forecastTime, nowMillis)
+    val forecastDate = wcnPublishedTime(bundle.today?.forecastTime, nowMillis)?.let { cityDate(it, 28800) }
     val current = bundle.current?.takeIf { it.temperature != null || !it.weatherText.isNullOrBlank() }?.let { c ->
         CurrentWeather(
             temperature = c.temperature,
@@ -366,7 +375,7 @@ internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long
             windDirectionDeg = NmcSource.windDirToDegree(c.windDirection),
         )
     }
-    val daily = bundle.today?.takeIf { forecastDate != null && forecastDate >= today }?.let { t ->
+    val daily = bundle.forecast.daily.ifEmpty { bundle.today?.takeIf { forecastDate != null && forecastDate >= today }?.let { t ->
         listOf(
             DailyWeather(
                 dateMillis = requireNotNull(forecastDate).atStartOfDay(offset).toInstant().toEpochMilli(),
@@ -376,11 +385,11 @@ internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long
                     WeatherCondition.fromCode(t.dayCode), WeatherCondition.fromCode(t.nightCode),
                 ),
                 weatherText = joinDayNightText(t.dayText, t.nightText),
-                windSpeed = NmcSource.windPowerToSpeed(t.windPower),
+                windSpeed = null, // A wind-force band is not an exact speed.
                 windDirectionDeg = NmcSource.windDirToDegree(t.windText?.substringBefore("转")?.trim()),
             )
         )
-    }.orEmpty()
+    }.orEmpty() }
     val aqi = bundle.current?.aqi?.let {
         AqiInfo(value = it, level = WeatherRepository.aqiLevel(it), standard = "中国")
     }
@@ -400,6 +409,7 @@ internal fun wcnToWeatherData(bundle: WeatherComCnApi.WcnBundle, nowMillis: Long
     return WeatherData(
         current = current,
         daily = daily,
+        hourly = bundle.forecast.hourly,
         aqi = aqi,
         alerts = alerts,
         extraIndices = bundle.indices.map { LifeIndexExtra(name = it.name, en = "wcn:${it.en}", category = it.level.orEmpty()) },

@@ -4,6 +4,8 @@ package com.zhisheng.weather.ui.home
 internal class CityPagerSelection {
     private val pending = mutableListOf<String>()
     private var observed: String? = null
+    private var moved = false
+    val hasObservedSelection: Boolean get() = observed != null
 
     fun request(key: String, selected: String?): Boolean {
         if (key == (pending.lastOrNull() ?: selected)) return false
@@ -14,6 +16,12 @@ internal class CityPagerSelection {
     /** true means a genuinely external selection which the pager must follow. */
     fun observe(selected: String?, keys: List<String>): Boolean {
         pending.removeAll { it !in keys }
+        // Selection and list flows may arrive in either order. Do not acknowledge
+        // a selected key until its page exists; the next list emission must align it.
+        if (selected == null || selected !in keys) {
+            observed = null
+            return false
+        }
         if (observed == selected) return false
         observed = selected
         val acknowledged = pending.indexOf(selected)
@@ -22,7 +30,15 @@ internal class CityPagerSelection {
             return false
         }
         pending.clear()
-        return selected != null && selected in keys
+        return true
+    }
+    /** Programmatic alignment must not publish an interrupted old page as a user choice. */
+    fun onMotion(scrolling: Boolean, synchronizing: Boolean, settledKey: String?, selected: String?): String? {
+        if (synchronizing) { moved = false; return null }
+        if (scrolling) { moved = true; return null }
+        if (!moved) return null
+        moved = false
+        return settledKey?.takeIf { request(it, selected) }
     }
 }
 

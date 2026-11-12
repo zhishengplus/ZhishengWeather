@@ -30,17 +30,17 @@ class WeatherModulePolicyTest {
         assertFalse(WeatherSourceCapabilities.supports(SourcePref.NMC, WeatherModule.MINUTELY))
     }
 
-    @Test fun replacingDailyOnlyForecastClearsOldHourlyRatherThanRelabellingIt() {
+    @Test fun replacingDailyOnlyForecastPreservesHourlyAndBothSourceLabels() {
         val base = stampModules(primary, city)
         val donor = stampModules(WeatherData(daily = listOf(DailyWeather(0, high = 31.0)), dataSource = "AMAP",
             blockSources = mapOf("daily" to "AMAP"), utcOffsetSeconds = 28800), city)
         val result = replaceModule(base, donor, WeatherModule.FORECAST)
-        assertTrue(result.hourly.isEmpty())
+        assertEquals(base.hourly, result.hourly)
         assertEquals(31.0, result.daily.single().high!!, 0.0)
         assertEquals(base.current, result.current)
         assertEquals(base.rainMinutes, result.rainMinutes)
-        assertFalse(result.blockSources.containsKey("hourly"))
-        assertEquals("AMAP", result.moduleEvidence.getValue("forecast").source)
+        assertEquals(base.blockSources["hourly"], result.blockSources["hourly"])
+        assertEquals("XIAOMI + AMAP", result.moduleEvidence.getValue("forecast").source)
         assertEquals(city.latitude, result.moduleEvidence.getValue("forecast").requestedLatitude!!, 0.0)
         assertEquals(28800, result.utcOffsetSeconds)
     }

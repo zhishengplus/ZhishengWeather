@@ -1,9 +1,10 @@
 package com.zhisheng.weather.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -13,14 +14,18 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntSize
 import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.ui.theme.LocalVistaGlowLevel
 import com.zhisheng.weather.ui.theme.LocalVistaGlowPhase
 import com.zhisheng.weather.ui.theme.LocalVistaSoftGlow
 import com.zhisheng.weather.ui.theme.LocalZhishengPalette
 import kotlin.math.sin
+import kotlin.math.ceil
 
 /** Softly lit weather forms. One native drawing language at both hero and forecast sizes. */
 @Composable
@@ -36,12 +41,30 @@ internal fun VistaWeatherArtwork(condition: WeatherCondition?, modifier: Modifie
     val pageRunning = LocalCityPageMotionRunning.current
     val heldLift = remember { floatArrayOf(0f) }
     val motion = LocalVistaGlowLevel.current.drift
-    Canvas(modifier.semantics { contentDescription = condition.label }) {
-        // Read the existing lifecycle/reduced-motion aware clock only in the draw phase.
-        if (moving && pageRunning) heldLift[0] = sin(clock.value * Math.PI * 2).toFloat() * 1.4f * motion
-        val lift = if (moving) heldLift[0] else 0f
-        drawVistaWeatherArtwork(condition, light, hero, ambient, lift)
-    }
+    val artwork = rememberGraphicsLayer()
+    Spacer(modifier.semantics { contentDescription = condition.label }.drawWithCache {
+        val viewport = size
+        // Retain vector drawing commands, not a scaled bitmap or an offscreen texture.
+        // The original parent still controls clipping; the sun/moon halo can escape
+        // this drawing's bounds exactly as it did with Canvas.
+        artwork.clip = false
+        artwork.record(size = IntSize(ceil(viewport.width).toInt(), ceil(viewport.height).toInt())) {
+            val recordedSize = drawContext.size
+            drawContext.size = viewport
+            try {
+                drawVistaWeatherArtwork(condition, light, hero, ambient)
+            } finally {
+                drawContext.size = recordedSize
+            }
+        }
+        onDrawBehind {
+            // Only translation samples the clock. Size/theme/weather/light changes
+            // invalidate the cache; clock ticks never rebuild paths or gradients.
+            if (moving && pageRunning) heldLift[0] = sin(clock.value * Math.PI * 2).toFloat() * 1.4f * motion
+            val lift = if (moving) heldLift[0] else 0f
+            translate(top = lift * viewport.minDimension / 100f) { drawLayer(artwork) }
+        }
+    })
 }
 
 /** Shared static drawing used by Compose and desktop RemoteViews. */

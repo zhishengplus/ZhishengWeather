@@ -480,6 +480,7 @@ private fun RadarInstrumentPage(
         org.maplibre.android.MapLibre.getInstance(context.applicationContext)
         MapView(context).apply {
             onCreate(null)
+            post { com.zhisheng.weather.ui.UiRefreshRate.applyViewTree(this) }
             // 全帧以极低透明度参与渲染，地图空闲后才开始播放，避免第一轮逐帧白等。
             addOnDidFinishLoadingMapListener {
                 if (mapReadyState.value && currentSource == RadarSource.RAINVIEWER) radarTilesReady = true

@@ -46,6 +46,8 @@ internal class ImmersiveSky(private val onFailure: () -> Unit = {}) {
         val phase: Double, val gain: Float, val light: Boolean, val size: IntSize,
         val weatherWeights: List<Float>, val quality: SkyRenderQuality)
     private var recorded: Frame? = null
+    private var configured: Frame? = null
+    private var stormWeight = 0f
     private var recordedAt = 0L
     private var unavailable = false
 
@@ -67,7 +69,7 @@ internal class ImmersiveSky(private val onFailure: () -> Unit = {}) {
                 val mustRecord = recorded == null || layer.size != target || recorded?.quality != quality
                 if (mustRecord || (recorded != frame && now - recordedAt >= minimumFrameIntervalNanos)) {
                     layer.record(size = target) {
-                        draw(this, state, palette, phase, gain, light, size.height, weatherWeights, quality)
+                        draw(this, frame)
                     }
                     recorded = frame
                     recordedAt = now
@@ -84,41 +86,53 @@ internal class ImmersiveSky(private val onFailure: () -> Unit = {}) {
         }
     }
 
-    private fun draw(scope: DrawScope, state: NaturalLightState, palette: NaturalLightPalette,
-             phase: Double, gain: Float, light: Boolean, height: Float,
-             weatherWeights: List<Float>, quality: SkyRenderQuality) {
+    private fun draw(scope: DrawScope, frame: Frame) {
+        val state = frame.state
+        val palette = frame.palette
+        val weatherWeights = frame.weatherWeights
+        val phase = frame.phase
         fun weatherWeight(predicate: (NaturalWeather) -> Boolean): Float =
             NaturalWeather.entries.indices.sumOf { if (predicate(NaturalWeather.entries[it])) weatherWeights[it].toDouble() else 0.0 }.toFloat()
-        shader.setFloatUniform("resolution", scope.size.width, height)
+        val previous = configured
+        // The same RuntimeShader retains uniforms between recordings. Most frames only
+        // advance time: keep the identical weather/geometry values and weighted sums,
+        // rather than resubmitting them and allocating their arrays at every sky tick.
+        // Weather blends, layout/quality changes and a new renderer invalidate this set.
+        if (previous == null || previous.state != state || previous.palette != palette ||
+            previous.weatherWeights != weatherWeights || previous.size != frame.size ||
+            previous.gain != frame.gain || previous.light != frame.light || previous.quality != frame.quality) {
+            shader.setFloatUniform("resolution", scope.size.width, scope.size.height)
+            shader.setFloatUniform("cover", state.cloud)
+            shader.setFloatUniform("day", state.daylight)
+            shader.setFloatUniform("dusk", state.twilight)
+            shader.setFloatUniform("solarMode", if (state.solar != null) 1f else 0f)
+            shader.setFloatUniform("sunSource", state.solar?.lightX ?: .80f, state.solar?.lightY ?: (.38f + .07f * state.twilight))
+            shader.setFloatUniform("skyCloudShade", palette.cloudShadow.red, palette.cloudShadow.green, palette.cloudShadow.blue)
+            shader.setFloatUniform("skyCloudLit", palette.cloudLit.red, palette.cloudLit.green, palette.cloudLit.blue)
+            shader.setFloatUniform("strength", frame.gain)
+            shader.setFloatUniform("cloudSlices", if (frame.quality == SkyRenderQuality.HIGH) 6f else 4f)
+            shader.setFloatUniform("detail", if (frame.quality == SkyRenderQuality.HIGH) 1f else 0f)
+            shader.setFloatUniform("lightTheme", if (frame.light) 1f else 0f)
+            stormWeight = weatherWeight { it == NaturalWeather.STORM }
+            shader.setFloatUniform("storm", stormWeight)
+            shader.setFloatUniform("mist", weatherWeight { it == NaturalWeather.FOG || it == NaturalWeather.HAZE || it == NaturalWeather.DUST })
+            shader.setFloatUniform("sunVisible", weatherWeight { it != NaturalWeather.NEUTRAL })
+            shader.setFloatUniform("heat", if (state.thermal == ThermalModifier.HOT) 1f else 0f)
+            shader.setFloatUniform("structure", FloatArray(4) { component ->
+                structures.indices.sumOf { (structures[it][component] * weatherWeights[it]).toDouble() }.toFloat()
+            })
+            shader.setFloatUniform("aerosol", weatherWeight { it == NaturalWeather.FOG },
+                weatherWeight { it == NaturalWeather.HAZE }, weatherWeight { it == NaturalWeather.DUST })
+            shader.setFloatUniform("cloudColor", palette.cloud.red, palette.cloud.green, palette.cloud.blue)
+            configured = frame
+        }
         // A closed path in density space has matching position and velocity at the clock seam.
         val angle = phase * PI * 2
         val travel = .22 + state.wind * .24
         shader.setFloatUniform("drift", (cos(angle) * travel).toFloat(), (sin(angle) * travel).toFloat())
-        shader.setFloatUniform("cover", state.cloud)
-        shader.setFloatUniform("day", state.daylight)
-        shader.setFloatUniform("dusk", state.twilight)
-        shader.setFloatUniform("solarMode", if (state.solar != null) 1f else 0f)
-        shader.setFloatUniform("sunSource", state.solar?.lightX ?: .80f, state.solar?.lightY ?: (.38f + .07f * state.twilight))
-        shader.setFloatUniform("skyCloudShade", palette.cloudShadow.red, palette.cloudShadow.green, palette.cloudShadow.blue)
-        shader.setFloatUniform("skyCloudLit", palette.cloudLit.red, palette.cloudLit.green, palette.cloudLit.blue)
-        shader.setFloatUniform("strength", gain)
-        shader.setFloatUniform("cloudSlices", if (quality == SkyRenderQuality.HIGH) 6f else 4f)
-        shader.setFloatUniform("detail", if (quality == SkyRenderQuality.HIGH) 1f else 0f)
-        shader.setFloatUniform("lightTheme", if (light) 1f else 0f)
-        val stormWeight = weatherWeight { it == NaturalWeather.STORM }
-        shader.setFloatUniform("storm", stormWeight)
         shader.setFloatUniform("lightning", stormWeight * naturalLightning(phase * 72.0))
-        shader.setFloatUniform("mist", weatherWeight { it == NaturalWeather.FOG || it == NaturalWeather.HAZE || it == NaturalWeather.DUST })
-        shader.setFloatUniform("sunVisible", weatherWeight { it != NaturalWeather.NEUTRAL })
-        shader.setFloatUniform("heat", if (state.thermal == ThermalModifier.HOT) 1f else 0f)
         shader.setFloatUniform("heatPhase", (phase * 2 * PI).toFloat())
-        shader.setFloatUniform("structure", FloatArray(4) { component ->
-            structures.indices.sumOf { (structures[it][component] * weatherWeights[it]).toDouble() }.toFloat()
-        })
-        shader.setFloatUniform("aerosol", weatherWeight { it == NaturalWeather.FOG },
-            weatherWeight { it == NaturalWeather.HAZE }, weatherWeight { it == NaturalWeather.DUST })
-        shader.setFloatUniform("cloudColor", palette.cloud.red, palette.cloud.green, palette.cloud.blue)
-        scope.drawContext.canvas.nativeCanvas.drawRect(0f, 0f, scope.size.width, height, paint)
+        scope.drawContext.canvas.nativeCanvas.drawRect(0f, 0f, scope.size.width, scope.size.height, paint)
     }
 }
 

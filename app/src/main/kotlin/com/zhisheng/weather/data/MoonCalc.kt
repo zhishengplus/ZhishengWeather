@@ -146,6 +146,17 @@ object MoonCalc {
         return ((1.0 - cosElongation) / 2.0).coerceIn(0.0, 1.0)
     }
 
+    /** Northern-hemisphere diagram: waxing is lit on the right, waning on the left. */
+    fun isWaxing(millis: Long): Boolean {
+        val days = millis / DAY_MS.toDouble() - 0.5 + J1970 - J2000
+        val anomaly = (357.5291 + 0.98560028 * days) * RAD
+        val center = (1.9148 * sin(anomaly) + 0.02 * sin(2 * anomaly) + 0.0003 * sin(3 * anomaly)) * RAD
+        val sunLongitude = anomaly + center + 102.9372 * RAD + PI
+        val moonLongitude = (218.316 + 13.176396 * days) * RAD +
+            6.289 * RAD * sin((134.963 + 13.064993 * days) * RAD)
+        return sin(moonLongitude - sunLongitude) >= 0.0
+    }
+
     private fun moonAltitude(millis: Long, latitude: Double, longitude: Double): Double {
         val lw = -longitude * RAD
         val phi = latitude * RAD

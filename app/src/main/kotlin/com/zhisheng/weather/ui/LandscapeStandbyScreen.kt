@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.repeatOnLifecycle
 import com.zhisheng.weather.BuildConfig
 import com.zhisheng.weather.data.LandscapeStandbyStyle
 import com.zhisheng.weather.i18n.uiText
@@ -96,7 +97,7 @@ fun LandscapeStandbyScreen(
     }
 }
 
-/** 已发布并获得用户认可的经典横屏终端；作为独立实现长期保留。 */
+/** 经典横屏终端的独立实现。 */
 @Composable
 private fun ClassicLandscapeStandbyScreen(
     uiState: HomeUiState,
@@ -107,10 +108,14 @@ private fun ClassicLandscapeStandbyScreen(
     val current = data?.current
     val offset = data?.utcOffsetSeconds
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(offset) {
-        while (true) {
-            nowMillis = System.currentTimeMillis()
-            delay(1_000L - nowMillis % 1_000L)
+    // 与气象中枢同款 STARTED 门控：息屏/退后台时停止每秒唤醒主线程。
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(offset, lifecycle) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) {
+                nowMillis = System.currentTimeMillis()
+                delay(1_000L - nowMillis % 1_000L)
+            }
         }
     }
     val zone = remember(offset) {

@@ -1,0 +1,10 @@
+{
+  "testOnly": true,
+  "subjectId": "00000000-0000-4000-8000-000000000011",
+  "publicKey": "MCowBQYDK2VwAyEAGJqvCe5V+o5ChfWjOmrgmCbq2tXVNLxeX6S8Q0FHQOc=",
+  "receipt": {
+    "keyId": "node-fixture-only",
+    "payload": "eyJwcm90b2NvbCI6MSwiYmFkZ2VJZCI6ImZpcnN0LWxpZ2h0LTAxNiIsImVkaXRpb24iOiLliJ3lhYkgwrcgMC4xLjYiLCJncmFudElkIjoiYzc3ZGRkNTctODEwNS00MDcyLTgyMmYtYWVhOGUyODMxZTExIiwic3ViamVjdElkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIiwic2VyaWFsIjoxMSwiY2xhaW1lZEF0IjoxMDAwfQ",
+    "signature": "skW7hHDks10VsEOfWMQKXPi65B0MVdjhlStXN08BacefuoU-_dhjypE6oATurALMPsGf__BejlnZlwvRS-M1Bg"
+  }
+}

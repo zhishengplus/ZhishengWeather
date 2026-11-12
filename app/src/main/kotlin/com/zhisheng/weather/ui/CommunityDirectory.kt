@@ -28,7 +28,7 @@ internal fun parseCommunityDirectory(raw: String): CommunityDirectorySnapshot {
         require(it.isNotBlank() && it == it.trim() && it.length <= max && it.none { c -> c.code < 32 || c.code == 127 })
     }
     val sponsors = root.getValue("sponsors").jsonArray.map { value(it, 100) }
-    require(sponsors.size in 6..2000 && sponsors.distinct().size == sponsors.size && sponsors[5] == "Sh4d0W")
+    require(sponsors.size in 6..2000 && sponsors.distinct().size == sponsors.size)
     val sections = root.getValue("sections").jsonArray.map { rawSection ->
         val s = rawSection.jsonObject
         val names = s.getValue("contributors").jsonArray.map { value(it, 100) }
@@ -64,7 +64,7 @@ internal object CommunityDirectory {
                 try { out.write(raw.toByteArray()); file.finishWrite(out) } catch (e: Exception) { file.failWrite(out); throw e }
                 state.value = next
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* Keep the last complete, validated list; never blank the bundled list. */ }
+            catch (_: Exception) { /* Keep the last complete, validated list. */ }
         }
     }
 }

@@ -32,6 +32,7 @@ internal fun VistaForecastScreen(
     city: City?, days: List<DailyWeather>, yesterday: YesterdayInfo?,
     tempUnit: String, windUnit: String, utcOffsetSeconds: Int?, onBack: () -> Unit,
     hourly: List<HourlyWeather> = emptyList(),
+    vertical: Boolean = false, onVertical: (Boolean) -> Unit = {},
 ) {
     val chrome = LocalZhishengChrome.current
     val nowMillis = weatherPresentationTime()
@@ -43,6 +44,7 @@ internal fun VistaForecastScreen(
     val selected = track.firstOrNull { it.dateMillis == selectedDate } ?: days.firstOrNull() ?: track.firstOrNull()
     Column(Modifier.fillMaxSize().zhishengScreen().statusBarsPadding().navigationBarsPadding()) {
         FeaturePageHeader(if (days.isEmpty()) "多天天气" else "${days.size}日天气预报", "", onBack)
+        ForecastLayoutToggle(vertical, onVertical)
         LazyColumn(Modifier.fillMaxWidth().weight(1f),
             contentPadding = PaddingValues(horizontal = chrome.pagePadding, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -53,7 +55,8 @@ internal fun VistaForecastScreen(
                 item { Text("暂无逐日预报，返回主页刷新后再试", color = ZhishengTextSecondary) }
             } else {
                 item {
-                    ForecastDateTrack(track, selected.dateMillis, tempUnit, utcOffsetSeconds) { selectedDate = it }
+                    if (vertical) ForecastDayList(track, selected.dateMillis, tempUnit, windUnit, utcOffsetSeconds) { selectedDate = it }
+                    else ForecastDateTrack(track, selected.dateMillis, tempUnit, utcOffsetSeconds) { selectedDate = it }
                 }
                 item {
                     val hours = remember(hourly, selected.dateMillis, utcOffsetSeconds) {

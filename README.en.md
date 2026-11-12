@@ -206,106 +206,16 @@ GitHub Releases also includes `SHA256SUMS.txt`.
 
 ## Build from source
 
-This repository holds a key-free source export; read [SOURCE_EXPORT.md](SOURCE_EXPORT.md) before building. The current snapshot is 0.1.5-beta10.8. The 0.1.6 source hasn't been synced yet, so use the APK above if you want 0.1.6.
+This is the key-free 0.1.6 / 20261172 community source, including the forecast widgets from PR #17. Install JDK 17 and Android SDK 34, then run `./gradlew :app:assembleDebug` (Windows: `gradlew.bat`). All variants use a local debug signature and disable official self-update. No signing keystore, service credentials, personal rosters or contact QR codes are included.
 
-You need JDK 17 and Android SDK 34; the Gradle Wrapper is included.
+Optional credentials and compatible shared-service configuration belong in your ignored `local.properties`; see `local.properties.example`. Badge endpoint and verification keys are blank in `app/src/main/assets/badges/service.json`. Core public weather sources and outfit calculations do not depend on these services.
 
-```bash
-git clone https://github.com/zhishengplus/ZhishengWeather.git
-cd ZhishengWeather
-./gradlew assembleDebug        # Windows: .\gradlew.bat assembleDebug
-```
+Fork the public repository, create a branch and submit a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Chinese development guide](README.md).
 
-Export builds use a locally generated debug signature and have in-app updates turned off, so they can't install over the official public build.
+## Code contributions
 
-<details>
-<summary><b>Use your own QWeather credentials</b></summary>
-<br>
-
-Add these to `local.properties` in the project root (Git ignores this file):
-
-```properties
-sdk.dir=<Android SDK path>
-qw.host=<API Host>
-qw.project_id=<Project ID>
-qw.kid=<Key ID>
-qw.private_key=<Ed25519 private key, single line>
-```
-
-You can also skip the build change and enter them in the app under 数据接入 (data access) in settings.
-
-</details>
-
-Built with Kotlin 2.0, Jetpack Compose, Material 3, Coroutines and Flow, Retrofit, OkHttp, kotlinx-serialization, DataStore and WorkManager. MapLibre draws the typhoon map, and the 0.1.6 badges render with three.js in a WebView. `minSdk 26`, `targetSdk 34`. See [CONTRIBUTING.md](CONTRIBUTING.md) for code layout and commit conventions.
-
-## Come say hi
-
-The QQ groups are the place to talk about weather, share ideas or report problems. Group 1 is almost full, so newcomers should start with Group 2.
-
-<table align="center">
-  <tr>
-    <td align="center" width="260">
-      <img src="assets/readme/qq-group-2.png" width="200" alt="QR code for Zhisheng Weather user group 2, group number 562847192"><br>
-      <b>Group 2</b> · 562847192<br>
-      <a href="https://qm.qq.com/q/Plez46Gzuy">Join in QQ</a>
-    </td>
-    <td align="center" width="260">
-      <img src="assets/readme/qq-group-1.png" width="200" alt="QR code for Zhisheng Weather user group 1, group number 1106284779"><br>
-      <b>Group 1</b> · 1106284779<br>
-      <a href="https://qm.qq.com/q/nfpxlC4Pyo">Join in QQ</a> · <sub>almost full</sub>
-    </td>
-  </tr>
-</table>
-
-Reproducible bugs are welcome in [GitHub Issues](https://github.com/zhishengplus/ZhishengWeather/issues). Include the app version, phone model, Android version, data source and screenshots where they help, and blur any tokens or API keys.
-
-## Support the project
-
-Zhisheng Weather will stay free and ad-free. I build it because I enjoy it, and I enjoy hearing from the people who use it. If a forecast is off, a sentence reads awkwardly, or there's something you'd like next, just tell me.
-
-If you'd like to chip in, scan the WeChat appreciation code below and leave the name you'd like to appear under. Every supporter is listed on the in-app sponsor board.
-
-<p align="center">
-  <img src="assets/sponsor-wechat.jpg" width="220" alt="WeChat appreciation code">
-  <br><br>
-  <b>愿你出门遇晴，代码一次通过，日子风调雨顺。</b><br>
-  <sub>May you step out into clear skies, pass every build on the first try, and have kind weather all year.</sub>
-</p>
-
-## Thanks
-
-Thank you to everyone who has sent feedback in the groups, on Coolapk and in Issues. Sponsors on the live in-app board, 99 people, in that order: `秋`, `披着牛皮的糖`, `摆渡人`, `😀`, `皮`, `Sh4d0W`, `饕餮梼杌獬豸`, `&`, `追光者`, `👁_👁`, `Past-Present-Future`, `雾岛笙南`, `苍茫`, `CK`, `半夏`, `西伯利亚狼`, `豆腐佬喔`, `洛儿阿茶`, `江宁`, `浪中浮云`, `大寶`, `支持枳生的老板`, `李勇`, `bluebone`, `深海罗非鱼`, `轻轻飘过的落叶`, `一月光含千世界`, `JamoC`, `野鸭子Evan`, `白日梦想家`, `YOGA`, `Adrian`, `Mrmuscle`, `ayida999`, `关`, `AiFuL`, `人生得意`, `意难平`, `匠芯`, `钟福燕`, `∮`, `润物无声`, `ScottZzz`, `*年`, `嗷呜`, `凉粉`, `浩然一切随缘`, `十二`, `2026`, `偏我来时不逢春`, `江湖暂过住`, `亦世凡华`, `llb`, `屿光`, `阿良`, `中未⬆️`, `十三”画`, `SKY`, `PickGear`, `以后升级纯靠举报加经验太好玩了`, `GongXian`, `酷我哥哥`, `李玄子`, `风来坊`, `X_K`, `果丽橙`, `谭政成`, `赵胖胖和李瘦瘦`, `烟花易冷`, `学习鱼`, `Ali`, `玉立`, `拾玖ya`, `...`, `阮福熊`, `yukino`, `许久丶不嵩手`, `如此而已`, `小豪科1212`, `王鸣川`, `Tarachi`, `半醒时迁`, `枫宇I樵夫`, `Neuro`, `安婧Tiffany`, `释梦Supreme`, `礼子`, `Misaki`, `征服天堂`, `好事多磨`, `无糖可乐没有糖`, `wdk7527`, `白云`, `（待认领）备注写的是：感谢大佬的软件，很好用`, `（待认领）备注写的是：枳生`, `kSir`, `一只糊涂猫`, `肖智强`, `为你写诗`.
-
-Community contributors: `PPQ1028`, `Uinuan1`, `KZzzzo`, `睡觉了寂`, `微生之最`, `r1file`, `vsqesy3721`, `茉莉羽`, `陈大橙`, `飞667`, `一杯冰美式、、`, `M1ralce`, `紅星照耀中國`, `我爱跑步`, `河鱼天雁`, `你的心里没点高数吗`, `周月星斗`, `无敌战神暴王龙`, `control3`, `明珠有泪`, `Gstar_`, `伍拾两HZ`, `寡欲老公猪`, `PickGear`.
-
-Weather icons derive from Meteocons, interface icons from Phosphor Icons, offline place names come from GeoNames, solar positions use commons-suncalc, and badges render with three.js. Licenses and sources are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-<details>
-<summary><b>Version history</b></summary>
-<br>
-
-| Version | Highlights |
-|:--|:--|
-| 0.1.6 | Outfits, 3D badges, typhoon tracks, lookback for any date |
-| 0.1.5-beta10.8 | Swipe between cities, first-run location guide, precise places, fill order for missing data |
-| 0.1.5-beta10.5 | Per-module sources, more domestic sources, morning and evening reminders, widget display options, Sky Bird |
-| 0.1.5 betas | ClearSky interface, 15-day forecast, weather lookback, Japanese interface |
-| 0.1.3 | Landscape weather clock, street-level location, glass widgets, weather-girl icon |
-| 0.1.0 | City deck, weather ambience, five terminal widgets |
-| 0.0.5 | The light "Cold Jade" theme |
-| 0.0.1 | First public preview: the phosphor-terminal interface and 15 weather icons |
-
-Full notes for every version are on [Releases](https://github.com/zhishengplus/ZhishengWeather/releases).
-
-</details>
+City boundary maps: PickGear (PR #7). Forecast combo widgets and configuration integration: the PR #17 contributor (PR #17). Existing weather artwork is retained; third-party licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 
-- Code is released under the [MIT License](LICENSE). Issues and PRs are welcome.
-- The interface design, app icons, the weather-girl character, badge models and app copy are Zhisheng Weather project assets; please credit the source when you use them.
-- Weather data belongs to its providers and is for reference only.
-- Keep personal weather-service credentials out of public repositories.
-
-<br>
-
-<p align="center"><sub>Zhisheng Weather · See the weather. And the sky.</sub></p>
+[MIT](LICENSE). Third-party resources retain their own licenses.

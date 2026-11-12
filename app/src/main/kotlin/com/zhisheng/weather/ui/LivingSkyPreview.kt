@@ -33,6 +33,7 @@ internal val skyPreviewMoments = listOf(
 @Composable
 internal fun LivingSkyPreviewDialog(onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         LivingSkyPreviewContent(onClose, Modifier.fillMaxSize().systemBarsPadding().padding(12.dp))
     }
 }

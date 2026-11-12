@@ -46,6 +46,8 @@ internal fun CityWeatherPager(
     modifier: Modifier = Modifier,
     onPaging: (Boolean) -> Unit = {},
     onPagerReady: (PagerState) -> Unit = {},
+    animateExternalSelection: Boolean = true,
+    onSettledCity: (String?) -> Unit = {},
     overlay: @Composable BoxScope.(PagerState) -> Unit = {},
     content: @Composable (City, PagerState) -> Unit,
 ) {
@@ -58,27 +60,37 @@ internal fun CityWeatherPager(
     val select by rememberUpdatedState(onSelect)
     val paging by rememberUpdatedState(onPaging)
     DisposableEffect(pager) { onDispose { paging(false) } }
+    var synchronizing by remember { mutableStateOf(false) }
     LaunchedEffect(keys, selectedKey) {
+        val initialized = selection.hasObservedSelection
         val external = selection.observe(selectedKey, keys)
         val target = keys.indexOf(selectedKey)
         if (target >= 0 && (external || !pager.isScrollInProgress && pager.currentPage >= keys.size)) {
-            if (pager.settledPage != target || pager.currentPageOffsetFraction != 0f) pager.scrollToPage(target)
+            if (pager.settledPage != target || pager.currentPageOffsetFraction != 0f) {
+                synchronizing = true
+                try {
+                    if (initialized && animateExternalSelection) {
+                        pager.animateScrollToPage(target, animationSpec = spring(dampingRatio = 1f, stiffness = 500f))
+                    } else pager.scrollToPage(target)
+                } finally { synchronizing = false }
+            }
         }
     }
     // Freeze city-local artwork and glow on the same composition as the gesture.
     // The separate sky keeps its own continuous transition and frame budget.
     val scrolling by remember { derivedStateOf { pager.isScrollInProgress } }
-    SideEffect { paging(scrolling); onPagerReady(pager) }
+    // Observe readiness, not every layout/offset update, so measuring the first
+    // target page wakes search navigation without recomposing the pager each frame.
+    val readyCity = remember(pager, selectedKey) { derivedStateOf {
+        val laidOutKey = pager.layoutInfo.visiblePagesInfo.firstOrNull { it.index == pager.settledPage }?.key
+        selectedKey?.takeIf { !pager.isScrollInProgress && !synchronizing &&
+            pager.currentPageOffsetFraction == 0f && laidOutKey == it }
+    } }.value
+    SideEffect { paging(scrolling); onPagerReady(pager); onSettledCity(readyCity) }
     LaunchedEffect(pager) {
-        var moved = false
-        snapshotFlow { pager.isScrollInProgress }.distinctUntilChanged().collect { scrolling ->
-            if (scrolling) moved = true
-            else if (moved) {
-                moved = false
-                currentCities.getOrNull(pager.settledPage)?.locationKey?.let { key ->
-                    if (selection.request(key, currentSelected)) select(key)
-                }
-            }
+        snapshotFlow { pager.isScrollInProgress to synchronizing }.distinctUntilChanged().collect { (scrolling, syncing) ->
+            selection.onMotion(scrolling, syncing,
+                currentCities.getOrNull(pager.settledPage)?.locationKey, currentSelected)?.let(select)
         }
     }
     Box(modifier.onPlaced { viewport.coordinates = it }) {

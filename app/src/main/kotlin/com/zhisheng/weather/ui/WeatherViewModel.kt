@@ -59,6 +59,7 @@ data class DisplayPrefs(
     val moduleOrder: List<HomeModule> = HomeModule.defaultOrder,
     val telemetryMetrics: Set<TelemetryMetric> = TelemetryMetric.defaultSelection,
     val lifeIndexMetrics: Set<LifeIndexMetric> = LifeIndexMetric.defaultSelection,
+    val showOutfit: Boolean = true,
 )
 
 data class HomeUiState(
@@ -199,6 +200,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         SettingsRepository.showTelemetry,
     ) { aqi, ix, y, p, tele ->
         DisplayPrefs(showAqi = aqi, showIndices = ix, showYesterday = y, showPrecip = p, showTelemetry = tele)
+    }.combine(SettingsRepository.showOutfit) { prefs, show ->
+        prefs.copy(showOutfit = show)
     }.combine(SettingsRepository.showSpacetime) { prefs, show ->
         prefs.copy(showSpacetime = show)
     }.combine(SettingsRepository.showSkyPhotography) { prefs, show ->
@@ -284,28 +287,47 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         viewModelScope.launch {
+            var initialSelection = true
             selectedCity.distinctUntilChangedBy { it?.locationKey }.collectLatest { city ->
                 if (city == null) {
                     sceneJob?.cancel()
                     _sceneCityKey.value = null
                     _sceneWeather.value = null
                 }
-                if (city != null && city.locationKey != lastFetchedKey) {
+                if (city != null) {
+                    val opening = initialSelection
+                    if (city.locationKey == lastFetchedKey && lastFetchKey == city.locationKey) {
+                        initialSelection = false
+                        return@collectLatest
+                    }
                     lastFetchedKey = city.locationKey
-                    // Keep the snapshot on screen while consecutive swipes settle.
+                    // ON_RESUME may already have started this city's request. Never
+                    // cancel it or replace its result with the disk snapshot.
+                    if (lastFetchKey == city.locationKey && fetchJob?.isActive == true) {
+                        initialSelection = false
+                        return@collectLatest
+                    }
                     fetchJob?.cancel()
                     sceneJob?.cancel()
                     _loading.value = false
                     val cached = loadCityPreview(city)
                     if (cached != null) publishCitySnapshot(city.locationKey, cached)
                     if (selectedCity.value?.locationKey != city.locationKey) return@collectLatest
+                    if (lastFetchKey == city.locationKey && fetchJob?.isActive == true) {
+                        initialSelection = false
+                        return@collectLatest
+                    }
                     _weather.value = cached?.data
                     _weatherCityKey.value = city.locationKey
                     _staleAge.value = cached?.let { System.currentTimeMillis() - it.savedAtMillis }
-                    kotlinx.coroutines.delay(1_000)
+                    // Only rapid city swipes need settling time. The first real city
+                    // must fetch even when ON_RESUME saw the temporary null selection.
+                    if (!opening) kotlinx.coroutines.delay(1_000)
                     if (selectedCity.value?.locationKey != city.locationKey) return@collectLatest
-                    if (citySwitchNeedsRefresh(cached?.savedAtMillis, System.currentTimeMillis())) refresh(city)
-                    else refreshScene(city, force = false)
+                    if (citySwitchNeedsRefresh(cached?.savedAtMillis, System.currentTimeMillis(), opening)) {
+                        refresh(city, force = false)
+                        initialSelection = false
+                    } else refreshScene(city, force = false)
                 }
             }
         }
@@ -356,7 +378,7 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         if (!force && !refreshGate.shouldFetch(target.locationKey, now, interval,
                 lastFetchKey.takeIf { fetchJob?.isActive == true }, intervalElapsed)) return
         refreshScene(target, force)
-        if (target.locationKey != lastFetchedKey) lastFetchedKey = target.locationKey
+        lastFetchedKey = target.locationKey
         lastFetchKey = target.locationKey
         fetchJob?.cancel()
         val knownSnapshot = _citySnapshots.value[target.locationKey]
@@ -431,9 +453,11 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     refreshGate.success(target.locationKey, System.currentTimeMillis())
                     _staleAge.value = null
                     publishCitySnapshot(target.locationKey, CachedWeather(result, System.currentTimeMillis()))
-                    runCatching { WeatherCache.save(getApplication(), target.locationKey, result) }
-                    runCatching { WidgetRuntime.publishAndRender(getApplication(), target, result) }
-                    com.zhisheng.weather.data.WeatherReminderSchedule.schedule(getApplication())
+                    completeWeatherRefresh(
+                        persist = { WeatherCache.save(getApplication(), target.locationKey, result) },
+                        renderWidgets = { WidgetRuntime.publishAndRender(getApplication(), target, result) },
+                        scheduleReminders = { com.zhisheng.weather.data.WeatherReminderSchedule.schedule(getApplication()) },
+                    )
                 }
                 if (selectedCity.value?.locationKey == target.locationKey) {
                     _weather.value = result
@@ -494,15 +518,47 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         _locateMessage.value = null
     }
 
+    private val _pendingSearchCityKey = MutableStateFlow<String?>(null)
+    val pendingSearchCityKey: StateFlow<String?> = _pendingSearchCityKey
+    private val _citySelectionError = MutableStateFlow<String?>(null)
+    val citySelectionError: StateFlow<String?> = _citySelectionError
+    private var citySelectionJob: kotlinx.coroutines.Job? = null
+
     fun addCityAndSelect(city: City) {
         cancelLocateForSelection()
+        val revision = selectionRevision
         _locateMessage.value = null
-        viewModelScope.launch {
-            val savedCity = CityRepository.addCity(city)
-            lastFetchedKey = savedCity.locationKey
-            refresh(savedCity)
+        _citySelectionError.value = null
+        citySelectionJob = viewModelScope.launch {
+            try {
+                val savedCity = CityRepository.addCity(city)
+                if (selectionRevision != revision) return@launch
+                lastFetchedKey = savedCity.locationKey
+                refresh(savedCity)
+                // Wait only for local selection publication, never for the network forecast.
+                kotlinx.coroutines.withTimeout(5_000L) {
+                    uiState.first { it.selectedCity?.locationKey == savedCity.locationKey &&
+                        it.cities.any { saved -> saved.locationKey == savedCity.locationKey } }
+                }
+                if (selectionRevision == revision) _pendingSearchCityKey.value = savedCity.locationKey
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                if (selectionRevision == revision) _citySelectionError.value = "暂时没能切换城市，请再点一次"
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (selectionRevision == revision) _citySelectionError.value = "暂时没能切换城市，请再点一次"
+            }
         }
     }
+
+    fun completeSearchSelection(key: String) {
+        if (_pendingSearchCityKey.value == key) _pendingSearchCityKey.value = null
+    }
+
+    fun cancelSearchSelection() {
+        if (citySelectionJob?.isActive == true || _pendingSearchCityKey.value != null) cancelLocateForSelection()
+    }
+    fun clearCitySelectionError() { _citySelectionError.value = null }
 
     fun removeCity(locationKey: String) {
         if (selectedCity.value?.locationKey == locationKey) cancelLocateForSelection()
@@ -572,6 +628,9 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     private fun cancelLocateForSelection(cancelInitial: Boolean = true) {
         if (cancelInitial) initialLocationRequest.cancel()
         selectionRevision++
+        citySelectionJob?.cancel()
+        citySelectionJob = null
+        _pendingSearchCityKey.value = null
         autoLocateJob?.cancel()
         autoLocateJob = null
         locateJob?.cancel()
@@ -606,13 +665,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                 // using stateIn's temporary null as the location request's starting city.
                 cityInitializationJob.join()
                 val storedSelection = CityRepository.selectedCity.first()
-                if (selectionRevision != revision) return@launch
+                val locatedKey = CityRepository.locatedCityKey.first()
+                if (selectionRevision != revision ||
+                    !com.zhisheng.weather.data.shouldAutoFollowLocation(storedSelection?.locationKey, locatedKey)) return@launch
                 selectedCity.first { it?.locationKey == storedSelection?.locationKey }
                 if (selectionRevision != revision) return@launch
 
-                // Restoring a known location is independent of the GPS throttle.
-                // Otherwise a recent fix leaves the last manually viewed city selected
-                // after reopening, even though automatic location following is enabled.
+                // Repair a missing selection or keep the already selected location.
+                // Foreground timers and resume must preserve manually viewed cities.
                 val restored = CityRepository.restoreLocatedCity(storedSelection?.locationKey)
                 if (selectionRevision != revision) return@launch
                 if (restored != null) {

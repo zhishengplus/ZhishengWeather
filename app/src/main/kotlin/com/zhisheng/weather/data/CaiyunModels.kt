@@ -34,6 +34,7 @@ data class CaiyunRealtime(
     @SerialName("life_index") val lifeIndex: CaiyunRealtimeLifeIndex? = null,
     @SerialName("air_quality") val airQuality: CaiyunAir? = null,
     val precipitation: CaiyunRealtimePrecip? = null,
+    val status: String? = null,
 )
 
 @Serializable

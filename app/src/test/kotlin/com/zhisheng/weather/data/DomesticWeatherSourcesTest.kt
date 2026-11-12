@@ -19,9 +19,14 @@ class DomesticWeatherSourcesTest {
         assertEquals(SourcePref.AUTO, SourcePref.from("moji").effective(false))
     }
     @Test fun dailyOnlySourcesCannotOfferMadeUpHourlyOrMinutelyData() {
-        listOf("tencent", "weathercn", "seniverse", "moji").forEach { key ->
+        listOf("seniverse", "moji").forEach { key ->
             val source = SourcePref.from(key)
             assertFalse(WeatherSourceCapabilities.map.getValue(source).hourly)
+            assertFalse(WeatherSourceCapabilities.supports(source, WeatherModule.MINUTELY))
+        }
+        listOf("tencent", "weathercn").forEach { key ->
+            val source = SourcePref.from(key)
+            assertTrue(WeatherSourceCapabilities.map.getValue(source).hourly)
             assertFalse(WeatherSourceCapabilities.supports(source, WeatherModule.MINUTELY))
         }
     }

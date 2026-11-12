@@ -18,6 +18,19 @@ abstract class GenerateWidgetConfiguration : DefaultTask() {
     }
 }
 
+abstract class GenerateLauncherShortcuts : DefaultTask() {
+    @get:Input abstract val applicationId: Property<String>
+    @get:InputFile @get:PathSensitive(PathSensitivity.NONE)
+    abstract val template: RegularFileProperty
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction fun generate() {
+        val target = outputDirectory.file("xml/shortcuts.xml").get().asFile
+        target.parentFile.mkdirs()
+        target.writeText(template.get().asFile.readText().replace("__APPLICATION_ID__", applicationId.get()))
+    }
+}
+
 // 和风天气凭据（不入库，仅存 local.properties）
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
@@ -27,9 +40,9 @@ fun lp(key: String, def: String = ""): String = localProps.getProperty(key, def)
 
 // 兼容旧命令的公开版开关；新发行流程优先使用独立的 assemblePublicRelease。
 val publicBuild = providers.gradleProperty("publicBuild").isPresent
-// 用户交流入口是公开信息，所有构建版本都必须包含。
-val communityQqGroup = "562847192"
-val communityQqGroup1 = "1106284779"
+// Optional community contact configuration; no contact details are bundled.
+val communityQqGroup = lp("community.qq_group")
+val communityQqGroup1 = lp("community.qq_group_1")
 
 android {
     namespace = "com.zhisheng.weather"
@@ -39,10 +52,9 @@ android {
         applicationId = "com.zhisheng.weather"
         minSdk = 26
         targetSdk = 34
-        // Beta 10 widget and update hotfix; keep the public package/signature.
-        versionCode = 20261102
-        versionName = "0.1.5-beta10.8"
-        resValue("string", "shortcut_target_package", "com.zhisheng.weather")
+        // Stable 0.1.6 community development baseline.
+        versionCode = 20261172
+        versionName = "0.1.6"
 
         // 发行渠道面向实体手机；去掉仅供 Intel 模拟器使用的 x86/x86_64 MapLibre 库。
         // 同时保留现代 ARM64 与 Android 8 时代的 32 位 ARM 设备。
@@ -57,13 +69,17 @@ android {
         // 天地图移动端 Key：仅从被 Git 忽略的 local.properties 注入；包名与 SHA1 在控制台绑定。
         // 和风 JWT 在公开包必须清空；天地图 tk 按包名绑定，公开包同样需要底图。
         buildConfigField("String", "TDT_TOKEN", "\"${lp("tianditu.token")}\"")
+        buildConfigField("String", "SHARED_SERVICE_ENDPOINT", "\"${lp("service.endpoint", "https://example.invalid")}\"")
         buildConfigField("String", "COMMUNITY_QQ_GROUP", "\"$communityQqGroup\"")
         buildConfigField("String", "COMMUNITY_QQ_GROUP_1", "\"$communityQqGroup1\"")
-        // 只有与 GitHub 公共版同包名、同签名的构建可以直接覆盖更新。
+        buildConfigField("String", "COMMUNITY_QQ_JOIN_URL", "\"${lp("community.qq_join_url")}\"")
+        buildConfigField("String", "COMMUNITY_QQ_JOIN_URL_1", "\"${lp("community.qq_join_url_1")}\"")
+        // Local debug signatures cannot replace official release builds.
         buildConfigField("boolean", "CAN_SELF_UPDATE", "false")
+        buildConfigField("boolean", "BADGE_EXPERIENCE", "false")
     }
 
-    // Key-free source export: local builds use the developer debug signing key.
+    // Community builds use the developer's local debug signing key.
 
     buildTypes {
         release {
@@ -88,7 +104,6 @@ android {
             val previewSuffix = providers.gradleProperty("previewSuffix").orElse(".preview").get()
             require(Regex("\\.[a-z][a-z0-9_]*").matches(previewSuffix)) { "Invalid preview application suffix" }
             applicationIdSuffix = previewSuffix
-            resValue("string", "shortcut_target_package", "com.zhisheng.weather$previewSuffix")
             resValue("string", "app_name", if (previewSuffix == ".preview") "枳生天气 澄空体验" else "枳生天气 分层验证")
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
@@ -100,7 +115,7 @@ android {
         }
         create("publicRelease") {
             initWith(getByName("release"))
-            // 面向社区的正式公开包：独立任务、公开签名、凭据硬清空，避免漏写 -PpublicBuild。
+            // Optimized development build with empty QWeather compile-time credentials.
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             buildConfigField("String", "QW_HOST", "\"\"")
@@ -108,6 +123,12 @@ android {
             buildConfigField("String", "QW_KID", "\"\"")
             buildConfigField("String", "QW_PRIVATE_KEY", "\"\"")
             buildConfigField("boolean", "CAN_SELF_UPDATE", "false")
+        }
+        create("badgeExperience") {
+            initWith(getByName("previewPublic"))
+            applicationIdSuffix = ".badgeexperience"
+            resValue("string", "app_name", "枳生徽章体验")
+            buildConfigField("boolean", "BADGE_EXPERIENCE", "true")
         }
     }
 
@@ -140,12 +161,26 @@ androidComponents.onVariants { variant ->
         outputDirectory.set(layout.buildDirectory.dir("generated/widgetConfiguration/${variant.name}"))
     }
     variant.sources.res?.addGeneratedSourceDirectory(generateWidgetConfiguration, GenerateWidgetConfiguration::outputDirectory)
+    val generateShortcuts = tasks.register<GenerateLauncherShortcuts>(
+        "generate${variant.name.replaceFirstChar(Char::uppercase)}LauncherShortcuts",
+    ) {
+        applicationId.set(variant.applicationId)
+        template.set(layout.projectDirectory.file("src/main/shortcuts.xml"))
+        outputDirectory.set(layout.buildDirectory.dir("generated/launcherShortcuts/${variant.name}"))
+    }
+    variant.sources.res?.addGeneratedSourceDirectory(generateShortcuts, GenerateLauncherShortcuts::outputDirectory)
 }
 
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
+    // The wardrobe same-anchor animation adapter targets the exact Material3 1.3.1 ABI.
+    // Revisit that adapter and its gesture regression before upgrading either artifact.
+    constraints {
+        implementation("androidx.compose.material3:material3") { version { strictly("1.3.1") } }
+        implementation("androidx.compose.material3:material3-android") { version { strictly("1.3.1") } }
+    }
     implementation(libs.compose.foundation)
     implementation(libs.compose.tooling.preview)
     implementation(libs.core.ktx)
@@ -164,10 +199,4 @@ dependencies {
     implementation(libs.maplibre.android)
     testImplementation(libs.junit)
     debugImplementation(libs.compose.tooling)
-}
-
-// Opt-in native screenshot review; normal unit tests and release APKs do not include this fixture.
-if (providers.gradleProperty("atlasSnapshots").orNull == "true") {
-    apply(plugin = "app.cash.paparazzi")
-    android.sourceSets.getByName("test").java.srcDir("src/atlasSnapshot/kotlin")
 }

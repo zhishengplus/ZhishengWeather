@@ -222,6 +222,15 @@ class NmcSourceTest {
         assertEquals(AlertLevel.YELLOW, matched[1].severity)
     }
 
+    @Test fun moreThanThreeLocalNoticesNeverHideTheLaterWindWarning() {
+        val ref = NmcSource.NmcCityRef("AHE", "shahe", "/shahe.html", "河北省", "沙河市")
+        val notices = listOf("大雾黄色", "雷电黄色", "暴雨黄色", "大风蓝色", "寒潮蓝色")
+            .mapIndexed { index, kind -> NmcApi.NmcAlarm("河北省沙河市气象台发布${kind}预警信号", "2026/10/31 16:0$index", "/$index.html") }
+        val result = NmcSource.parseNmcAlarms(notices + notices.first(), ref)
+        assertEquals(5, result.size)
+        assertTrue(result.any { it.type == "大风" })
+    }
+
     @Test fun alarmTitleIgnoresMalformed() {
         assertNull(NmcSource.parseAlarmTitle("今日天气提示"))
         assertNotNull(NmcSource.parseAlarmTitle("河北省张家口市气象台发布大风蓝色预警信号"))
@@ -469,6 +478,31 @@ class NmcSourceTest {
         assertEquals(315.0, NmcSource.windDirToDegree("西北风")!!, 0.001)
         assertNull(NmcSource.windDirToDegree("-"))
         assertNull(NmcSource.windDirToDegree(null))
+    }
+
+    @Test fun windDirSixteenPointBiasFormsMoveTowardTheBiasedCardinal() {
+        // “X偏Y”＝从X向Y偏22.5°：南偏东=157.5°（旧实现误作202.5°）、北偏西=337.5°。
+        assertEquals(22.5, NmcSource.windDirToDegree("北偏东")!!, 0.001)
+        assertEquals(67.5, NmcSource.windDirToDegree("东偏北")!!, 0.001)
+        assertEquals(112.5, NmcSource.windDirToDegree("东偏南")!!, 0.001)
+        assertEquals(157.5, NmcSource.windDirToDegree("南偏东")!!, 0.001)
+        assertEquals(202.5, NmcSource.windDirToDegree("南偏西")!!, 0.001)
+        assertEquals(247.5, NmcSource.windDirToDegree("西偏南")!!, 0.001)
+        assertEquals(292.5, NmcSource.windDirToDegree("西偏北")!!, 0.001)
+        assertEquals(337.5, NmcSource.windDirToDegree("北偏西")!!, 0.001)
+        assertEquals(157.5, NmcSource.windDirToDegree("南偏东风")!!, 0.001)
+        // 无基准方位的“偏X风”语义不明确，保持缺失而不是猜一个度数。
+        assertNull(NmcSource.windDirToDegree("偏北风"))
+    }
+
+    @Test fun missingOrOutOfRangeFeelsLikeStaysNullInsteadOfCopyingTemperature() {
+        // 体感缺测（null/9999/越界）不能拿气温冒充；温度本身照常保留。
+        listOf(null, 9999.0, 120.0).forEach { feelst ->
+            val current = NmcSource.parseNmcReal(NmcApi.NmcReal(
+                weather = NmcApi.NmcWeather(img = "0", info = "晴", temperature = 26.1, feelst = feelst)))!!
+            assertEquals(26.1, current.temperature!!, 0.001)
+            assertNull(current.feelsLike)
+        }
     }
 
     @Test fun predictSentinelDayHalfFallsBackToTempchart() {

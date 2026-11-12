@@ -114,6 +114,7 @@ fun AppUpdateDialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        com.zhisheng.weather.ui.HighRefreshDialogContent()
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()

@@ -2,6 +2,7 @@
 
 package com.zhisheng.weather.ui.home
 
+import android.animation.ValueAnimator
 import com.zhisheng.weather.ui.Text
 import com.zhisheng.weather.ui.weatherPresentationTime
 import com.zhisheng.weather.ui.LocalWeatherPreviewTime
@@ -117,7 +118,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -166,6 +167,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -232,8 +234,12 @@ import com.zhisheng.weather.ui.components.VistaWeatherArtwork
 import com.zhisheng.weather.ui.theme.vistaClick
 import com.zhisheng.weather.ui.theme.zhishengScreen
 import com.zhisheng.weather.ui.theme.zhishengCompactPanel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 import kotlin.math.abs
@@ -253,6 +259,7 @@ internal enum class VistaHomeBlock {
     ALERTS,
     HOURLY,
     DAILY,
+    OUTFIT,
     PRECIPITATION,
     TELEMETRY,
     AQI,
@@ -272,6 +279,7 @@ internal fun vistaHomeBlocks(
             HomeModule.PRECIP -> VistaHomeBlock.PRECIPITATION
             HomeModule.SPACETIME -> VistaHomeBlock.ATLAS
             HomeModule.DAILY -> VistaHomeBlock.DAILY
+            HomeModule.OUTFIT -> VistaHomeBlock.OUTFIT
             HomeModule.TELEMETRY -> VistaHomeBlock.TELEMETRY
             HomeModule.AQI -> VistaHomeBlock.AQI
             HomeModule.INDICES -> VistaHomeBlock.INDICES
@@ -298,8 +306,13 @@ fun HomeScreen(
     onHourlyClick: () -> Unit = {},
     onTyphoonClick: () -> Unit,
     dismissCitiesRequest: Int = 0,
+    onCityReady: (String?) -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val outfitState = rememberOutfitUiState()
+    var outfitRequest by rememberSaveable(stateSaver = OutfitDialogRequest.Saver) { mutableStateOf<OutfitDialogRequest?>(null) }
+    // A coordinate/cache refresh may replace a city page, but must not close an active wardrobe.
+    outfitRequest?.let { OutfitWardrobeOverlay(it, outfitState) { outfitRequest = null } }
     // A transient city drawer must not be restored by the portrait SaveableStateProvider.
     // Reset on the configuration frame, before the outgoing orientation can flash an open drawer.
     val drawerOrientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
@@ -411,6 +424,12 @@ fun HomeScreen(
                     // Keep the city page in place beneath search; Back returns to this list.
                     onSearchClick()
                 },
+                onTyphoonClick = {
+                    scope.launch {
+                        drawerState.snapTo(DrawerValue.Closed)
+                        onTyphoonClick()
+                    }
+                },
             )
         },
     ) {
@@ -422,7 +441,7 @@ fun HomeScreen(
         NaturalWeatherSurface(atmosphereWeather, uiState.prefs.ambience, night,
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 alpha = if (drawerState.isOpen && drawerState.targetValue == DrawerValue.Open) 0f else 1f
-            }, active = ambienceActive && !drawerState.isOpen && drawerState.targetValue != DrawerValue.Open,
+            }, active = ambienceActive && outfitRequest == null && !drawerState.isOpen && drawerState.targetValue != DrawerValue.Open,
             parallax = { ambienceParallax.floatValue }, city = atmosphereCity,
             pagingTransition = skyTransition,
             pagingFraction = { cityPager?.let { p ->
@@ -438,23 +457,21 @@ fun HomeScreen(
                 } else CompositionLocalProvider(LocalCitySharedChrome provides sharedChrome) { CityWeatherPager(
                     cities = uiState.cities,
                     selectedKey = uiState.selectedCity?.locationKey,
-                    enabled = ambienceActive && !cityDeckVisible && !drawerState.isOpen,
+                    enabled = ambienceActive && outfitRequest == null && !cityDeckVisible && !drawerState.isOpen,
                     onSelect = viewModel::selectCity,
                     onPaging = { cityPaging = it },
                     onPagerReady = { cityPager = it },
+                    animateExternalSelection = ambienceActive,
+                    onSettledCity = onCityReady,
                     overlay = { pager -> CitySharedChromeHost(sharedChrome, uiState.cities, pager, uiState,
                         { scope.launch { drawerState.open() } }, viewModel::refreshFromUser, onSettingsClick,
                         scrollEnabled = ambienceActive && !cityDeckVisible && !drawerState.isOpen) },
                     modifier = Modifier.fillMaxSize(),
                 ) { city, pager ->
-                    // Changing configuration/coordinates destroys the preview before the next frame.
-                    androidx.compose.runtime.key(city.locationKey, city.latitude, city.longitude, previewRevision) {
-                        val selected = city.locationKey == uiState.selectedCity?.locationKey
+                    val selected = city.locationKey == uiState.selectedCity?.locationKey
+                    HomeCityPageContent(city, previewRevision, scrollToTopRequest, selected,
+                        loadPreview = viewModel::loadCityPreview) { weatherListState, preview ->
                         val liveWeather = uiState.weather.takeIf { selected }
-                        val preview by produceState<CachedWeather?>(null, city, previewRevision) {
-                            // Disk is only the fallback until the in-memory snapshot for this city arrives.
-                            if (value == null) value = viewModel.loadCityPreview(city)
-                        }
                         val frame = cityPageWeather(city, uiState.selectedCity?.locationKey, liveWeather,
                             uiState.staleAgeMillis, preview, presentationTime,
                             snapshot = uiState.citySnapshots[city.locationKey])
@@ -468,7 +485,7 @@ fun HomeScreen(
                             sceneWeather = uiState.sceneWeather.takeIf { selected },
                             uiState = uiState, selected = selected,
                             staleAge = frame.staleAgeMillis,
-                            scrollToTopRequest = scrollToTopRequest,
+                            weatherListState = weatherListState,
                             onScrolling = { weatherContentScrolling = it },
                             onParallax = { ambienceParallax.floatValue = it },
                             onMenu = { scope.launch { drawerState.open() } },
@@ -479,6 +496,8 @@ fun HomeScreen(
                             onDailyForecastClick = { openCityDetail(onDailyForecastClick) },
                             onPrecipitationClick = { openCityDetail(onPrecipitationClick) }, onHourlyClick = { openCityDetail(onHourlyClick) },
                             onTyphoonClick = { openCityDetail(onTyphoonClick) },
+                            outfitState = outfitState,
+                            onOutfitOpen = { request -> openCityDetail { outfitRequest = request } },
                         )
                     }
                 }
@@ -606,16 +625,45 @@ fun HomeScreen(
     }
 }
 
+@Composable
+internal fun HomeCityPageContent(
+    city: City, previewRevision: Long, scrollToTopRequest: Int, selected: Boolean,
+    loadPreview: suspend (City) -> CachedWeather?,
+    content: @Composable (LazyListState, CachedWeather?) -> Unit,
+) {
+    // The pager owns this scope by locationKey. Fresh coordinates/source settings
+    // must invalidate the weather preview without discarding the user's scroll.
+    val weatherListState = rememberLazyListState()
+    // A restored/offscreen page must not replay a tap handled before it was composed.
+    var handledScrollToTop by rememberSaveable { mutableIntStateOf(scrollToTopRequest) }
+    LaunchedEffect(scrollToTopRequest) {
+        if (handledScrollToTop != scrollToTopRequest) {
+            handledScrollToTop = scrollToTopRequest
+            if (scrollToTopRequest > 0 && selected) weatherListState.animateScrollToItem(0)
+        }
+    }
+    // Recreate only the preview State: producer keys alone restart its coroutine but
+    // retain the previous value for a frame. Late loads can only write their old State.
+    val preview by androidx.compose.runtime.key(city.locationKey, city.latitude, city.longitude, previewRevision) {
+        produceState<CachedWeather?>(null, city, previewRevision) {
+            // Disk is only the fallback until the in-memory snapshot for this city arrives.
+            if (value == null) value = loadPreview(city)
+        }
+    }
+    content(weatherListState, preview)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun HomeCityPage(
     city: City, data: WeatherData?, sceneWeather: com.zhisheng.weather.model.SceneWeatherData?,
-    uiState: HomeUiState, selected: Boolean, staleAge: Long?, scrollToTopRequest: Int,
+    uiState: HomeUiState, selected: Boolean, staleAge: Long?, weatherListState: LazyListState,
     onScrolling: (Boolean) -> Unit, onParallax: (Float) -> Unit,
     onMenu: () -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
     indicator: @Composable () -> Unit,
     onHistoryClick: () -> Unit, onRadarClick: () -> Unit, onDailyForecastClick: () -> Unit,
     onPrecipitationClick: () -> Unit, onHourlyClick: () -> Unit, onTyphoonClick: () -> Unit,
+    outfitState: OutfitUiState = rememberOutfitUiState(), onOutfitOpen: ((OutfitDialogRequest) -> Unit)? = null,
 ) {
     val chrome = LocalZhishengChrome.current
     val density = LocalDensity.current
@@ -628,7 +676,6 @@ internal fun HomeCityPage(
     val topInset = if (measuredHeader > 0) with(density) { measuredHeader.toDp() }
         else WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 80.dp
     val bodyInset = if (floatingGlassHeader) topInset else 0.dp
-    val weatherListState = rememberLazyListState()
     val cardNow = weatherPresentationTime()
     val cardMinutes = data?.utcOffsetSeconds?.let {
         Math.floorMod(cardNow / 60_000L + it / 60L, 1440L).toInt()
@@ -646,9 +693,6 @@ internal fun HomeCityPage(
     // The weather column is the expensive display list. The page indicator lives
     // outside it and is the only thing that has to redraw while the finger moves.
     val retainedColumn = remember { Modifier.graphicsLayer() }
-    LaunchedEffect(scrollToTopRequest) {
-        if (scrollToTopRequest > 0 && selected) weatherListState.animateScrollToItem(0)
-    }
     LaunchedEffect(selected, weatherListState.isScrollInProgress) {
         if (selected) onScrolling(weatherListState.isScrollInProgress)
     }
@@ -683,6 +727,7 @@ internal fun HomeCityPage(
                     onHistoryClick = onHistoryClick, onRadarClick = onRadarClick,
                     onDailyForecastClick = onDailyForecastClick, onPrecipitationClick = onPrecipitationClick,
                     onHourlyClick = onHourlyClick, onTyphoonClick = onTyphoonClick,
+                    outfitState = outfitState, onOutfitOpen = onOutfitOpen,
                 )
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(
                     top = bodyInset + 48.dp, start = 28.dp, end = 28.dp, bottom = 48.dp)) {
@@ -1226,6 +1271,11 @@ private fun Stagger(index: Int, entered: Boolean, content: @Composable (Modifier
         content(Modifier)
         return
     }
+    // 尊重系统"动画时长"设置（与其他经典动效同一判据）：关闭时直接呈现，不逐项延迟淡入。
+    if (!remember { ValueAnimator.areAnimatorsEnabled() }) {
+        content(Modifier)
+        return
+    }
     if (!LocalCityPageMotionRunning.current) {
         content(Modifier)
         return
@@ -1261,6 +1311,8 @@ private fun WeatherContent(
     onPrecipitationClick: () -> Unit = {},
     onHourlyClick: () -> Unit = {},
     onTyphoonClick: () -> Unit = {},
+    outfitState: OutfitUiState = rememberOutfitUiState(),
+    onOutfitOpen: ((OutfitDialogRequest) -> Unit)? = null,
 ) {
     val heroEntry = LocalCityChromeEntry.current
     // 入场动画总开关：状态提升到 LazyColumn 之上，只驱动一次交错入场（v0.0.1 修复快滑闪卡）
@@ -1299,6 +1351,7 @@ private fun WeatherContent(
         if (vistaVisibleAlerts(data.alerts).isNotEmpty()) add(VistaHomeBlock.ALERTS)
         if (showHourly) add(VistaHomeBlock.HOURLY)
         if (showDaily) add(VistaHomeBlock.DAILY)
+        if (prefs.showOutfit) add(VistaHomeBlock.OUTFIT)
         if (showPrecip) add(VistaHomeBlock.PRECIPITATION)
         if (showTele) add(VistaHomeBlock.TELEMETRY)
         if (showAqi) add(VistaHomeBlock.AQI)
@@ -1355,8 +1408,10 @@ private fun WeatherContent(
                         HomeModule.TELEMETRY -> data.current?.let { TelemetryGrid(it, todayDaily, unit, prefs, m, city, data.utcOffsetSeconds) }
                         HomeModule.AQI -> data.aqi?.let { AqiCard(it, m) }
                         HomeModule.INDICES -> IndicesRow(data, prefs.lifeIndexMetrics, m, unit)
+                        HomeModule.OUTFIT -> OutfitCard(data, unit, m, windUnit = prefs.windUnit,
+                            state = outfitState, cityName = city?.displayName.orEmpty(), onOpen = onOutfitOpen)
                         HomeModule.YESTERDAY -> data.yesterday?.let { YesterdayCard(it, todayDaily, unit, prefs.windUnit, m) }
-                        HomeModule.TYPHOON -> TyphoonCard(data.typhoons, m, onTyphoonClick)
+                        HomeModule.TYPHOON -> TyphoonEntryCard(m, onTyphoonClick)
                     }
                 }
                 }
@@ -1382,11 +1437,12 @@ private fun WeatherContent(
                     VistaHomeBlock.ALERTS -> {
                         compactAfterHero = false
                         item {
-                            Stagger(nextStagger(), entered) { m -> AlertSection(vistaVisibleAlerts(data.alerts).take(3), m) }
+                            Stagger(nextStagger(), entered) { m -> AlertSection(vistaVisibleAlerts(data.alerts), m) }
                         }
                     }
                     VistaHomeBlock.HOURLY -> emitModule(HomeModule.HOURLY)
                     VistaHomeBlock.DAILY -> emitModule(HomeModule.DAILY)
+                    VistaHomeBlock.OUTFIT -> emitModule(HomeModule.OUTFIT)
                     VistaHomeBlock.PRECIPITATION -> emitModule(HomeModule.PRECIP)
                     VistaHomeBlock.TELEMETRY -> emitModule(HomeModule.TELEMETRY)
                     VistaHomeBlock.AQI -> emitModule(HomeModule.AQI)
@@ -1405,7 +1461,7 @@ private fun WeatherContent(
                 }
             }
             if (data.alerts.isNotEmpty()) {
-                item { Stagger(nextStagger(), entered) { m -> AlertSection(data.alerts.take(3), m) } }
+                item { Stagger(nextStagger(), entered) { m -> AlertSection(vistaVisibleAlerts(data.alerts), m) } }
             }
             prefs.moduleOrder.forEach { module ->
                 val visible = when (module) {
@@ -1413,6 +1469,7 @@ private fun WeatherContent(
                     HomeModule.PRECIP -> showPrecip
                     HomeModule.SPACETIME -> showAtlas
                     HomeModule.DAILY -> showDaily
+                    HomeModule.OUTFIT -> prefs.showOutfit
                     HomeModule.TELEMETRY -> showTele
                     HomeModule.AQI -> showAqi
                     HomeModule.INDICES -> showIndices
@@ -1432,6 +1489,7 @@ private fun HomeModule.isPrimaryHomeModule(): Boolean = when (this) {
     HomeModule.HOURLY,
     HomeModule.PRECIP,
     HomeModule.DAILY,
+    HomeModule.OUTFIT,
     HomeModule.SPACETIME
     -> true
     HomeModule.TELEMETRY,
@@ -1611,6 +1669,7 @@ internal fun HeroSection(
                 if (!isPhosphorVista) Canvas(modifier = Modifier.size(116.dp)) {
                     val c = center
                     val r = size.minDimension / 2f
+                    // 描边按密度换算：1.5dp/1dp 在高密度屏保持设计粗细（原裸像素在高密度屏细至不可见）。
                     val path = Path().apply {
                         for (i in 0 until 6) {
                             val a = Math.toRadians(60.0 * i - 30.0)
@@ -1619,7 +1678,7 @@ internal fun HeroSection(
                         }
                         close()
                     }
-                    drawPath(path, hexOuter, style = Stroke(1.5f))
+                    drawPath(path, hexOuter, style = Stroke(1.5.dp.toPx()))
                     drawPath(
                         androidx.compose.ui.graphics.Path().apply {
                             val r2 = r * 0.82f
@@ -1631,7 +1690,7 @@ internal fun HeroSection(
                             close()
                         },
                         hexInner,
-                        style = Stroke(1f),
+                        style = Stroke(1.dp.toPx()),
                     )
                 }
                 WeatherIcon(
@@ -1910,31 +1969,39 @@ private fun briefingColor(briefing: com.zhisheng.weather.model.HeroBriefing): Co
     else -> ZhishengMint
 }
 
+// 经典大温度字号：84sp 封顶、40sp 保底，按可用宽/字符数/字体倍率缩放（等宽数字 0.62em 字宽估算）。
+internal fun classicHeroNumberSize(availableWidthDp: Float, textLength: Int, fontScale: Float): Float =
+    minOf(84f, availableWidthDp / ((maxOf(textLength, 2) * 0.62f) * fontScale)).coerceAtLeast(40f)
+
 // 温度数字滚动（400ms，emphasizedDecelerate 近似）
 @Composable
 private fun AnimatedTemp(celsius: Double?, unit: String) {
-    if (celsius == null) {
-        // 无数据显示 "--"，而不是误导性的 "0"（v0.0.1）
+    BoxWithConstraints {
+        // 大温度按本列实际可用宽与字体倍率自适应（对齐澄空思路）：大字体/窄屏不再固定 84sp 溢出截断。
+        val fontScale = LocalDensity.current.fontScale
+        val unitReserve = 48f * fontScale // 同行 ℃/°F 单位与间距的预留
+        val target = celsius?.let { if (unit == "f") it * 9.0 / 5.0 + 32.0 else it }
+        val shown = if (target == null) {
+            // 无数据显示 "--"，而不是误导性的 "0"（v0.0.1）
+            "--"
+        } else {
+            val anim = remember { Animatable(target.toFloat()) }
+            val running = LocalCityPageMotionRunning.current
+            LaunchedEffect(target, running) {
+                if (running) anim.animateTo(target.toFloat(), tween(400)) else anim.snapTo(target.toFloat())
+            }
+            (if (running) anim.value else target.toFloat()).roundToInt().toString()
+        }
+        // 长度下限 2 防止单位数瞬间放大跳动。
+        val numberSize = classicHeroNumberSize(maxWidth.value - unitReserve, shown.length, fontScale)
         Text(
-            text = "--",
-            style = MaterialTheme.typography.displayLarge,
+            text = shown,
+            style = MaterialTheme.typography.displayLarge.copy(fontSize = numberSize.sp, lineHeight = (numberSize * 1.05f).sp),
             color = ZhishengText,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
-        return
     }
-    val target = if (unit == "f") celsius * 9.0 / 5.0 + 32.0 else celsius
-    val anim = remember { Animatable(target.toFloat()) }
-    val running = LocalCityPageMotionRunning.current
-    LaunchedEffect(target, running) {
-        if (running) anim.animateTo(target.toFloat(), tween(400)) else anim.snapTo(target.toFloat())
-    }
-    Text(
-        text = (if (running) anim.value else target.toFloat()).roundToInt().toString(),
-        style = MaterialTheme.typography.displayLarge,
-        color = ZhishengText,
-        fontWeight = FontWeight.Bold,
-    )
 }
 
 // —— 预警横幅：警示斜纹 + 按等级着色边框 ——
@@ -1944,28 +2011,32 @@ private fun AlertSection(alerts: List<AlertInfo>, modifier: Modifier) {
         VistaAlerts(alerts, modifier)
         return
     }
-    // 展开态按标题记忆：原来按列表位置 remember，预警条数变化时展开态会错位到别条（v0.0.2）
-    val expandedTitles = remember { mutableStateListOf<String>() }
+    // 与澄空同口径：空白标题的占位预警不进列表。
+    val visible = alerts.filter { it.title.isNotBlank() }
+    // 展开态用"长度前缀身份"记忆并跨进程重建保留：同标题多条预警不会互相串位（对齐澄空做法）。
+    var expandedKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     // 单一闪烁时钟：原来每条预警各起一个 while(true)，多条预警时多个协程各自计时（v0.0.2）
     val blinkOn = rememberBlink()
     Column(
         modifier = modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp),
     ) {
-        alerts.forEachIndexed { index, alert ->
-            val expanded = alert.title in expandedTitles
+        visible.forEachIndexed { index, alert ->
+            val identity = listOf(alert.title, alert.pubTime.orEmpty(), alert.type.orEmpty())
+                .joinToString("") { "${it.length}:$it" }
+            val expanded = identity in expandedKeys
             // v0.0.4：三源等级归一后按国标四档着色，未识别档退回警报红
             val c = alertLevelColor(alert.severity)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = if (index == alerts.lastIndex) 0.dp else 8.dp)
+                    .padding(bottom = if (index == visible.lastIndex) 0.dp else 8.dp)
                     .zhishengCompactPanel(
                         containerColor = ZhishengCard,
                         borderColor = c.copy(alpha = 0.7f),
                     )
-                    .clickable {
-                        if (expanded) expandedTitles.remove(alert.title)
-                        else expandedTitles.add(alert.title)
+                    .semantics { stateDescription = if (expanded) "已展开" else "已收起" }
+                    .clickable(role = Role.Button, onClickLabel = if (expanded) "收起预警" else "查看完整预警") {
+                        expandedKeys = if (expanded) expandedKeys - identity else expandedKeys + identity
                     }
                     .padding(0.dp),
             ) {
@@ -2007,7 +2078,8 @@ private fun AlertSection(alerts: List<AlertInfo>, modifier: Modifier) {
 
 private fun hazardStripes(scope: DrawScope, color: Color) {
     with(scope) {
-        val w = 10f
+        // 斜纹宽随条幅高度缩放：不同密度下保持同一比例（原 10f 裸像素在高密度屏会挤成细密纹）。
+        val w = size.height * 2f
         var x = -size.height
         while (x < size.width) {
             val path = Path().apply {
@@ -2023,16 +2095,20 @@ private fun hazardStripes(scope: DrawScope, color: Color) {
     }
 }
 
-// 1Hz 闪烁时钟：整个预警区共用一个，随 composable 离开屏幕自动停
+// 1Hz 闪烁时钟：整个预警区共用一个，随 composable 离开屏幕自动停；
+// 退到后台组合仍存活，必须再按生命周期暂停，否则每 500ms 唤醒主线程。
 @Composable
 private fun rememberBlink(): Boolean {
     var on by remember { mutableStateOf(true) }
     val running = LocalCityPageMotionRunning.current
-    LaunchedEffect(running) {
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(running, lifecycle) {
         if (!running) return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(500)
-            on = !on
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                kotlinx.coroutines.delay(500)
+                on = !on
+            }
         }
     }
     return if (running) on else true
@@ -2170,7 +2246,7 @@ internal fun SectionTitle(index: Int, title: String, en: String, prominent: Bool
 
 // —— 角括号 HUD 卡片 ——
 @Composable
-private fun HudCard(
+internal fun HudCard(
     modifier: Modifier = Modifier,
     edgeContent: Boolean = false,
     content: @Composable () -> Unit,
@@ -2291,7 +2367,6 @@ internal fun HourlySection(
             }
             Spacer(Modifier.height(if (isPhosphorVista) 18.dp else 14.dp))
             // 经典终端保留原先的分格逐时卡片：逐格拼接曲线 + 图标/降水/风力/时间纵向排列，
-            // 用户明确表示这版比共享坐标图表更适合经典终端的观感。
             if (isPhosphorVista) {
                 VistaHourlyForecast(displayItems, data, unit, utcOffsetSeconds)
             } else LazyRow(
@@ -2300,9 +2375,7 @@ internal fun HourlySection(
                 contentPadding = PaddingValues(start = 0.dp, end = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                itemsIndexed(displayItems, key = { i, item ->
-                    if (item.isNow) "now-${item.weather.timeMillis}" else "hour-$i-${item.weather.timeMillis}"
-                }) { i, item ->
+                itemsIndexed(displayItems, key = { _, item -> item.stableKey }) { i, item ->
                     val h = item.weather
                     HourlyItem(
                         h = h,
@@ -2327,7 +2400,11 @@ internal fun HourlySection(
 internal data class HourlyDisplayItem(
     val weather: HourlyWeather,
     val isNow: Boolean,
-)
+) {
+    // The live observation changes its timestamp on every clock update. Its
+    // identity and forecast identities must survive recomposition and hour rollover.
+    val stableKey: String get() = if (isNow) "now" else "hour-${weather.timeMillis}"
+}
 
 // 和风高档套餐可返回 240 小时。完整数据继续留在 WeatherData 中供趋势和详情使用，
 // 主页横向卡片只承担“今天接下来怎么变”的速览职责，不能随套餐等级无限变长。
@@ -2633,8 +2710,8 @@ internal fun PrecipCard(data: WeatherData, modifier: Modifier, onClick: () -> Un
                         color = ZhishengText,
                         style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                     // 雨强读数归位到这里：与降水结论同卡、同源、同一视线；
-                    // 只有拿到逐分钟数据时才展开，距离型状态保持"一行结论"
-                    if (!presentation.dry && isPhosphorVista) {
+                    // 只有拿到逐分钟数据时才展开，距离型状态保持"一行结论"；两套界面同显
+                    if (!presentation.dry) {
                         data.current?.precipMm?.takeIf { it.isFinite() && it >= 0.0 }?.let {
                             Text("当前雨强 ${String.format(Locale.US, "%.1f", it)} mm/h",
                                 color = ZhishengTextSecondary, style = MaterialTheme.typography.labelSmall)
@@ -3319,91 +3396,8 @@ internal fun VistaDailyOverview(
 
 @Composable
 private fun DailyExpanded(d: DailyWeather, windUnit: String) {
-    Column(Modifier.padding(start = 56.dp, top = 2.dp, bottom = 6.dp, end = 4.dp)) {
-        d.weatherText?.takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = ZhishengMint)
-            Spacer(Modifier.height(4.dp))
-        }
-        if (d.windSpeed != null || d.windDirectionDeg != null) {
-            Text(
-                dailyWindLabel(d, windUnit),
-                style = MaterialTheme.typography.labelSmall,
-                color = ZhishengTextTertiary,
-            )
-            Spacer(Modifier.height(4.dp))
-        }
-        d.aqi?.let {
-            Text("AQI $it", style = MaterialTheme.typography.labelSmall, color = aqiColor(it))
-            Spacer(Modifier.height(4.dp))
-        }
-        // 与“多天天气”页 vistaForecastFacts 同一字段集：首页展开也要能看到
-        // 阵风、湿度、云量和紫外线，不因入口不同而少信息。
-        d.windGust?.takeIf { it.isFinite() && it >= 0 }?.let { gust ->
-            Fmt.wind(gust, windUnit)?.let { gustText ->
-                Text("阵风 $gustText", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-                Spacer(Modifier.height(4.dp))
-            }
-        }
-        val humidCloudParts = buildList {
-            d.humidity?.takeIf { it.isFinite() && it in 0.0..100.0 }?.let { add("湿度 ${it.toInt()}%") }
-            d.cloudCover?.takeIf { it.isFinite() && it in 0.0..100.0 }?.let { add("云量 ${it.toInt()}%") }
-        }
-        if (humidCloudParts.isNotEmpty()) {
-            Text(
-                humidCloudParts.joinToString("   "),
-                style = MaterialTheme.typography.labelSmall,
-                color = ZhishengTextTertiary,
-            )
-            Spacer(Modifier.height(4.dp))
-        }
-        d.uvIndex?.takeIf { it >= 0 }?.let { uv ->
-            Text("紫外线指数 $uv", style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-            Spacer(Modifier.height(4.dp))
-        }
-        Row {
-            d.sunrise?.let {
-                Text("日出 $it", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange)
-                Spacer(Modifier.width(14.dp))
-            }
-            d.sunset?.let {
-                Text("日落 $it", style = MaterialTheme.typography.labelSmall, color = ZhishengOrange)
-            }
-        }
-        Fmt.probability(d.precipProbability)?.let { probability ->
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "降水概率 $probability",
-                style = MaterialTheme.typography.labelSmall,
-                color = ZhishengCyan,
-            )
-        }
-        d.precipMm?.takeIf { it > 0.0 }?.let { mm ->
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "降水 ${if (mm == Math.floor(mm)) mm.toInt().toString() else String.format(java.util.Locale.US, "%.1f", mm)} mm",
-                style = MaterialTheme.typography.labelSmall,
-                color = ZhishengCyan,
-            )
-        }
-        if (d.moonPhase != null || d.moonrise != null || d.moonset != null) {
-            Spacer(Modifier.height(4.dp))
-            Row {
-                Text(
-                    "月相 ${Fmt.moonPhaseZh(d.moonPhase) ?: "--"}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZhishengCyan,
-                )
-                Spacer(Modifier.width(14.dp))
-                d.moonrise?.let {
-                    Text("月出 $it", style = MaterialTheme.typography.labelSmall, color = ZhishengCyan)
-                    Spacer(Modifier.width(14.dp))
-                }
-                d.moonset?.let {
-                    Text("月落 $it", style = MaterialTheme.typography.labelSmall, color = ZhishengCyan)
-                }
-            }
-        }
-    }
+    com.zhisheng.weather.ui.ForecastDayFacts(d, windUnit,
+        Modifier.padding(start = 14.dp, top = 12.dp, bottom = 16.dp, end = 10.dp))
 }
 
 // 温度色：两段插值 钢青 → 翡翠 → 琥珀（单段青→橙的中点会发灰发脏，v0.0.5 盘查）
@@ -3473,7 +3467,7 @@ internal fun TelemetryGrid(
                 }
             }
             if (showLuminary) Column(Modifier.fillMaxWidth().zhishengPanel().padding(16.dp)) {
-                VistaLuminary(today, utcOffsetSeconds)
+                VistaLuminarySlot(today, utcOffsetSeconds)
             }
         }
         return
@@ -3485,8 +3479,8 @@ internal fun TelemetryGrid(
             .zhishengPanel(containerColor = if (palette.isLight) ZhishengCard else ZhishengSurface),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
+        // 列数规则两套界面统一：大字体降为单列防截断，宽屏升三列；经典此前被短路恒为2列。
         val columns = when {
-            !isPhosphorVista -> 2
             LocalDensity.current.fontScale > 1.25f -> 1
             androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600 -> 3
             else -> 2
@@ -3520,7 +3514,7 @@ internal fun TelemetryGrid(
                 Modifier.padding(horizontal = 16.dp), color = ZhishengCardBorder.copy(alpha = 0.5f))
             Box(Modifier.fillMaxWidth().padding(horizontal = if (isPhosphorVista) 16.dp else 12.dp, vertical = if (isPhosphorVista) 16.dp else 10.dp)) {
                 if (isPhosphorVista) {
-                    VistaLuminary(today, utcOffsetSeconds)
+                    VistaLuminarySlot(today, utcOffsetSeconds)
                 } else {
                     Column {
                         TeleLabel("日月", "LUMINARY")
@@ -4192,70 +4186,6 @@ private fun YesterdayCard(y: YesterdayInfo, today: DailyWeather?, unit: String, 
     }
 }
 
-// —— 台风 ——
-@Composable
-private fun TyphoonCard(typhoons: List<TyphoonInfo>, modifier: Modifier, onClick: () -> Unit) {
-    HudCard(
-        modifier = modifier.fillMaxWidth()
-            .clickable(role = Role.Button, onClickLabel = "查看台风路径", onClick = onClick),
-    ) {
-        Column {
-            if (typhoons.isEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("西北太平洋台风路径", style = MaterialTheme.typography.titleSmall, color = ZhishengText)
-                        Text(
-                            if (isPhosphorVista) "查看台风位置和未来路径" else "实况节点 · 强度变化 · 多机构预报",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZhishengTextTertiary,
-                        )
-                    }
-                    Text("查看  →", style = MaterialTheme.typography.labelMedium, color = ZhishengMint, fontWeight = FontWeight.Bold)
-                }
-            }
-            typhoons.forEach { t ->
-                Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            t.type ?: "TY",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = ZhishengOrange,
-                            modifier = Modifier.width(34.dp),
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(t.name ?: "", style = MaterialTheme.typography.titleSmall, color = ZhishengText)
-                        Spacer(Modifier.width(8.dp))
-                        t.ename?.let {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = ZhishengTextTertiary)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        t.windSpeed?.let {
-                            Text("${it.roundToInt()}m/s", style = MaterialTheme.typography.labelMedium, color = ZhishengCyan)
-                        }
-                    }
-                    typhoonPointLabel(t)?.let { label ->
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZhishengTextTertiary,
-                            modifier = Modifier.padding(start = 34.dp, top = 2.dp),
-                        )
-                    }
-                }
-            }
-            if (typhoons.isNotEmpty()) {
-                Text(
-                    "查看实时路径与官方预报  →",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZhishengMint,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.align(Alignment.End).padding(top = 5.dp),
-                )
-            }
-        }
-    }
-}
-
 internal fun hourlyWindLabel(hour: HourlyWeather): String? {
     val direction = com.zhisheng.weather.data.WeatherRepository.windDirection(hour.windDirectionDeg)
     val force = Fmt.windForce(hour.windSpeed)
@@ -4362,11 +4292,11 @@ private fun dataSourceLabel(source: String?): String = when (source) {
 }
 
 private fun dataSourceSummary(data: WeatherData): String {
-    // 枳生天气源：列出实际参与融合的源（多源共识），而不是"部分数据由…提供"
+    // Show only providers that supplied retained data; agreement is not an accuracy score.
     if (data.dataSource == "ZHISHENG") {
         val names = data.fusionSources.distinct().map(::dataSourceShortLabel)
         return if (names.isEmpty()) dataSourceLabel(data.dataSource)
-        else "${dataSourceLabel(data.dataSource)} · 多源共识：${names.joinToString("/")}"
+        else "${dataSourceLabel(data.dataSource)} · 实际来源：${names.joinToString("/")}"
     }
     val supplements = data.blockSources.values
         .filter { it != data.dataSource }
@@ -4377,10 +4307,10 @@ private fun dataSourceSummary(data: WeatherData): String {
 }
 
 private fun supplementShortLabel(data: WeatherData): String {
-    // 融合源不罗列参与者（行太长），用数量表达
+    // Keep the compact attribution short.
     if (data.dataSource == "ZHISHENG") {
         val n = data.fusionSources.distinct().size
-        return if (n <= 1) "" else "·融合${n}源"
+        return if (n <= 1) "" else "·${n}个来源"
     }
     val extras = data.blockSources.values.filter { it != data.dataSource }.distinct()
     return if (extras.isEmpty()) "" else extras.joinToString(prefix = "+", separator = "+") { dataSourceShortLabel(it) }
@@ -4553,9 +4483,72 @@ private fun ErrorState(message: String, onSearchClick: () -> Unit) {
     }
 }
 
+// —— 经典抽屉每城天气：与澄空 CityWeatherList 同一套磁盘/网络/live 合并管线 ——
+// 仅经典分支组合；live 更新独立成效应，不重启邻城请求（与已修复口径一致）。
+@Composable
+private fun rememberClassicDrawerWeather(ui: HomeUiState, active: Boolean): Map<String, CachedWeather> {
+    val context = LocalContext.current
+    val weather = remember { mutableStateMapOf<String, CachedWeather>() }
+    val modules by SettingsRepository.moduleSources.collectAsState(
+        initial = com.zhisheng.weather.data.ModuleSourcePolicy(),
+    )
+    val priority by SettingsRepository.sourcePriority.collectAsState(initial = emptyList<String>())
+    suspend fun merge(city: City, candidate: CachedWeather?) =
+        mergeCityWeatherCache(weather, city, candidate, ui.sourcePref) { data ->
+            com.zhisheng.weather.data.WeatherRepository.cacheCompatible(data, ui.sourcePref)
+        }
+    LaunchedEffect(active, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) },
+        ui.sourcePref, modules, priority) {
+        if (!active) return@LaunchedEffect
+        val savedKeys = ui.cities.map { it.locationKey }.toSet()
+        weather.keys.toList().filter { it !in savedKeys }.forEach { weather.remove(it) }
+        ui.cities.forEach { city -> merge(city, null) }
+        ui.cities.forEach { city ->
+            val disk = try {
+                withContext(Dispatchers.IO) { com.zhisheng.weather.data.WeatherCache.load(context, city) }
+            } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
+            merge(city, disk)
+        }
+        // 当前城 live 只由下方独立效应写入，磁盘读取后不能回写本效应启动时的旧 ui。
+        ui.cities.forEach { city ->
+            val existing = merge(city, null)
+            if (existing != null && System.currentTimeMillis() - existing.savedAtMillis < CITY_WEATHER_REFRESH_MS) return@forEach
+            try {
+                val result = withTimeoutOrNull(15_000) {
+                    com.zhisheng.weather.data.WeatherRepository.fetchWeather(city, ui.sourcePref)
+                }
+                val entry = result?.let { CachedWeather(it, System.currentTimeMillis()) }
+                val accepted = merge(city, entry)
+                if (entry != null && accepted === entry) {
+                    withContext(Dispatchers.IO) {
+                        com.zhisheng.weather.data.WeatherCache.save(context, city.locationKey, entry.data)
+                    }
+                }
+            } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { /* 保留已有缓存占位 */ }
+        }
+    }
+    // 每城内存快照垫底：抽屉一打开即可见最近看过的城市读数；merge 择新，不会覆盖更新的网络结果。
+    LaunchedEffect(active, ui.citySnapshots, ui.cities.map { com.zhisheng.weather.widget.weatherCityIdentity(it) },
+        ui.sourcePref, modules, priority) {
+        if (!active) return@LaunchedEffect
+        ui.citySnapshots.forEach { (key, snapshot) ->
+            ui.cities.firstOrNull { it.locationKey == key }?.let { merge(it, snapshot) }
+        }
+    }
+    // live 更新不重启邻城请求；磁盘、网络和 live 结果统一择新发布。
+    LaunchedEffect(active, ui.weather, ui.selectedCity?.let { com.zhisheng.weather.widget.weatherCityIdentity(it) },
+        ui.sourcePref, modules, priority) {
+        if (!active) return@LaunchedEffect
+        val data = ui.weather ?: return@LaunchedEffect
+        val city = ui.selectedCity ?: return@LaunchedEffect
+        merge(city, CachedWeather(data, data.fetchedAt ?: data.updateTime ?: System.currentTimeMillis()))
+    }
+    return weather
+}
+
 // —— 城市抽屉 ——
 @Composable
-private fun CityDrawer(
+internal fun CityDrawer(
     uiState: HomeUiState,
     active: Boolean,
     onBack: () -> Unit,
@@ -4565,6 +4558,7 @@ private fun CityDrawer(
     onLocate: () -> Unit,
     onClearLocateMessage: () -> Unit,
     onAddCity: () -> Unit,
+    onTyphoonClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -4643,6 +4637,7 @@ private fun CityDrawer(
             CityWeatherList(uiState, Modifier.weight(1f).fillMaxWidth(),
                 onAddCity, onSelect, onToggleFavorite, onRemove, active)
         } else {
+        val drawerWeather = rememberClassicDrawerWeather(uiState, active)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 4.dp),
@@ -4669,7 +4664,7 @@ private fun CityDrawer(
                             if (isPhosphorVista) Modifier.background(if (selected) ZhishengCard.copy(alpha = 0.72f) else Color.Transparent)
                             else Modifier.zhishengCompactPanel(containerColor = if (selected) ZhishengCard else Color.Transparent, borderColor = Color.Transparent)
                         )
-                        .clickable { onSelect(city.locationKey) }
+                        .clickable(role = Role.Button, onClickLabel = "切换到${city.displayName}") { onSelect(city.locationKey) }
                         .padding(horizontal = 12.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -4697,6 +4692,34 @@ private fun CityDrawer(
                                 color = ZhishengTextTertiary,
                             )
                         }
+                    }
+                    // 每城天气（终端样式）：与主页同源同口径；图标按昼夜相位取正确形态。
+                    if (!isPhosphorVista) {
+                        val entry = drawerWeather[city.locationKey]?.data
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (entry != null) {
+                                WeatherIcon(
+                                    phaseAwareCondition(entry.current?.condition, entry, weatherPresentationTime()),
+                                    Modifier.size(22.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    (Fmt.temp(entry?.current?.temperature, uiState.tempUnit) ?: "—") + "°",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = ZhishengText,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                val day = entry?.todayDaily(weatherPresentationTime())
+                                Text(
+                                    "${Fmt.temp(day?.high, uiState.tempUnit) ?: "—"}°/${Fmt.temp(day?.low, uiState.tempUnit) ?: "—"}°",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ZhishengTextTertiary,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
                     }
                     IconButton(
                         onClick = { onToggleFavorite(city.locationKey) },

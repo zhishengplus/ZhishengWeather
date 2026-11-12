@@ -206,105 +206,35 @@ GitHub Releases 里也附有 `SHA256SUMS.txt`。
 
 ## 从源码构建
 
-本仓库的源码是无密钥导出版，构建前请先读 [SOURCE_EXPORT.md](SOURCE_EXPORT.md)。目前的源码快照是 0.1.5-beta10.8，0.1.6 的源码还没有同步过来；想用 0.1.6，请直接下载上面的安装包。
 
-需要 JDK 17 和 Android SDK 34，仓库自带 Gradle Wrapper。
 
-```bash
-git clone https://github.com/zhishengplus/ZhishengWeather.git
-cd ZhishengWeather
-./gradlew assembleDebug        # Windows：.\gradlew.bat assembleDebug
+安装 JDK 17 和 Android SDK 34，用 Android Studio 打开本目录。SDK 路径由各自电脑配置。Gradle Wrapper 已包含，无须另装 Gradle。
+
+```powershell
+.\gradlew.bat :app:assembleDebug
 ```
 
-导出版使用本机自动生成的调试签名，并关闭了应用内覆盖更新，打出来的包不能覆盖官方公共版。
+macOS / Linux 使用 `./gradlew :app:assembleDebug`。无服务密钥时也可编译；需要密钥的数据源和地图功能须自行配置。可参考 `local.properties.example`，或在应用设置中添加自己的凭据。
 
-<details>
-<summary><b>接入自己的和风天气凭据</b></summary>
-<br>
+所有变体使用开发者本机生成的调试签名，并关闭官方应用内覆盖更新。没有附带签名文件。开发包不能直接覆盖官方签名版本；请使用独立测试设备或独立配置的应用 ID。
 
-在根目录的 `local.properties` 里写入下面几项（这个文件已被 Git 忽略）：
+## 修改与提 PR
 
-```properties
-sdk.dir=<Android SDK 路径>
-qw.host=<API Host>
-qw.project_id=<Project ID>
-qw.kid=<Key ID>
-qw.private_key=<Ed25519 私钥，单行>
+从公开仓库 Fork 后新建分支，完成修改后向公开仓库提交 Pull Request。说明改了什么、如何验证；界面修改请附对比截图。参见 [贡献指南](CONTRIBUTING.md)。
+
+穿搭建议的入口、规则和状态都在 `app/src/main/kotlin/com/zhisheng/weather/ui/home/`，主要文件为 `OutfitCard.kt`、`OutfitAdvice.kt`、`OutfitState.kt` 和 `OutfitArtwork.kt`。
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+.\gradlew.bat :app:lintDebug
 ```
 
-也可以不改构建，直接在应用设置的「数据接入」里填写。
+本目录只提供 Android 开发工程，没有附带服务器运维配置、数据库或后台账号。共享服务默认地址为不可用的示例地址；需要这部分功能时，在 `local.properties` 中填写自己的 `service.endpoint`，服务须使用受系统信任的 HTTPS 证书。徽章线上配置在 `app/src/main/assets/badges/service.json`，端点和验签公钥留空，需要自行接入兼容服务。天气的公开数据源和穿搭计算不依赖这些后台配置。
 
-</details>
+群联系方式、收款码及人员名单没有随源码提供，相关资源使用占位图。徽章演示变体只使用明确标记的公开测试材料，不对应线上账号或权益。
 
-主要技术：Kotlin 2.0、Jetpack Compose、Material 3、Coroutines / Flow、Retrofit、OkHttp、kotlinx-serialization、DataStore、WorkManager；台风地图用 MapLibre，0.1.6 的三维徽章用 three.js 在 WebView 里渲染。`minSdk 26`，`targetSdk 34`。代码结构和提交约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+项目使用 [MIT 许可证](LICENSE)。第三方代码、字体、美术和地理数据的授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 及各资源附带的许可证。
 
-## 一起聊聊天气
+## 社区代码贡献
 
-想聊聊天气、提个想法或者报个问题，都欢迎进 QQ 群。1 群快满了，新朋友可以先进 2 群。
-
-<table align="center">
-  <tr>
-    <td align="center" width="260">
-      <img src="assets/readme/qq-group-2.png" width="200" alt="枳生天气用户 2 群二维码，群号 562847192"><br>
-      <b>2 群</b> · 562847192<br>
-      <a href="https://qm.qq.com/q/Plez46Gzuy">一键加群</a>
-    </td>
-    <td align="center" width="260">
-      <img src="assets/readme/qq-group-1.png" width="200" alt="枳生天气用户 1 群二维码，群号 1106284779"><br>
-      <b>1 群</b> · 1106284779<br>
-      <a href="https://qm.qq.com/q/nfpxlC4Pyo">一键加群</a> · <sub>即将满员</sub>
-    </td>
-  </tr>
-</table>
-
-可以稳定复现的问题，也欢迎发到 [GitHub Issues](https://github.com/zhishengplus/ZhishengWeather/issues)。请附上应用版本、手机型号、系统版本、数据源和必要的截图，记得遮住 Token、API KEY 这类个人凭据。
-
-## 赞赏
-
-枳生天气会一直免费，也不会加广告。我做它是因为喜欢，也喜欢和大家聊天。哪里不准、哪句话读着别扭、下次想要什么，直接告诉我就好。
-
-如果愿意支持一下，可以扫下面的赞赏码，备注你想出现的名字，所有赞助者都会写进应用里的赞助榜。
-
-<p align="center">
-  <img src="assets/sponsor-wechat.jpg" width="220" alt="微信赞赏码">
-  <br><br>
-  <b>愿你出门遇晴，代码一次通过，日子风调雨顺。</b>
-</p>
-
-## 致谢
-
-谢谢每一位在群里、酷安和 Issues 里提过反馈的朋友。赞助榜现网 99 位，顺序与应用内一致：`秋`、`披着牛皮的糖`、`摆渡人`、`😀`、`皮`、`Sh4d0W`、`饕餮梼杌獬豸`、`&`、`追光者`、`👁_👁`、`Past-Present-Future`、`雾岛笙南`、`苍茫`、`CK`、`半夏`、`西伯利亚狼`、`豆腐佬喔`、`洛儿阿茶`、`江宁`、`浪中浮云`、`大寶`、`支持枳生的老板`、`李勇`、`bluebone`、`深海罗非鱼`、`轻轻飘过的落叶`、`一月光含千世界`、`JamoC`、`野鸭子Evan`、`白日梦想家`、`YOGA`、`Adrian`、`Mrmuscle`、`ayida999`、`关`、`AiFuL`、`人生得意`、`意难平`、`匠芯`、`钟福燕`、`∮`、`润物无声`、`ScottZzz`、`*年`、`嗷呜`、`凉粉`、`浩然一切随缘`、`十二`、`2026`、`偏我来时不逢春`、`江湖暂过住`、`亦世凡华`、`llb`、`屿光`、`阿良`、`中未⬆️`、`十三”画`、`SKY`、`PickGear`、`以后升级纯靠举报加经验太好玩了`、`GongXian`、`酷我哥哥`、`李玄子`、`风来坊`、`X_K`、`果丽橙`、`谭政成`、`赵胖胖和李瘦瘦`、`烟花易冷`、`学习鱼`、`Ali`、`玉立`、`拾玖ya`、`...`、`阮福熊`、`yukino`、`许久丶不嵩手`、`如此而已`、`小豪科1212`、`王鸣川`、`Tarachi`、`半醒时迁`、`枫宇I樵夫`、`Neuro`、`安婧Tiffany`、`释梦Supreme`、`礼子`、`Misaki`、`征服天堂`、`好事多磨`、`无糖可乐没有糖`、`wdk7527`、`白云`、`（待认领）备注写的是：感谢大佬的软件，很好用`、`（待认领）备注写的是：枳生`、`kSir`、`一只糊涂猫`、`肖智强`、`为你写诗`。
-
-参与过项目的社区贡献者：`PPQ1028`、`Uinuan1`、`KZzzzo`、`睡觉了寂`、`微生之最`、`r1file`、`vsqesy3721`、`茉莉羽`、`陈大橙`、`飞667`、`一杯冰美式、、`、`M1ralce`、`紅星照耀中國`、`我爱跑步`、`河鱼天雁`、`你的心里没点高数吗`、`周月星斗`、`无敌战神暴王龙`、`control3`、`明珠有泪`、`Gstar_`、`伍拾两HZ`、`寡欲老公猪`、`PickGear`。
-
-天气图标源自 Meteocons，界面图标源自 Phosphor Icons，离线地名来自 GeoNames，太阳位置计算使用 commons-suncalc，徽章渲染使用 three.js。许可与出处见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-<details>
-<summary><b>版本足迹</b></summary>
-<br>
-
-| 版本 | 重点 |
-|:--|:--|
-| 0.1.6 | 穿搭、三维徽章、台风路径、按任意日期回看 |
-| 0.1.5-beta10.8 | 首页左右切城、首次定位引导、精确地点、天气源补全顺序 |
-| 0.1.5-beta10.5 | 按模块选源、更多国内来源、早晚天气提醒、小组件显示选项、云间小鸟 |
-| 0.1.5 测试版 | 澄空界面、15 日预报、天气回看、日本語界面 |
-| 0.1.3 | 横屏气象时钟、街道级定位、玻璃质感小组件、天气娘图标 |
-| 0.1.0 | 城市卡组、天气氛围效果、五种终端小组件 |
-| 0.0.5 | 浅色主题「清冷翡翠」 |
-| 0.0.1 | 首次公开预览：磷光终端界面和 15 枚天气图标 |
-
-每个版本的完整记录见 [Releases](https://github.com/zhishengplus/ZhishengWeather/releases)。
-
-</details>
-
-## 许可
-
-- 代码使用 [MIT License](LICENSE)，欢迎提交 Issue 和 PR。
-- 界面设计、应用图标、天气娘形象、徽章模型和应用文案是枳生天气的项目素材，引用时请注明出处。
-- 天气数据的权利归各数据提供方所有，仅供参考。
-- 使用个人天气服务时请保管好自己的凭据，不要提交到公开仓库。
-
-<br>
-
-<p align="center"><sub>枳生天气 · 看天气，也看见天空</sub></p>
+城市轮廓地图由 PickGear 贡献（PR #7）。时日预报小组件由 社区贡献者 贡献（PR #17），已保留其组件与配置入口适配。

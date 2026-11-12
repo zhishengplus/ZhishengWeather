@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HourlySequenceTest {
+    @Test fun clockTicksAndExpiredHoursDoNotChangeSurvivingColumnIdentities() {
+        val time = 1_800_000_000_000L
+        val observation = CurrentWeather(temperature = 23.0)
+        val forecast = (0..8).map { HourlyWeather(time + it * 3_600_000L, 20.0 + it) }
+        val first = hourlyDisplaySequence(observation, forecast, time + 1_000)
+        val tick = hourlyDisplaySequence(observation, forecast, time + 2_000)
+        assertEquals(first.map { it.stableKey }, tick.map { it.stableKey })
+        val later = hourlyDisplaySequence(observation, forecast, time + 3_601_000)
+        for (item in first.filter { it.isNow || it.weather.timeMillis >= time + 7_200_000 }) {
+            assertEquals(item.stableKey, later.single {
+                if (item.isNow) it.isNow else !it.isNow && it.weather.timeMillis == item.weather.timeMillis
+            }.stableKey)
+        }
+        assertEquals(first.size, first.map { it.stableKey }.distinct().size)
+    }
     @Test fun exactHourShowsPreviousForecastThenOneRealNowWithoutDuplicateTimestamp() {
         val now = 1_800_000_000_000L
         val previous = HourlyWeather(now - 3_600_000L, 21.0)

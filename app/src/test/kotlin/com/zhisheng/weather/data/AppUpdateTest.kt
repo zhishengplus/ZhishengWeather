@@ -171,6 +171,31 @@ class AppUpdateTest {
     }
 
     @Test
+    fun communityPreviewIsPublicButIsolatedPreviewAndExperienceAreNot() {
+        val filename = "ZhishengWeather-v0.1.6preview-20261144-public.apk"
+        assertTrue(AppUpdate.isPublicApkName(filename))
+        assertFalse(AppUpdate.isPublicApkName("ZhishengWeather-v0.1.6-preview-public.apk"))
+        assertFalse(AppUpdate.isPublicApkName("ZhishengWeather-v0.1.6preview-public-parallel.apk"))
+        assertFalse(AppUpdate.isPublicApkName("ZhishengWeather-v0.1.6-experience-public.apk"))
+        val feed = """[{"tag_name":"v0.1.6preview","draft":false,"prerelease":true,
+            "assets":[{"name":"$filename","state":"uploaded","browser_download_url":"https://example.test/preview.apk"}]}]"""
+        assertEquals("0.1.6preview", AppUpdate.parseGithubFeed(feed)?.versionName)
+        assertEquals("https://example.test/preview.apk", AppUpdate.parseGithubFeed(feed)?.apkUrl)
+    }
+
+    @Test
+    fun previewUpgradesPublicBetaAndCanLaterUpgradeToStable() {
+        fun info(name: String, code: Int? = null) = AppUpdateInfo(versionName = name, versionCode = code, apkUrl = "https://example.test/app.apk")
+        assertTrue(AppUpdate.isNewer(info("0.1.6preview", 20261144), 20261102, "0.1.5-beta10.8"))
+        assertTrue(AppUpdate.isNewer(info("0.1.6preview"), 20261102, "0.1.5-beta10.8"))
+        assertTrue(AppUpdate.isNewer(info("0.1.6"), 20261144, "0.1.6preview"))
+        assertFalse(AppUpdate.isNewer(info("0.1.6preview"), 20261145, "0.1.6"))
+        assertFalse(AppUpdate.isNewer(info("0.1.6preview", 20261144), 20261144, "0.1.6preview"))
+        assertFalse(AppUpdate.isNewer(info("0.1.5-beta10.8", 20261102), 20261144, "0.1.6preview"))
+        assertEquals(0, AppUpdate.compareSemver("v0.1.6preview", "0.1.6-preview"))
+    }
+
+    @Test
     fun checkedInReleaseRemainsValidWithoutDowngradingDevelopmentBuild() {
         val manifest = sequenceOf(
             File("update.json"),
@@ -188,12 +213,7 @@ class AppUpdateTest {
         assertTrue(AppUpdate.isNewer(info, 20260901, "0.1.5-beta3"))
         assertTrue(AppUpdate.isNewer(info, 20260912, "0.1.5-beta7"))
         assertTrue(AppUpdate.isNewer(info, 20260973, "0.1.5-beta10-public"))
-        // Public source exports can lag the published update manifest. Verify
-        // upgrade/same-version/downgrade behavior without assuming their order.
-        val releasedCode = requireNotNull(info.versionCode)
-        assertTrue(AppUpdate.isNewer(info, releasedCode - 1, info.versionName))
-        assertFalse(AppUpdate.isNewer(info, releasedCode, info.versionName))
-        assertFalse(AppUpdate.isNewer(info, releasedCode + 1, info.versionName))
+        assertFalse(AppUpdate.isNewer(info, BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME))
     }
 
     @Test
@@ -270,7 +290,7 @@ class AppUpdateTest {
     }
 
     @Test
-    fun keyFreeExportDisablesSelfUpdateForEveryBuildType() {
+    fun communityBuildsDisableOfficialSelfUpdate() {
         val gradle = sequenceOf(
             File("build.gradle.kts"),
             File("app/build.gradle.kts"),

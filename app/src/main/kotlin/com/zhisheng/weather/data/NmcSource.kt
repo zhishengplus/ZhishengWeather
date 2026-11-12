@@ -10,6 +10,8 @@ import com.zhisheng.weather.model.WeatherCondition
 import com.zhisheng.weather.model.WeatherData
 import com.zhisheng.weather.model.WeatherLocationMatch
 import com.zhisheng.weather.model.alertLevelOf
+import com.zhisheng.weather.model.PlaceRegion
+import com.zhisheng.weather.model.placeRegion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -44,13 +46,17 @@ object NmcSource {
         "新疆" to "新疆维吾尔自治区",
         "香港" to "香港特别行政区",
         "澳门" to "澳门特别行政区",
+        "澳門" to "澳门特别行政区",
+        "澳門特別行政區" to "澳门特别行政区",
+        "香港特別行政區" to "香港特别行政区",
     )
 
     private fun provinceNameVariants(name: String): List<String> {
         val short = provinceAliases.entries.firstOrNull { it.value == name }?.key
             ?: name.removeSuffix("省").removeSuffix("市")
                 .removeSuffix("自治区").removeSuffix("特别行政区")
-        return listOf(name, short).distinct().filter { it.length >= 2 }
+        return (listOf(name, short) + provinceAliases.filterValues { it == name }.keys)
+            .distinct().sortedByDescending { it.length }.filter { it.length >= 2 }
     }
 
     private val alarmProvincePrefix =
@@ -71,8 +77,11 @@ object NmcSource {
                 ?: return WeatherData(error = "中央气象台暂无「${city.displayName}」的区县级数据，可换用小米或 Open-Meteo 源")
             coroutineScope {
                 val fullDeferred = async { NmcApi.weather(ref.scode) }
-                val pageDeferred = async { NmcApi.forecastHtml(ref.pageUrl) }
-                val alarmDeferred = async { NmcApi.alarms() }
+                // The public HTML is much larger than the JSON response. A four-second
+                // cutoff discarded valid hourly forecasts on slower connections; retain
+                // a bounded budget within the caller's overall weather-request deadline.
+                val pageDeferred = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { NmcApi.forecastHtml(ref.pageUrl) } }
+                val alarmDeferred = async { kotlinx.coroutines.withTimeoutOrNull(4_000L) { NmcApi.alarms() }.orEmpty() }
 
                 val full = fullDeferred.await()
                 val pageHtml = pageDeferred.await()
@@ -81,8 +90,11 @@ object NmcSource {
                 val alerts = parseNmcAlarms(alarmsResponse, ref)
                 // 过去实况先解析：小站 real 气压常为 9999，需用同站最近整点的测站气压兜底。
                 val hourlyPast = parseNmcPassed(full?.passedchart.orEmpty())
+                val publishMs = real?.publish_time?.let { parseBeijingMillis(it) }
                 val current = real?.let {
-                    parseNmcReal(it, pressureFallbackHpa = hourlyPast.lastOrNull()?.pressure)
+                    parseNmcReal(it, pressureFallbackHpa = hourlyPast.lastOrNull { hour ->
+                        publishMs != null && hour.timeMillis <= publishMs && publishMs - hour.timeMillis <= 60 * 60_000L
+                    }?.pressure)
                 }
                 // 7 天用 /rest/weather 的结构化 JSON（含日降水量）；tempchart 兜底
                 // 晚间 9999 的今天高低温；月相与月升月落由本地天文计算补齐（源不提供）。
@@ -95,15 +107,23 @@ object NmcSource {
                     return@coroutineScope WeatherData(error = "中央气象台数据请求失败，稍后自动重试")
                 }
 
-                val publishMs = real?.publish_time?.let { parseBeijingMillis(it) }
+                val air = NmcApi.decodeAir(full?.air)
                 WeatherData(
                     current = current,
                     hourly = hourly,
                     daily = daily,
-                    aqi = parseNmcAir(NmcApi.decodeAir(full?.air)),
+                    aqi = parseNmcAir(air),
                     alerts = alerts,
                     updateTime = publishMs,
                     dataSource = SOURCE_ID,
+                    moduleEvidence = buildMap {
+                        fun add(key: String, time: Long?) { put(key, com.zhisheng.weather.model.WeatherModuleEvidence(
+                            SOURCE_ID, time, requestedLatitude = city.latitude, requestedLongitude = city.longitude,
+                            locationScope = ref.provinceName + ref.cityName + "城市/区县站点")) }
+                        if (current != null) add("current", publishMs)
+                        if (daily.isNotEmpty() || hourly.isNotEmpty()) add("forecast", full?.predict?.publish_time?.let(::parseBeijingMillis))
+                        if (air != null) add("air", air.forecasttime?.let(::parseBeijingMillis))
+                    },
                     blockSources = mapOf(
                         "current" to SOURCE_ID,
                         "hourly" to SOURCE_ID,
@@ -117,8 +137,10 @@ object NmcSource {
                         providerLatitude = city.latitude,
                         providerLongitude = city.longitude,
                         preciseGps = false,
-                        matchedLatitude = city.latitude,
-                        matchedLongitude = city.longitude,
+                        matchedLatitude = null,
+                        matchedLongitude = null,
+                        dataResolution = "城市/区县站点",
+                        matchedRegionName = ref.provinceName + ref.cityName,
                     ),
                     // nmc 仅覆盖中国，全部按北京时间。
                     utcOffsetSeconds = 28800,
@@ -139,6 +161,7 @@ object NmcSource {
         provinces: List<NmcApi.NmcProvince>,
         cityLookup: suspend (String) -> List<NmcApi.NmcCityEntry>?,
     ): NmcCityRef? {
+        if (city.placeRegion() == PlaceRegion.OVERSEAS) return null
         val province = matchProvince(city.affiliation, city.name, provinces) ?: return null
         val entries = cityLookup(province.code) ?: return null
         val wanted = stripDistrictSuffix(city.name)
@@ -160,6 +183,18 @@ object NmcSource {
                 val entryName = stripDistrictSuffix(entry.city)
                 entryName.length >= 2 && rest.startsWith(entryName)
             }?.let {
+                return NmcCityRef(province.code, it.code, it.url, province.name, it.city)
+            }
+        }
+        // The public catalogue exposes territory stations, not all HK districts
+        // or Macau parishes. Use the named parent station, never an arbitrary row.
+        val territory = when (province.name) {
+            "香港特别行政区" -> "香港"
+            "澳门特别行政区" -> "澳门"
+            else -> null
+        }
+        if (territory != null) {
+            entries.firstOrNull { it.city == territory }?.let {
                 return NmcCityRef(province.code, it.code, it.url, province.name, it.city)
             }
         }
@@ -238,8 +273,8 @@ object NmcSource {
             ?: pressureFallbackHpa
         return CurrentWeather(
             temperature = w.temperature?.takeIf { it in -90.0..60.0 },
-            feelsLike = w.feelst?.takeIf { it in -100.0..70.0 }
-                ?: w.temperature?.takeIf { it in -100.0..70.0 },
+            // 体感缺测就是缺测，不能用气温冒充（其余源同样留空）。
+            feelsLike = w.feelst?.takeIf { it in -100.0..70.0 },
             condition = condition,
             weatherText = info ?: condition.takeUnless { it == WeatherCondition.UNKNOWN }?.label ?: "天气现象暂缺",
             humidity = w.humidity?.takeIf { it in 0.0..100.0 },
@@ -286,7 +321,7 @@ object NmcSource {
                 severity = alertLevelOf("${level}预警"),
                 type = kind,
             )
-        }.take(3)
+        }.distinct()
     }
 
     internal fun parseAlarmTitle(title: String): Triple<String, String, String>? {
@@ -337,7 +372,7 @@ object NmcSource {
                     nightInfo == null || dayInfo == nightInfo -> dayInfo
                     else -> "${dayInfo}转${nightInfo}"
                 },
-                windSpeed = windPowerToSpeed(nmcText(day.day?.wind?.power)),
+                windSpeed = null, // A force-level range must not become an exact forecast speed.
                 windDirectionDeg = windDirToDegree(nmcText(day.day?.wind?.direct)),
                 precipMm = day.precipitation?.takeIf { it >= 0.0 },
                 // 首日带出官方日出日落（原格式 “2026-09-14 05:53”）。
@@ -521,10 +556,17 @@ object NmcSource {
             }
     }
 
-    // 中文方位 → 罗盘度数（8 方位 + 常见变体；实况 JSON 自带 degree，此映射兜底 7 天文本）。
+    // 中文方位 → 罗盘度数（8/16 方位 + 常见变体；实况 JSON 自带 degree，此映射兜底 7 天文本）。
     internal fun windDirToDegree(text: String?): Double? {
         val t = text?.trim() ?: return null
         if (t.isEmpty() || t == "-") return null
+        // “X偏Y”＝从X向Y偏22.5°（顺时针邻位加、逆时针邻位减）：南偏东=157.5°、北偏西=337.5°。
+        biasPoint.find(t)?.let { m ->
+            val base = cardinalDirs.indexOf(m.groupValues[1])
+            val toward = cardinalDirs.indexOf(m.groupValues[2])
+            val delta = if ((base + 1) % 4 == toward) 22.5 else -22.5
+            return (base * 90.0 + delta + 360.0) % 360.0
+        }
         val base = when {
             t.startsWith("北") && !t.contains("东") && !t.contains("西") -> 0.0
             t.startsWith("东北") -> 45.0
@@ -536,14 +578,11 @@ object NmcSource {
             t.startsWith("西北") -> 315.0
             else -> return null
         }
-        return when {
-            t.contains("偏北") && base == 0.0 -> 337.5
-            t.contains("偏东") -> base + 22.5
-            t.contains("偏南") && base == 180.0 -> 168.75
-            t.contains("偏西") && base == 270.0 -> 292.5
-            else -> base
-        }
+        return base
     }
+
+    private val cardinalDirs = "北东南西"
+    private val biasPoint = Regex("^(北|东|南|西)偏(北|东|南|西)风?$")
 
     // nmc 只有中国城市；城市搜索不做全网抓取（35 省×逐省请求不现实），
     // 由现有搜索渠道负责选址，本源在 fetch 时按省/市名匹配。

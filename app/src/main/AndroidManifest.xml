@@ -9,7 +9,8 @@
     <!--
       位置权限：**可选功能**，默认关闭。
       仅当用户在设置里主动开启「定位当前城市」并点击定位按钮时才申请；
-      默认只使用粗略位置；用户主动开启街道级定位时才申请精确位置。
+      默认支持粗略位置；首次定位、街道级定位或用户选择 GPS 重试时可申请精确位置。
+      GPS 重试不会自动开启街道地址显示。
       始终不申请后台位置。
       拒绝后 App 全部功能照常可用（手动搜索城市）。
     -->
@@ -52,9 +53,9 @@
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@mipmap/ic_launcher_character"
+        android:icon="@mipmap/zw_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_character_round"
+        android:roundIcon="@mipmap/zw_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ZhishengWeather">
 
@@ -75,18 +76,25 @@
             android:screenOrientation="fullUser"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
         </activity>
+        <activity
+            android:name=".ui.badge.BadgeActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.ZhishengWeather.Badge"
+            android:screenOrientation="fullUser"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode" />
 
         <!--
           桌面图标通过互斥 activity-alias 切换。先启用目标别名、再禁用旧别名，
-          可在不重装 App 的前提下刷新桌面入口；默认使用角色图标。
+          可在不重装 App 的前提下刷新桌面入口；复用旧默认别名以保留桌面位置。
         -->
         <activity-alias
             android:name=".IconCharacter"
             android:enabled="true"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_character"
+            android:icon="@mipmap/zw_launcher"
             android:label="@string/app_name"
-            android:roundIcon="@mipmap/ic_launcher_character_round"
+            android:roundIcon="@mipmap/zw_launcher_round"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -97,8 +105,9 @@
                 android:resource="@xml/shortcuts" />
         </activity-alias>
 
-        <activity-alias android:name=".IconMinimal" android:enabled="false" android:exported="true"
-            android:icon="@mipmap/ic_launcher_minimal" android:roundIcon="@mipmap/ic_launcher_minimal"
+        <!-- 旧默认组件名保持不变；显式选择的天气娘使用独立别名。 -->
+        <activity-alias android:name=".IconWeatherGirl" android:enabled="false" android:exported="true"
+            android:icon="@mipmap/ic_launcher_character" android:roundIcon="@mipmap/ic_launcher_character_round"
             android:label="@string/app_name" android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -106,6 +115,20 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity-alias>
+
+        <!-- 已选旧简约的用户保留原组件入口，显示新的默认图标。 -->
+        <activity-alias android:name=".IconMinimal" android:enabled="false" android:exported="true"
+            android:icon="@mipmap/zw_launcher" android:roundIcon="@mipmap/zw_launcher_round"
+            android:label="@string/app_name" android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+        </activity-alias>
+        <receiver android:name=".data.AppIconUpgradeReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
         <activity android:name=".widget.WidgetConfigActivity" android:exported="true" android:label="桌面天气">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
@@ -147,9 +170,9 @@
             android:name=".IconClassic"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher"
+            android:icon="@mipmap/zw_launcher"
             android:label="@string/app_name"
-            android:roundIcon="@mipmap/ic_launcher_round"
+            android:roundIcon="@mipmap/zw_launcher_round"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -164,9 +187,9 @@
             android:name=".IconLight"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_light"
+            android:icon="@mipmap/zw_launcher"
             android:label="@string/app_name"
-            android:roundIcon="@mipmap/ic_launcher_light_round"
+            android:roundIcon="@mipmap/zw_launcher_round"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

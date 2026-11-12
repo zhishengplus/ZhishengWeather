@@ -122,7 +122,7 @@ object WeatherRepository {
               catch (_: Exception) { null }
             if (donor != null) result = fillMissingWeather(result, donor)
         }
-        markSuccessfulFetch(result.copy(configurationFingerprint = config.fingerprint, sourceDiagnostics = result.sourceDiagnostics + diagnostics), System.currentTimeMillis())
+        markSuccessfulFetch(WeatherQuality.prepare(result.copy(configurationFingerprint = config.fingerprint, sourceDiagnostics = result.sourceDiagnostics + diagnostics)), System.currentTimeMillis())
         } finally { batch?.close() }
     }
 
@@ -130,7 +130,7 @@ object WeatherRepository {
 
     suspend fun fetchComparison(city: City): List<SourceComparison> = withContext(Dispatchers.IO) {
         val config = configuration(SourcePref.AUTO)
-        // The fusion and AUTO products combine sources; comparisons use their individual inputs.
+        // Automatic products combine modules; comparisons use their individual providers.
         val sources = SourcePref.entries.filter { it in config.available && it != SourcePref.AUTO && it != SourcePref.ZHISHENG &&
             it != SourcePref.SENIVERSE && it != SourcePref.MOJI }
         val startedAt = System.currentTimeMillis()
@@ -154,14 +154,14 @@ object WeatherRepository {
         "co" to "mg/m³",
     )
 
-    // AUTO 与枳生天气源（融合+完整性）允许公共源补缺；其余手动锁定源保持完全纯源，
+    // AUTO 与枳生天气源允许公共源补缺；其余手动锁定源保持完全纯源，
     // 让设置名称与实际数据严格一致。
     private suspend fun fetchPrimaryWeather(city: City, pref: SourcePref, includeHistory: Boolean = true): WeatherData = withContext(Dispatchers.IO) {
         val history = if (includeHistory) WeatherFetchBatch(listOf<suspend () -> List<MinutePrecip>?>(
             { PrecipitationHistorySource.fetch(city) },
         ), coroutineContext.job) else null
         try {
-            val data = when (pref) {
+            val data = kotlinx.coroutines.withTimeoutOrNull(14_000L) { when (pref) {
                 SourcePref.QWEATHER -> {
                     SecretStore.currentQw()
                     if (QWeatherApi.enabled) {
@@ -185,18 +185,8 @@ object WeatherRepository {
                 SourcePref.MOJI -> DomesticWeatherSource.fetchMoji(city)
                 SourcePref.ZHISHENG -> fetchZhishengFusion(city)
                 SourcePref.AUTO -> autoChain(city)
-            }
-            // 先丢掉已经过去的逐时，再决定要不要用公共源补齐；最后对齐「现在」。
-            val trimmed = WeatherConsistency.dropPastHourly(data)
-            val completed = if (shouldSupplementWithOpenMeteo(pref)) {
-                supplementWithinBudget(trimmed, city)
-            } else {
-                backfillHourlyPrecipOnly(trimmed, city, pref)
-            }
-            val result = markSuccessfulFetch(
-                WeatherConsistency.align(completed),
-                System.currentTimeMillis(),
-            )
+            } } ?: WeatherData(error = "天气来源响应超时，请重试或换用自动优选")
+            val result = markSuccessfulFetch(WeatherQuality.prepare(data), System.currentTimeMillis())
             // 历史是可选模型回溯；仅收下已完成的结果，不能让它阻塞有效的当前天气。
             val historyPoints = history?.collect(timeoutMs = 0)?.firstOrNull().orEmpty()
             if (result.current == null || result.error != null) result else result.copy(
@@ -234,7 +224,10 @@ object WeatherRepository {
      * 失败结果不更新时间，避免用户误以为错误页拿到了新天气。
      */
     internal fun markSuccessfulFetch(data: WeatherData, fetchedAt: Long): WeatherData =
-        if (data.current != null && data.error == null) data.copy(fetchedAt = fetchedAt) else data
+        if (data.current != null && data.error == null) data.copy(fetchedAt = fetchedAt,
+            moduleEvidence = data.moduleEvidence.mapValues { (_, evidence) ->
+                if (evidence.fetchedAt == null) evidence.copy(fetchedAt = fetchedAt) else evidence
+            }) else data
 
     internal fun shouldSupplementWithOpenMeteo(pref: SourcePref): Boolean =
         pref == SourcePref.AUTO || pref == SourcePref.ZHISHENG
@@ -244,148 +237,23 @@ object WeatherRepository {
 
     // AUTO 链：小米主导；小米失败先降中央气象台（国内直连、区县级），再降 Open-Meteo。
     // 只有整源失败时，才尝试用户已配置的百度/高德，避免行政区级数据降低正常链路精度。
-    private suspend fun autoChain(city: City): WeatherData {
-        // 0.0.9-debug 修复：原实现熔断打开时仍会再打一次小米（白等一轮超时），
-        // 小米慢失败时连续两次 fetchXiaomi（内部各带 2 次重试）最坏 30s+，
-        // 会吃满 ViewModel 的 25s 全局超时，Open-Meteo 兜底永远轮不到--
-        // 与 SourceHealth「熔断期内直接跳过该源」的注释意图相反。现在熔断期内
-        // 直接走公共源，冷却结束后自动恢复小米。
-        if (SourceHealth.isDown(SourceHealth.XIAOMI)) {
-            return autoPublicFallback(city)
-        }
-        val d = fetchXiaomi(city)
-        val checked = WeatherConsistency.sanitize(d)
-        if (checked.error == null && checked.current != null) {
-            SourceHealth.recordSuccess(SourceHealth.XIAOMI)
-            return checked
-        }
-        SourceHealth.recordFailure(SourceHealth.XIAOMI)
-        return autoPublicFallback(city)
-    }
+    private suspend fun autoChain(city: City): WeatherData = fetchAutomaticWeather(city, branded = false)
 
-    // AUTO 链：小米主导，随后中央气象台（官方、国内直连、免配置），最后 Open-Meteo
-    //（0.1.5-beta6 起百度/高德天气已下线）。中央气象台熔断期内直接跳过，避免叠加超时。
-    private suspend fun autoPublicFallback(city: City): WeatherData {
-        if (!SourceHealth.isDown(SourceHealth.NMC)) {
-            val nmc = NmcSource.fetch(city)
-            val nmcChecked = WeatherConsistency.sanitize(nmc)
-            if (nmcChecked.error == null && nmcChecked.current != null) {
-                SourceHealth.recordSuccess(SourceHealth.NMC)
-                return nmcChecked
-            }
-            SourceHealth.recordFailure(SourceHealth.NMC)
-        }
-        return OpenMeteoSource.fetch(city)
-    }
+    private suspend fun fetchZhishengFusion(city: City): WeatherData = fetchAutomaticWeather(city, branded = true)
 
-    // —— 枳生天气源：并发抓取全部可用源 → FusionEngine 加权融合 + 实况纠偏 + 完整性补齐 ——
-    // 免 key 常驻：小米 / 中央气象台 / 腾讯 / 中国天气网 / Open-Meteo（9 模式 + 补充包 + 空气质量）；
-    // 配置了凭据时自动加入和风 / 彩云。任一腿失败自动剔除，≥2 源融合、仅 1 源直用、全失败走完整 OM 兜底。
-    // 腿不读熔断（手动源哲学），但写入熔断供真实失败观测。
-
-    private val zhishengBaseWeights = mapOf(
-        "XIAOMI" to 1.0, "NMC" to 0.9, "WEATHERCN" to 0.8, "TENCENT" to 0.7,
-        "QWEATHER" to 1.0, "CAIYUN" to 1.0,
-        "OPEN-METEO:ecmwf_ifs025" to 1.0, "OPEN-METEO:gfs_global" to 0.9,
-        "OPEN-METEO:icon_seamless" to 0.9, "OPEN-METEO:cma_grapes_global" to 0.8,
-        "OPEN-METEO:jma_seamless" to 0.7, "OPEN-METEO:ukmo_seamless" to 0.9,
-        "OPEN-METEO:meteofrance_seamless" to 0.8, "OPEN-METEO:gem_global" to 0.8,
-        "OPEN-METEO:ecmwf_aifs025_single" to 0.85, "OPEN-METEO" to 0.85,
-    )
-
-    private fun zhishengWeight(id: String): Double = zhishengBaseWeights[id] ?: 0.7
-
-    private data class FusionLegResult(
-        val sources: List<FusionEngine.FusionSource> = emptyList(),
-        val multi: OmMultiModel? = null,
-        val supplements: OmSupplements? = null,
-        val air: OmAirQuality? = null,
-    )
-
-    private suspend fun fetchZhishengFusion(city: City): WeatherData {
-        val startedAt = System.currentTimeMillis()
-        // 凭据判定照既有先例：先同步运行态，再查 ready
-        SecretStore.currentQw()
-        SecretStore.currentCaiyun()
-        val qwEnabled = QWeatherApi.enabled
-        val cyEnabled = SecretStore.caiyunReady
-        fun source(id: String, data: WeatherData?): List<FusionEngine.FusionSource> =
-            data?.takeIf { it.error == null }?.let {
-                listOf(FusionEngine.FusionSource(id, id.substringBefore(':'), zhishengWeight(id), it))
-            }.orEmpty()
-        val requests = mutableListOf<suspend () -> FusionLegResult?>(
-            { FusionLegResult(source("XIAOMI", leg(SourceHealth.XIAOMI, 8_000) { fetchXiaomi(city).takeIf { it.error == null && it.current != null } })) },
-            { FusionLegResult(source("NMC", leg(SourceHealth.NMC, 8_000) { NmcSource.fetch(city).takeIf { it.error == null && it.current != null } })) },
-            {
-                val multi = leg(SourceHealth.OPEN_METEO, 7_000) {
-                    OpenMeteoApi.fetchMultiModel(city.latitude, city.longitude, city.isPreciseLocation)
-                }
-                FusionLegResult(multi = multi, sources = multi?.models.orEmpty().flatMap {
-                    source("OPEN-METEO:${it.model}", omModelToWeatherData(it, startedAt))
-                })
-            },
-            {
-                val supplement = leg(null, 7_000) { OpenMeteoApi.fetchSupplements(city.latitude, city.longitude, city.isPreciseLocation) }
-                FusionLegResult(supplements = supplement, sources = source("OPEN-METEO", supplement?.let { omSupplementsToWeatherData(it, startedAt) }))
-            },
-            { FusionLegResult(air = leg(null, 6_000) { OpenMeteoApi.fetchAirQuality(city.latitude, city.longitude) }) },
-            {
-                val response = leg(null, 6_000) { tencentArea(city)?.let { (p, c) -> TencentWeatherApi.fetch(p, c) } }
-                FusionLegResult(source("TENCENT", response?.let { tencentToWeatherData(it, startedAt) }))
-            },
-            { FusionLegResult(source("WEATHERCN", leg(null, 7_000) { WeatherComCnApi.fetch(city) }?.let { wcnToWeatherData(it, startedAt) })) },
-        )
-        if (qwEnabled) requests += { FusionLegResult(source("QWEATHER", leg(SourceHealth.QWEATHER, 8_000) { fetchQWeather(city)?.takeIf { it.error == null && it.current != null } })) }
-        if (cyEnabled) requests += { FusionLegResult(source("CAIYUN", leg(SourceHealth.CAIYUN, 6_000) { CaiyunSource.fetch(city).takeIf { it.error == null && it.current != null } })) }
-        // 保留首个有效天气的完整 8s 等待机会；只有实况可用后才开启 1.5s 收集窗。
-        // 空气/日预报等辅助数据不能提前截断主源。窗内所有到达源继续使用原融合权重。
-        val legs = WeatherFetchBatch(requests, coroutineContext.job)
-            .collect(8_000, settleAfterUsableMs = 1_500) { result ->
-            result.sources.any { WeatherConsistency.sanitize(it.data).current != null }
+    /** Bounded parallel requests: a slow website must not exhaust the entire fallback budget. */
+    private suspend fun fetchAutomaticWeather(city: City, branded: Boolean): WeatherData {
+        val sources = mutableListOf(SourcePref.XIAOMI, SourcePref.NMC)
+        if (branded) sources += listOf(SourcePref.WEATHERCN, SourcePref.TENCENT)
+        sources += SourcePref.OPEN_METEO
+        // Personal subscriptions remain explicit choices/module selections; do not spend their
+        // quota merely because a free automatic source was selected.
+        val candidates = WeatherFetchBatch(sources.map { source -> suspend {
+            fetchPrimaryWeather(city, source, includeHistory = false)
+        } }, coroutineContext.job).collect(timeoutMs = 12_000, settleAfterUsableMs = 2_500) {
+            WeatherQuality.usableCurrent(it) && it.hourly.size >= 8 && it.daily.size >= 3
         }.filterNotNull()
-        val sources = legs.flatMap { it.sources }
-        val multi = legs.firstNotNullOfOrNull { it.multi }
-        val supplements = legs.firstNotNullOfOrNull { it.supplements }
-        val omAirData = legs.firstNotNullOfOrNull { it.air }
-
-        if (sources.isEmpty()) {
-            return backfillHourlyCompleteness(
-                fusionFallback(city), city, omAirData, supplements)
-        }
-        if (sources.size == 1 && WeatherConsistency.sanitize(sources.single().data).current != null) {
-            return backfillHourlyCompleteness(sources.single().data.copy(
-                dataSource = "ZHISHENG",
-                fusionSources = listOf(sources.single().label),
-            ), city, omAirData, supplements)
-        }
-        // 误差积分板：用本次实况给上一轮快照打分 → 自适应系数（样本不足时为空表 = 纯先验）
-        val factors = FusionScoreboard.settle(city.locationKey, sources, startedAt)
-        val weighted = if (factors.isEmpty()) sources else sources.map {
-            it.copy(weight = it.weight * (factors[it.id] ?: 1.0))
-        }
-        val fused = FusionEngine.fuse(
-            FusionEngine.Input(city, weighted, startedAt, omAirData, supplements),
-        )
-        if (fused.current == null) {
-            return backfillHourlyCompleteness(
-                fusionFallback(city), city, omAirData, supplements)
-        }
-        val snappedLat = multi?.latitude
-        val snappedLon = multi?.longitude
-        val matched = if (snappedLat != null && snappedLon != null) {
-            fused.copy(
-                locationMatch = WeatherLocationMatch(
-                    requestedLatitude = city.latitude,
-                    requestedLongitude = city.longitude,
-                    providerLatitude = snappedLat,
-                    providerLongitude = snappedLon,
-                    preciseGps = city.isPreciseLocation,
-                    matchedLatitude = snappedLat,
-                    matchedLongitude = snappedLon,
-                ),
-            )
-        } else fused
-        return backfillHourlyCompleteness(matched, city, omAirData, supplements)
+        return WeatherQuality.combine(candidates, city, branded, System.currentTimeMillis())
     }
 
     /**
@@ -559,27 +427,27 @@ object WeatherRepository {
             val svc = QWeatherApi.service
 
             val now = async { qwRetry { svc.current(lat, lon) } }
-            val daily = async {
+            val daily = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) {
                 qwRetry { svc.daily(lat, lon, 10) }
                     ?: qwRetry { svc.daily(lat, lon, 7) }
                     ?: qwRetry { svc.daily(lat, lon, 3) }
-            }
-            val hourly = async {
+            } }
+            val hourly = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) {
                 // 新版接口最多 240 小时。高档套餐先取完整时效；若凭据权限只覆盖
                 // 较短时效，按档回退，不能让免费用户因为一次 4xx 丢掉整个逐时区。
                 qwRetry { svc.hourly(lat, lon, 240) }
                     ?: qwRetry { svc.hourly(lat, lon, 168) }
                     ?: qwRetry { svc.hourly(lat, lon, 72) }
                     ?: qwRetry { svc.hourly(lat, lon, 24) }
-            }
-            val alerts = async { qwRetry { svc.alerts(lat, lon) } }
-            val air = async { qwRetry { svc.air(lat, lon) } }
-            val minutely = async { qwRetry { svc.minutely(QWeatherApi.lonLat(city)) } }
-            val indices = async {
+            } }
+            val alerts = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { qwRetry { svc.alerts(lat, lon) } } }
+            val air = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { qwRetry { svc.air(lat, lon) } } }
+            val minutely = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { qwRetry { svc.minutely(QWeatherApi.lonLat(city)) } } }
+            val indices = async { kotlinx.coroutines.withTimeoutOrNull(8_000L) {
                 // type=0 表示套餐允许的全部生活指数；不支持时退回基础四项。
                 qwRetry { svc.indices(QWeatherApi.lonLat(city), "0") }
                     ?: qwRetry { svc.indices(QWeatherApi.lonLat(city), "1,2,3,9") }
-            }
+            } }
             // 小米源补：昨日复盘 + 台风 + 逐日扩展（按城市名反查小米 key，取距离最近命中，
             // 防同名异地串台——v0.0.1 修复：金川区(金昌)显示四川金川县预警）
             val cur = now.await() ?: return@coroutineScope null
@@ -951,35 +819,22 @@ object WeatherRepository {
     // 按城市名反查小米 key：同名异地（金川区/金川县、朝阳…）必须取距离最近的命中，
     // 且超过 150km 视为无匹配，宁可缺数据也不串城市（v0.0.1）。
     // v0.0.4：结果做会话级缓存——此前每次和风刷新都附带一次 searchCity 往返（15s 超时风险）
-    private const val XIAOMI_MATCH_MAX_KM = 150.0
-
     private val xiaomiKeyCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private suspend fun nearestXiaomiKey(name: String, lat: Double, lon: Double): String? {
         val cacheKey = "$name|$lat|$lon"
         xiaomiKeyCache[cacheKey]?.let { return it }
         val hit = try {
-            val hits = XiaomiApi.instance.searchCity(name)
-                .filter { it.status == 0 && !it.locationKey.isNullOrBlank() }
-            val nearest = hits.minByOrNull { h ->
-                val hl = h.latitude?.toDoubleOrNull()
-                val ho = h.longitude?.toDoubleOrNull()
-                if (hl == null || ho == null) Double.MAX_VALUE / 2 else distanceKm(lat, lon, hl, ho)
-            }
-            if (nearest == null) {
-                null
-            } else {
-                val hl = nearest.latitude?.toDoubleOrNull()
-                val ho = nearest.longitude?.toDoubleOrNull()
-                if (hl == null || ho == null) nearest.locationKey // 命中无坐标，退化为直接用
-                else if (distanceKm(lat, lon, hl, ho) <= XIAOMI_MATCH_MAX_KM) nearest.locationKey else null
-            }
+            coordinateXiaomiKey(XiaomiApi.instance.searchCity(name), lat, lon)
         } catch (ce: kotlinx.coroutines.CancellationException) {
             throw ce
         } catch (_: Exception) {
             null
         }
-        if (hit != null) xiaomiKeyCache[cacheKey] = hit
+        if (hit != null) {
+            if (xiaomiKeyCache.size >= 128) xiaomiKeyCache.clear()
+            xiaomiKeyCache[cacheKey] = hit
+        }
         return hit
     }
 
@@ -1192,9 +1047,9 @@ object WeatherRepository {
         return buildList {
             val highs = r.forecastDaily?.temperature?.value
             val codes = r.forecastDaily?.weather?.value
-            // pubTime 解析失败退回当日 0 点，避免逐日日期全部掉回 1970（v0.0.1）
+            // Undated forecasts cannot safely be assigned to today.
             val start = parseTimeMillis(r.forecastDaily?.pubTime).takeIf { it != 0L }
-                ?: todayStartMillis()
+                ?: return@buildList
             val offset = offsetSeconds(r.forecastDaily?.pubTime)
             val n = minOf(highs?.size ?: 0, codes?.size ?: 0, 15)
             for (i in 0 until n) {
@@ -1244,6 +1099,10 @@ object WeatherRepository {
         r: XiaomiForecastResult,
         locationKey: String? = null,
     ): WeatherData {
+        val currentCodeKey = r.weatherCodeKey("current", locationKey)
+        val hourlyCodeKey = r.weatherCodeKey("hourly", locationKey)
+        val dailyCodeKey = r.weatherCodeKey("daily", locationKey)
+        val yesterdayCodeKey = r.weatherCodeKey("yesterday", dailyCodeKey)
         val indexValues = r.indices?.indices.orEmpty()
             .mapNotNull { item ->
                 val key = item.type?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
@@ -1252,14 +1111,16 @@ object WeatherRepository {
             }
             .toMap()
         val current = r.current?.let { cur ->
-            val profile = WeatherCondition.xiaomiProfile(cur.weather, locationKey)
+            val profile = WeatherCondition.xiaomiProfile(cur.weather, currentCodeKey)
             CurrentWeather(
                 temperature = cur.temperature?.value?.toDoubleOrNull(),
                 // 指数值仅作同一份小米响应内的缺值补充，绝不覆盖实况对象已有字段。
                 feelsLike = cur.feelsLike?.value?.toDoubleOrNull() ?: indexValues["feelslike"],
                 condition = profile.condition,
-                weatherText = WeatherCondition.xiaomiLabel(cur.weather, locationKey),
-                humidity = pct(cur.humidity?.value?.toDoubleOrNull() ?: indexValues["humidity"]),
+                weatherText = WeatherCondition.xiaomiLabel(cur.weather, currentCodeKey),
+                humidity = cur.humidity?.value?.toDoubleOrNull()?.let { value ->
+                    if (cur.humidity.unit?.trim() in setOf("%", "％")) value else pct(value)
+                } ?: indexValues["humidity"]?.takeIf { it in 0.0..100.0 },
                 // 小米风速带 unit 字段：km/h 透传，m/s 换算（v0.0.1）
                 windSpeed = xiaomiWindKmh(cur.wind?.speed),
                 windDirectionDeg = cur.wind?.direction?.value?.toDoubleOrNull(),
@@ -1279,17 +1140,17 @@ object WeatherRepository {
             val codes = r.forecastHourly?.weather?.value
             val pubRaw = r.forecastHourly?.temperature?.pubTime ?: r.forecastHourly?.pubTime
             val start = parseTimeMillis(pubRaw).takeIf { it != 0L }
-                ?: (System.currentTimeMillis() / 3_600_000L * 3_600_000L)
             val hourOffset = offsetSeconds(pubRaw)
             val n = minOf(temps?.size ?: 0, codes?.size ?: 0, 24)
             for (i in 0 until n) {
-                val profile = WeatherCondition.xiaomiProfile(codes?.getOrNull(i)?.toString(), locationKey)
+                val profile = WeatherCondition.xiaomiProfile(codes?.getOrNull(i)?.toString(), hourlyCodeKey)
                 val wind = hourlyWind?.getOrNull(i)
                 val explicitTime = parseTimeMillis(wind?.datetime).takeIf { it != 0L }
+                val time = explicitTime ?: start?.let { xiaomiHourlyMillis(it, i, hourOffset) } ?: continue
                 add(
                     HourlyWeather(
                         // 风数组自带逐点时间时以源时间为准；缺失才按发布时间顺推，避免跨小时错配。
-                        timeMillis = explicitTime ?: xiaomiHourlyMillis(start, i, hourOffset),
+                        timeMillis = time,
                         temperature = temps?.getOrNull(i)?.toDouble(),
                         condition = profile.condition,
                         windSpeed = wind?.speed?.toDoubleOrNull(),
@@ -1301,7 +1162,7 @@ object WeatherRepository {
             }
         }
 
-        val daily = mapXiaomiDaily(r, locationKey)
+        val daily = mapXiaomiDaily(r, dailyCodeKey)
 
         val aqi = r.aqi?.let { a ->
             AqiInfo(
@@ -1339,6 +1200,12 @@ object WeatherRepository {
             alerts = alerts,
             // 首页“更新”反映源数据时刻，不把刚下载到的旧响应伪装成刚刚观测。
             updateTime = xiaomiUpdateMillis(r, System.currentTimeMillis()),
+            moduleEvidence = buildMap {
+                fun add(key: String, raw: String?) { put(key, com.zhisheng.weather.model.WeatherModuleEvidence(
+                    "XIAOMI", parseTimeMillis(raw).takeIf { it > 0L })) }
+                if (current != null) add("current", r.current?.pubTime)
+                if (aqi != null) add("air", r.aqi?.pubTime)
+            },
             rainNowcast = xiaomiNowcast(r.minutely),
             // v0.0.6：小米 precipitation.value 为约 120 个逐分钟点；此前只接了文案和雨区距离
             rainMinutes = xiaomiMinuteSeries(r.minutely?.precipitation),
@@ -1355,8 +1222,8 @@ object WeatherRepository {
             sportsOk = xiaomiSuitability(r.indices, "sports"),
             extraIndices = xiaomiLifeIndices(r.indices),
             yesterday = r.yesterday?.let {
-                val startCondition = WeatherCondition.fromXiaomi(it.weatherStart, locationKey)
-                val endCondition = WeatherCondition.fromXiaomi(it.weatherEnd, locationKey)
+                val startCondition = WeatherCondition.fromXiaomi(it.weatherStart, yesterdayCodeKey)
+                val endCondition = WeatherCondition.fromXiaomi(it.weatherEnd, yesterdayCodeKey)
                 YesterdayInfo(
                     high = it.tempMax?.toDoubleOrNull(),
                     low = it.tempMin?.toDoubleOrNull(),
@@ -1653,13 +1520,7 @@ object WeatherRepository {
     }
 
     internal fun xiaomiUpdateMillis(r: XiaomiForecastResult, fetchedAt: Long): Long? =
-        sequenceOf(
-            r.current?.pubTime,
-            r.updateTime,
-            r.forecastHourly?.temperature?.pubTime,
-            r.forecastHourly?.pubTime,
-            r.aqi?.pubTime,
-        ).map(::parseTimeMillis).firstOrNull { it > 0L && it <= fetchedAt + 300_000L }
+        parseTimeMillis(r.current?.pubTime).takeIf { it > 0L && it <= fetchedAt + 300_000L }
 
     private val formatter: DateTimeFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 

@@ -31,6 +31,10 @@ data class AutomationSettings(
 
 /** Independent store: widget settings and provider credentials retain their existing ownership. */
 object AutomationSettingsRepository {
+    // 重排留在 IO，并串行执行；每次执行时由调度器重新读取最新设置，
+    // 避免较早保存产生的任务最后入队、覆盖用户随后选择的间隔或关闭状态。
+    private val rescheduler = AutomationSettingsRescheduler(kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO))
     private val mutable = MutableStateFlow(AutomationSettings())
     val settings: StateFlow<AutomationSettings> = mutable
     fun read(context: Context): AutomationSettings {
@@ -42,6 +46,7 @@ object AutomationSettingsRepository {
     fun init(context: Context) { mutable.value = read(context) }
     fun save(context: Context, settings: AutomationSettings) {
         val s = settings.normalized()
+        val app = context.applicationContext
         reminderDeliveryGate.updateSettings {
             context.getSharedPreferences("weather_automation", Context.MODE_PRIVATE).edit()
                 .putInt("foreground", s.foregroundMinutes).putBoolean("background", s.backgroundEnabled)
@@ -53,8 +58,10 @@ object AutomationSettingsRepository {
             manager?.activeNotifications?.filter { shouldCancelWeatherReminder(it.tag, s) }
                 ?.forEach { manager.cancel(it.tag, it.id) }
         }
-        com.zhisheng.weather.widget.WidgetRefresh.schedule(context.applicationContext)
-        com.zhisheng.weather.widget.WidgetRefresh.request(context.applicationContext)
-        WeatherReminderSchedule.request(context.applicationContext)
+        rescheduler.request {
+            com.zhisheng.weather.widget.WidgetRefresh.schedule(app)
+            com.zhisheng.weather.widget.WidgetRefresh.request(app)
+            WeatherReminderSchedule.request(app)
+        }
     }
 }

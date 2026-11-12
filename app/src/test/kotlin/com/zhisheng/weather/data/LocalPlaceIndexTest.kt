@@ -59,7 +59,7 @@ class LocalPlaceIndexTest {
             "江苏省", "浙江省", "安徽省", "福建省", "江西省", "山东省", "河南省", "湖北省", "湖南省",
             "广东省", "海南省", "四川省", "贵州省", "云南省", "陕西省", "甘肃省", "青海省",
             "内蒙古自治区", "广西壮族自治区", "西藏自治区", "宁夏回族自治区", "新疆维吾尔自治区",
-            "離島區", "中西區", "大堂區", "台北市", "高雄市")) {
+            "离岛区", "中西区", "大堂区", "台北市", "高雄市")) {
             assertTrue("$query missing", index.search(query).any { it.name == query })
         }
         assertTrue(index.search("朝阳区").map { it.affiliation }.distinct().size >= 2)

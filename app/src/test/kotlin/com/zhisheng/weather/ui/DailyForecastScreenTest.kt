@@ -137,7 +137,7 @@ class DailyForecastScreenTest {
         assertTrue(home.contains("查看近15日天气"))
         assertTrue(home.contains(".height(38.dp)"))
         assertTrue(home.contains("d.condition?.label"))
-        assertTrue(home.contains("降水概率 \$probability"))
+        assertTrue(vistaForecastFacts(DailyWeather(0L, precipProbability = 37), "kmh").contains("降水概率" to "37%"))
         assertFalse(settings.contains("三天转上下"))
         assertFalse(settings.contains("完整上下"))
         assertFalse(settings.contains("经典横排"))

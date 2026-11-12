@@ -8,25 +8,24 @@ import org.junit.Test
 
 class CommunityGroupTest {
     @Test
-    fun `community contact is built into every distribution`() {
+    fun `community contact is optional and locally configured`() {
         val projectDir = File(requireNotNull(System.getProperty("user.dir")))
         val settings = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/SettingsScreen.kt").readText()
         val dialog = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/CommunityGroupDialog.kt").readText()
         val groups = File(projectDir, "src/main/kotlin/com/zhisheng/weather/ui/CommunityGroups.kt").readText()
         val build = File(projectDir, "build.gradle.kts").readText()
         assertTrue(settings.contains("用户交流 QQ 群"))
-        assertFalse(settings.contains("CommunityQqGroup.isNotBlank()"))
+        assertTrue(settings.contains("CommunityQqGroup.isNotBlank()"))
         assertTrue(settings.contains("CommunityGroupDialog"))
         assertTrue(groups.contains("R.drawable.qq_group_2_qr"))
         assertTrue(groups.contains("R.drawable.qq_group_1_qr"))
         assertTrue(build.contains("COMMUNITY_QQ_GROUP"))
-        assertTrue(build.contains("1106284779"))
-        assertTrue(build.contains("562847192"))
+        assertTrue(build.contains("lp(\"community.qq_group\")"))
         assertFalse(Regex("\\d{9,12}").containsMatchIn(dialog))
     }
 
     @Test fun `join fallback retains the selected group`() {
-        val selected = CommunityGroups.last()
+        val selected = CommunityGroups.last().copy(joinUrl = "https://example.invalid/group")
         val attempts = mutableListOf<Pair<String, String?>>()
         assertTrue(openCommunityGroupLink(selected) { url, target ->
             attempts += url to target
@@ -37,11 +36,11 @@ class CommunityGroupTest {
 
     @Test fun `successful QQ launch does not also open a browser`() {
         var attempts = 0
-        assertTrue(openCommunityGroupLink(CommunityGroups.first()) { _, _ -> attempts++; true })
+        assertTrue(openCommunityGroupLink(CommunityGroups.first().copy(joinUrl = "https://example.invalid/group")) { _, _ -> attempts++; true })
         assertEquals(1, attempts)
     }
 
     @Test fun `unavailable handlers report a failed launch`() {
-        assertFalse(openCommunityGroupLink(CommunityGroups.first()) { _, _ -> false })
+        assertFalse(openCommunityGroupLink(CommunityGroups.first().copy(joinUrl = "https://example.invalid/group")) { _, _ -> false })
     }
 }

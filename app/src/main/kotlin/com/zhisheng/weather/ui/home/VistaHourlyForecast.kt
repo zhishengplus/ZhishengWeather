@@ -6,10 +6,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -74,6 +75,13 @@ internal fun VistaHourlyForecast(
     val iconToTemperatureGap = if (hasTrend) 6.dp else 8.dp
     val showRain = vistaHourlyShowsPrecip(items.map { it.weather })
     val scrollState = rememberScrollState()
+    // Only entering/leaving an end changes the lip. Reading the raw offset in
+    // either drawing block used to rebuild its effect on every scroll pixel.
+    val exits = remember(scrollState) {
+        derivedStateOf(structuralEqualityPolicy()) {
+            (scrollState.value > 0) to (scrollState.value < scrollState.maxValue)
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val visibleColumns = floor(maxWidth.value / (56f * fontScale)).toInt()
             .coerceIn(if (fontScale <= 1.5f) 3 else 2, 8)
@@ -106,26 +114,31 @@ internal fun VistaHourlyForecast(
         // Forecast text stays flat and readable; only the last pixels bend under the glass lip.
         Box(Modifier.fillMaxWidth().graphicsLayer {
             compositingStrategy = CompositingStrategy.Offscreen
-        }.drawWithContent {
-            drawContent()
+        }.drawWithCache {
+            val (hasLeft, hasRight) = exits.value
             val edge = ((if (refract) 14.dp else 12.dp).toPx() / size.width.coerceAtLeast(1f)).coerceIn(0f, 0.16f)
-            drawRect(Brush.horizontalGradient(
-                0f to Color.Black.copy(alpha = if (scrollState.value > 0) 0f else 1f),
+            val mask = Brush.horizontalGradient(
+                0f to Color.Black.copy(alpha = if (hasLeft) 0f else 1f),
                 edge to Color.Black,
                 (1f - edge) to Color.Black,
-                1f to Color.Black.copy(alpha = if (scrollState.value < scrollState.maxValue) 0f else 1f),
-            ), blendMode = BlendMode.DstIn)
+                1f to Color.Black.copy(alpha = if (hasRight) 0f else 1f),
+            )
+            onDrawWithContent {
+                drawContent()
+                drawRect(mask, blendMode = BlendMode.DstIn)
+            }
         }) {
         Box(Modifier.fillMaxWidth().graphicsLayer {
-            if (refract && Build.VERSION.SDK_INT >= 33) {
-                renderEffect = edgeOptics?.effect(
+            renderEffect = if (refract && Build.VERSION.SDK_INT >= 33) {
+                val (hasLeft, hasRight) = exits.value
+                edgeOptics?.effect(
                     width = size.width,
                     height = size.height,
                     edgeWidth = 20.dp.toPx(),
-                    hasLeft = scrollState.value > 0,
-                    hasRight = scrollState.value < scrollState.maxValue,
+                    hasLeft = hasLeft,
+                    hasRight = hasRight,
                 )
-            }
+            } else null
         }) {
         Row(Modifier.cityChartGestures().horizontalScroll(scrollState).drawWithCache {
             // Match the actual rounded Column/Spacer measurements, including large type.

@@ -61,8 +61,9 @@ object NmcApi {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
     private val okHttp = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
         .build()
 
     @Serializable
@@ -248,16 +249,7 @@ object NmcApi {
         }
     }
 
-    private fun getText(url: String): String? = try {
-        okHttp.newCall(
-            Request.Builder().url(url)
-                .header("User-Agent", UA)
-                .header("Accept", "application/json, text/html, */*")
-                .build()
-        ).execute().use { resp ->
-            if (!resp.isSuccessful) null else resp.body?.string()
-        }
-    } catch (_: Exception) {
-        null
-    }
+    private suspend fun getText(url: String): String? = weatherAwaitText(okHttp,
+        Request.Builder().url(url).header("User-Agent", UA)
+            .header("Accept", "application/json, text/html, */*").build())
 }

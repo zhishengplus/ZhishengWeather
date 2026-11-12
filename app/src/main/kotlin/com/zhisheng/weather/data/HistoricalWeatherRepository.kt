@@ -1,6 +1,9 @@
 package com.zhisheng.weather.data
 
 import android.content.Context
+import com.zhisheng.weather.model.HistoricalDateRange
+import com.zhisheng.weather.model.historyDateRangeError
+import com.zhisheng.weather.model.normalizedHistoryRange
 import com.zhisheng.weather.model.City
 import com.zhisheng.weather.model.HistoricalDay
 import com.zhisheng.weather.model.HistoricalReview
@@ -36,12 +39,14 @@ private object HistoricalWeatherSource {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    suspend fun fetch(city: City, date: LocalDate): HistoricalDay? = withContext(Dispatchers.IO) {
+    suspend fun fetch(city: City, date: LocalDate): HistoricalDay? = fetchRange(city, date, date).firstOrNull()
+
+    suspend fun fetchRange(city: City, start: LocalDate, end: LocalDate): List<HistoricalDay> = withContext(Dispatchers.IO) {
         val url = "https://archive-api.open-meteo.com/v1/archive".toHttpUrl().newBuilder()
             .addQueryParameter("latitude", city.latitude.toString())
             .addQueryParameter("longitude", city.longitude.toString())
-            .addQueryParameter("start_date", date.toString())
-            .addQueryParameter("end_date", date.toString())
+            .addQueryParameter("start_date", start.toString())
+            .addQueryParameter("end_date", end.toString())
             .addQueryParameter(
                 "daily",
                 "weather_code,temperature_2m_max,temperature_2m_min,temperature_2m_mean," +
@@ -61,26 +66,16 @@ private object HistoricalWeatherSource {
         try {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->
                 val raw = response.body?.string()
-                if (!response.isSuccessful || raw.isNullOrBlank()) return@withContext null
-                val daily = json.decodeFromString<ArchiveResponse>(raw).daily ?: return@withContext null
-                val returnedDate = daily.time.firstOrNull() ?: date.toString()
-                HistoricalDay(
-                    date = returnedDate,
-                    weatherCode = daily.weather_code?.firstOrNull(),
-                    high = daily.temperature_2m_max?.firstOrNull(),
-                    low = daily.temperature_2m_min?.firstOrNull(),
-                    mean = daily.temperature_2m_mean?.firstOrNull(),
-                    precipitationMm = daily.precipitation_sum?.firstOrNull(),
-                    windMaxKmh = daily.wind_speed_10m_max?.firstOrNull(),
-                    gustMaxKmh = daily.wind_gusts_10m_max?.firstOrNull(),
-                // 历史页的核心任务是做温度对照。只有现象码、没有任何温度的空壳记录
-                // 不进入列表，避免再次出现整屏「未知 / --」。
-                ).normalized(date)
+                if (!response.isSuccessful || raw.isNullOrBlank()) return@withContext emptyList()
+                val daily = json.decodeFromString<ArchiveResponse>(raw).daily ?: return@withContext emptyList()
+                normalizedHistoryRange(start, end, daily.time.indices.mapNotNull { index ->
+                    daily.toHistoricalDay(index, daily.time[index])
+                }).days
             }
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Exception) {
-            null
+            emptyList()
         }
     }
 }
@@ -168,6 +163,27 @@ object HistoricalWeatherRepository {
         val week = RecentWeatherSource.fetch(city, expectedEndDate) ?: error("Recent weather is unavailable")
         writePastWeek(city, expectedEndDate, week)
         return week
+    }
+
+    internal suspend fun loadDateRange(city: City, start: LocalDate, end: LocalDate, today: LocalDate): HistoricalDateRange {
+        check(::directory.isInitialized)
+        require(historyDateRangeError(start, end, today) == null)
+        val dates = normalizedHistoryRange(start, end, emptyList()).dates
+        val existing = dates.mapNotNull { date -> read(city, date)?.day }.associateBy { it.localDate }.toMutableMap()
+        // Archive reanalysis is delayed; the existing recent archive covers the last seven complete days.
+        val archiveEnd = minOf(end, today.minusDays(8))
+        if (start <= archiveEnd && dates.any { it <= archiveEnd && it !in existing }) {
+            HistoricalWeatherSource.fetchRange(city, start, archiveEnd).forEach { day ->
+                existing[day.localDate] = day; write(city, day.localDate, day)
+            }
+        }
+        if (end > archiveEnd && dates.any { it > archiveEnd && it !in existing }) {
+            val recent = try { loadPastWeek(city, today).days }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { emptyList() }
+            recent.filter { it.localDate in start..end }.forEach { day -> existing[day.localDate] = day }
+        }
+        return normalizedHistoryRange(start, end, existing.values.toList())
     }
 
     private suspend fun loadDay(city: City, date: LocalDate): HistoricalDay? {
