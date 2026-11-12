@@ -308,7 +308,7 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                                     Toggle("显示时钟和日期", config.showClock) { config = config.copy(showClock = it) }
                                     Toggle("24 小时制", config.clock24) { config = config.copy(clock24 = it) }
                                 }
-                                if (kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.BAND)) Toggle("显示天气预报", config.showForecast) { config = config.copy(showForecast = it) }
+                                if (kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.BAND, WidgetKind.COMBO)) Toggle("显示天气预报", config.showForecast) { config = config.copy(showForecast = it) }
                                 if (kind == WidgetKind.SCENE) Toggle("短时降水柱图", config.showPrecipitation) { config = config.copy(showPrecipitation = it) }
                                 if (kind == WidgetKind.SCENE || (kind == WidgetKind.WEEK && !classic)) Toggle("农历", config.showLunar) { config = config.copy(showLunar = it) }
                                 if (kind == WidgetKind.SCENE) Toggle("天气娘提示", config.showWeatherGirl) { config = config.copy(showWeatherGirl = it) }
@@ -483,7 +483,7 @@ internal fun WidgetPreviewDialogContent(style: WidgetStyle, kind: WidgetKind, co
                     if (allKinds) Text("${candidate.name(style)} · ${candidate.columns} × ${candidate.rows}", color = colors.ink,
                         fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
                     Box(Modifier.fillMaxWidth().height(when (candidate) {
-                        WidgetKind.PULSE -> 100.dp; WidgetKind.NOW -> 190.dp; WidgetKind.SCENE -> 300.dp; else -> 200.dp
+                        WidgetKind.PULSE -> 100.dp; WidgetKind.NOW -> 190.dp; WidgetKind.SCENE -> 300.dp; WidgetKind.COMBO -> 260.dp; else -> 200.dp
                     }).clip(colors.shape).background(Brush.linearGradient(studioBackdropColors(style, backdrop)))
                         .semantics { contentDescription = "${candidate.name(style)}预览，试览壁纸${backdrop + 1}" }) {
                         NativeWidgetPreview(style, candidate, config, preview, Modifier.fillMaxSize().padding(12.dp),

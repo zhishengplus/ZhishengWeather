@@ -36,6 +36,10 @@ open class FreshWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (intent.action == WidgetRefresh.ACTION_REFRESH) WidgetRefresh.request(context, force = true)
+        if (intent.action == WidgetRedrawAlarm.ACTION_REDRAW) {
+            // Stored data only: advance hourly/daily slots across hour and day boundaries.
+            async { WidgetRuntime.renderAll(context); WidgetRedrawAlarm.schedule(context) }
+        }
         if (intent.action in setOf(Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_DATE_CHANGED,
                 Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_WALLPAPER_CHANGED)) {
             async { WidgetRuntime.renderAll(context); WidgetNotification.refresh(context); WidgetRefresh.schedule(context) }
@@ -60,6 +64,8 @@ class ClassicNowWidgetProvider : FreshWidgetProvider()
 class ClassicBandWidgetProvider : FreshWidgetProvider()
 class ClassicWeekWidgetProvider : FreshWidgetProvider()
 class ClassicSceneWidgetProvider : FreshWidgetProvider()
+class VistaComboWidgetProvider : FreshWidgetProvider()
+class ClassicComboWidgetProvider : FreshWidgetProvider()
 data class WidgetInstance(val id: Int, val style: WidgetStyle, val kind: WidgetKind)
 
 object WidgetRuntime {
@@ -68,17 +74,22 @@ object WidgetRuntime {
     private var started = false
     private val providers = mapOf(
         WidgetStyle.VISTA to mapOf(WidgetKind.PULSE to VistaPulseWidgetProvider::class.java, WidgetKind.NOW to VistaNowWidgetProvider::class.java,
-            WidgetKind.BAND to VistaBandWidgetProvider::class.java, WidgetKind.WEEK to VistaWeekWidgetProvider::class.java, WidgetKind.SCENE to VistaSceneWidgetProvider::class.java),
+            WidgetKind.BAND to VistaBandWidgetProvider::class.java, WidgetKind.WEEK to VistaWeekWidgetProvider::class.java, WidgetKind.SCENE to VistaSceneWidgetProvider::class.java,
+            WidgetKind.COMBO to VistaComboWidgetProvider::class.java),
         WidgetStyle.CLASSIC to mapOf(WidgetKind.PULSE to ClassicPulseWidgetProvider::class.java, WidgetKind.NOW to ClassicNowWidgetProvider::class.java,
-            WidgetKind.BAND to ClassicBandWidgetProvider::class.java, WidgetKind.WEEK to ClassicWeekWidgetProvider::class.java, WidgetKind.SCENE to ClassicSceneWidgetProvider::class.java))
+            WidgetKind.BAND to ClassicBandWidgetProvider::class.java, WidgetKind.WEEK to ClassicWeekWidgetProvider::class.java, WidgetKind.SCENE to ClassicSceneWidgetProvider::class.java,
+            WidgetKind.COMBO to ClassicComboWidgetProvider::class.java))
     fun providerFor(style: WidgetStyle, kind: WidgetKind): Class<out AppWidgetProvider> = providers.getValue(style).getValue(kind)
     fun instances(c: Context): List<WidgetInstance> = providers.flatMap { (style, kinds) ->
         kinds.flatMap { (kind, provider) -> AppWidgetManager.getInstance(c).getAppWidgetIds(ComponentName(c, provider)).map { WidgetInstance(it, style, kind) } }
     }
     fun instance(c: Context, id: Int): WidgetInstance? {
-        val info = AppWidgetManager.getInstance(c).getAppWidgetInfo(id) ?: return null
+        val provider = AppWidgetManager.getInstance(c).getAppWidgetInfo(id)?.provider
+            ?: return instances(c).firstOrNull { it.id == id }
         return providers.entries.firstNotNullOfOrNull { (style, kinds) ->
-            kinds.entries.firstOrNull { ComponentName(c, it.value) == info.provider }?.let { WidgetInstance(id, style, it.key) }
+            kinds.entries.firstOrNull { (_, klass) ->
+                widgetProviderClassMatches(c.packageName, klass.name, provider.packageName, provider.className)
+            }?.let { WidgetInstance(id, style, it.key) }
         }
     }
     @Synchronized fun start(c: Context) {
@@ -88,6 +99,7 @@ object WidgetRuntime {
         // 升级或开机后配置流可能一个值都不变，distinctUntilChanged 就不会触发渲染，
         // 桌面会一直挂着旧包的 RemoteViews。进程启动先兜底重绘一次。
         scope.launch { WidgetStore.migrateWeatherCache(ctx); renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.schedule(ctx) }
+        WidgetRedrawAlarm.registerScreenReceiver(ctx)
         scope.launch {
             SettingsRepository.moduleSources.drop(1).collect {
                 renderAll(ctx); WidgetNotification.refresh(ctx); WidgetRefresh.request(ctx, force = true)
@@ -135,6 +147,7 @@ object WidgetRuntime {
         instances(c).forEach { item ->
             try { renderOneLocked(c, item.id) } catch (e: Exception) { android.util.Log.w("DesktopWeather", "Widget ${item.id} unavailable", e) }
         }
+        WidgetRedrawAlarm.markRendered()
     }
     suspend fun renderOne(c: Context, id: Int) = renderLock.withLock { renderOneLocked(c, id) }
 
@@ -205,6 +218,7 @@ object WidgetRefresh {
         WidgetStore.notification(c).let { it.enabled || it.alertsEnabled } || AutomationSettingsRepository.read(c).needsBackground
     fun schedule(c: Context) {
         WeatherReminderSchedule.schedule(c)
+        WidgetRedrawAlarm.schedule(c)
         val work = WorkManager.getInstance(c)
         WidgetRuntime.scope.launch { scheduleSky(c, SettingsRepository.livingSky.first(), SettingsRepository.ambience.first()) }
         if (!active(c)) { work.cancelUniqueWork(PERIODIC); work.cancelUniqueWork("widget-beta9-now"); return }

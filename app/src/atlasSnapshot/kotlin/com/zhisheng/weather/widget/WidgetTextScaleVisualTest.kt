@@ -39,7 +39,7 @@ class WidgetTextScaleVisualTest {
         for (style in WidgetStyle.entries) for (kind in WidgetKind.entries) for (unit in listOf("c", "f")) {
             val width = if (kind == WidgetKind.NOW) 110 else 250
             val height = when (kind) { WidgetKind.NOW -> 110; WidgetKind.PULSE -> 60;
-                WidgetKind.BAND -> 120; WidgetKind.WEEK -> 140; WidgetKind.SCENE -> 320 }
+                WidgetKind.BAND -> 120; WidgetKind.WEEK -> 140; WidgetKind.SCENE -> 320; WidgetKind.COMBO -> 180 }
             val sample = widgetPreviewSample().let { it.copy(weather = it.weather.copy(
                 current = it.weather.current?.copy(temperature = if (unit == "c") -18.0 else 48.0),
                 hourly = it.weather.hourly.map { h -> h.copy(temperature = if (unit == "c") -18.0 else 48.0) },
@@ -58,7 +58,7 @@ class WidgetTextScaleVisualTest {
                 fun check(node: View) {
                     if (node.visibility != View.VISIBLE) return
                     if (node is TextView && node.id in setOf(R.id.widget_temp, R.id.widget_range,
-                            R.id.widget_cell_temp, R.id.widget_cell_extra) && node.text.isNotBlank()) {
+                            R.id.widget_cell_temp, R.id.widget_cell_extra) + HOUR_SLOTS.flatMap { listOf(it.temp, it.extra) } && node.text.isNotBlank()) {
                         if (node.textSize / context.resources.displayMetrics.density < 8.99f)
                             failures += "$name: unreadably small ${node.text}"
                         if (node.layout.height > node.height || (0 until node.layout.lineCount).any {
@@ -99,9 +99,9 @@ class WidgetTextScaleVisualTest {
                 val ids = setOf(R.id.widget_time, R.id.widget_temp, R.id.widget_range,
                     R.id.widget_metric_1, R.id.widget_metric_2, R.id.widget_metric_3,
                     R.id.widget_metric_4, R.id.widget_metric_5, R.id.widget_metric_6,
-                    R.id.widget_cell_temp, R.id.widget_cell_extra)
+                    R.id.widget_cell_temp, R.id.widget_cell_extra) + HOUR_SLOTS.flatMap { listOf(it.temp, it.extra) }
                 return if (node is TextView) listOf(node).filter {
-                    (it.id in ids || (it.id == R.id.widget_cell_label && ':' in it.text)) && it.text.isNotBlank()
+                    (it.id in ids || ((it.id == R.id.widget_cell_label || it.id in HOUR_SLOTS.map { s -> s.label }) && ':' in it.text)) && it.text.isNotBlank()
                 }
                     else if (node is ViewGroup) (0 until node.childCount).flatMap { readings(node.getChildAt(it)) }
                     else emptyList()

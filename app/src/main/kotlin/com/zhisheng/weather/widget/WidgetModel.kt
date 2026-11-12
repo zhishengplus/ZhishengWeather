@@ -12,7 +12,8 @@ enum class WidgetKind(val title: String, val classicTitle: String, val descripti
     NOW("天气小窗", "微型观测站", "此刻温度、天气与今日温差", 164, 164, 2, 2),
     BAND("逐时天光", "出行监测", "未来六小时的温度与降水概率", 344, 174, 4, 2),
     WEEK("日历天气", "五日趋势", "澄空的时钟日历，经典的温差趋势", 344, 194, 4, 2),
-    SCENE("天气全景", "气象终端", "时间、预报与由你排序的天气读数", 344, 300, 4, 4);
+    SCENE("天气全景", "气象终端", "时间、预报与由你排序的天气读数", 344, 300, 4, 4),
+    COMBO("时日预报", "时日预报", "当前天气、未来六小时与两天预报", 344, 250, 4, 3);
     fun name(style: WidgetStyle) = if (style == WidgetStyle.CLASSIC) classicTitle else title
 }
 enum class WidgetStyle(val key: String, val title: String) {

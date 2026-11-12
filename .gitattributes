@@ -4,3 +4,5 @@ gradlew text eol=lf
 *.png binary
 *.jar binary
 *.jks binary
+# The dataset manifest verifies raw bytes; Windows checkouts must preserve them.
+app/src/main/assets/geo/local_places.json -text

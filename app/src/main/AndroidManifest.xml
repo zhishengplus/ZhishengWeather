@@ -111,6 +111,12 @@
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
             </intent-filter>
         </activity>
+        <activity-alias android:name="${applicationId}.WidgetConfigure" android:targetActivity=".widget.WidgetConfigActivity"
+            android:exported="true" android:label="桌面天气">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity-alias>
         <activity android:name=".widget.WidgetLaunchActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <receiver android:name=".widget.WidgetPinReceiver" android:exported="false" />
         <receiver android:name=".widget.FreshWidgetProvider" android:exported="false">
@@ -134,6 +140,8 @@
         <receiver android:name=".widget.ClassicBandWidgetProvider" android:label="枳生天气 · 经典 · 出行监测" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_band" /></receiver>
         <receiver android:name=".widget.ClassicWeekWidgetProvider" android:label="枳生天气 · 经典 · 五日趋势" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_week" /></receiver>
         <receiver android:name=".widget.ClassicSceneWidgetProvider" android:label="枳生天气 · 经典 · 气象终端" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_scene" /></receiver>
+        <receiver android:name=".widget.VistaComboWidgetProvider" android:label="枳生天气 · 澄空 · 时日预报" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vista_combo" /></receiver>
+        <receiver android:name=".widget.ClassicComboWidgetProvider" android:label="枳生天气 · 经典 · 时日预报" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_classic_combo" /></receiver>
 
         <activity-alias
             android:name=".IconClassic"

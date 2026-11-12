@@ -25,6 +25,7 @@
 </ImageView>
 </LinearLayout>
 <LinearLayout android:id="@+id/widget_forecast" android:layout_width="match_parent" android:layout_height="0dp" android:orientation="horizontal" android:gravity="center_vertical" android:layout_weight="1">
+<include layout="@layout/widget_band_hours" />
 </LinearLayout>
 </LinearLayout>
 </LinearLayout>

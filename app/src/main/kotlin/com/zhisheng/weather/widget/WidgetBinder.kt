@@ -22,6 +22,31 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /** Shared by the launcher and editor: the preview is the actual widget. */
+/** View ids for one forecast cell: generic ids for inflated cells, or a fixed slot in the shell XML. */
+internal data class CellIds(val root: Int, val label: Int, val icon: Int, val temp: Int, val extra: Int,
+                            val sublabel: Int = 0, val drop: Int = 0, val chart: Int = R.id.widget_cell_chart) {
+    companion object {
+        val GENERIC = CellIds(R.id.widget_forecast_cell, R.id.widget_cell_label, R.id.widget_cell_icon, R.id.widget_cell_temp,
+            R.id.widget_cell_extra, R.id.widget_cell_sublabel, R.id.widget_cell_drop)
+    }
+}
+
+internal val HOUR_SLOTS = listOf(
+    CellIds(R.id.widget_hour_0, R.id.widget_hour_0_label, R.id.widget_hour_0_icon, R.id.widget_hour_0_temp, R.id.widget_hour_0_extra),
+    CellIds(R.id.widget_hour_1, R.id.widget_hour_1_label, R.id.widget_hour_1_icon, R.id.widget_hour_1_temp, R.id.widget_hour_1_extra),
+    CellIds(R.id.widget_hour_2, R.id.widget_hour_2_label, R.id.widget_hour_2_icon, R.id.widget_hour_2_temp, R.id.widget_hour_2_extra),
+    CellIds(R.id.widget_hour_3, R.id.widget_hour_3_label, R.id.widget_hour_3_icon, R.id.widget_hour_3_temp, R.id.widget_hour_3_extra),
+    CellIds(R.id.widget_hour_4, R.id.widget_hour_4_label, R.id.widget_hour_4_icon, R.id.widget_hour_4_temp, R.id.widget_hour_4_extra),
+    CellIds(R.id.widget_hour_5, R.id.widget_hour_5_label, R.id.widget_hour_5_icon, R.id.widget_hour_5_temp, R.id.widget_hour_5_extra),
+)
+internal val HOUR_GAPS = listOf(R.id.widget_hour_gap_0, R.id.widget_hour_gap_1, R.id.widget_hour_gap_2, R.id.widget_hour_gap_3, R.id.widget_hour_gap_4)
+internal val DAY_SLOTS = listOf(
+    CellIds(R.id.widget_day_0, R.id.widget_day_0_label, R.id.widget_day_0_icon, R.id.widget_day_0_temp, R.id.widget_day_0_extra,
+        R.id.widget_day_0_sublabel, R.id.widget_day_0_drop),
+    CellIds(R.id.widget_day_1, R.id.widget_day_1_label, R.id.widget_day_1_icon, R.id.widget_day_1_temp, R.id.widget_day_1_extra,
+        R.id.widget_day_1_sublabel, R.id.widget_day_1_drop),
+)
+
 object WidgetBinder {
     private const val MINIMUM_NUMBER_SIZE_DP = 9f
     fun bind(context: Context, widgetId: Int, instance: WidgetInstance, config: WidgetConfig,
@@ -65,11 +90,12 @@ object WidgetBinder {
             WidgetKind.WEEK -> height < 184
             WidgetKind.PULSE -> height < 72
             WidgetKind.SCENE -> height < 440
+            WidgetKind.COMBO -> height - 64 < 160
         }
         // A typical four-row phone slot is about 340–430dp tall. It has room
         // for readable type, but not the extra hourly section of the tall layout.
         val roomyScene = instance.kind == WidgetKind.SCENE && compact && width >= 300 && height >= 340
-        val weatherStrip = instance.kind == WidgetKind.BAND || instance.kind == WidgetKind.WEEK
+        val weatherStrip = instance.kind == WidgetKind.BAND || instance.kind == WidgetKind.WEEK || instance.kind == WidgetKind.COMBO
         // Keep text away from the rounded corners even when a two-row slot uses
         // the compact layout. Reserve the header and forecast before adding
         // vertical breathing room, so shorter launcher slots still fit.
@@ -79,13 +105,18 @@ object WidgetBinder {
             else -> 12
         }
         val stripMinimumContent = when {
-            instance.kind == WidgetKind.BAND -> if (compact) 94 else 126
+            instance.kind == WidgetKind.BAND || instance.kind == WidgetKind.COMBO -> if (compact) 94 else 126
             instance.style == WidgetStyle.CLASSIC -> if (compact) 40 else 46
             compact -> 62 + if (height < 140) 30 else if (height >= 160 && android.os.Build.VERSION.SDK_INT >= 31) 66 else 54
             else -> 152
         }
-        val stripVerticalInset = minOf(if (instance.kind == WidgetKind.BAND) 20 else 16,
-            ((height - stripMinimumContent) / 2).coerceAtLeast(2))
+        val stripHeight = height
+        val stripVerticalInset = when {
+            instance.kind == WidgetKind.COMBO ->
+                minOf(if (compact) 14 else 16, ((height - if (compact) 148 else 188) / 2).coerceAtLeast(6))
+            else -> minOf(if (instance.kind == WidgetKind.BAND) 20 else 16,
+                ((stripHeight - stripMinimumContent) / 2).coerceAtLeast(2))
+        }
         val pulseInset = if (instance.kind == WidgetKind.PULSE && compact) ((height - 40) / 2).coerceIn(2, 8) else 0
         val classicCurrentWeek = instance.style == WidgetStyle.CLASSIC && instance.kind == WidgetKind.WEEK && !config.showForecast
         // The forecast-free card reserves city/footer widths and gives all
@@ -162,7 +193,7 @@ object WidgetBinder {
         v.setCharSequence(R.id.widget_date, "setFormat12Hour", dateFormat)
         v.setCharSequence(R.id.widget_date, "setFormat24Hour", dateFormat)
         val clockSize = when (kind) { WidgetKind.PULSE -> 34f; WidgetKind.WEEK -> if (compact) 32f else 42f; WidgetKind.SCENE -> if (roomyScene) 40f else if (compact) 32f else 39f; else -> 46f }
-        val tempSize = when (kind) { WidgetKind.PULSE -> 28f; WidgetKind.WEEK -> 28f; WidgetKind.NOW -> 48f; WidgetKind.BAND -> 32f; WidgetKind.SCENE -> if (roomyScene) 40f else 34f }
+        val tempSize = when (kind) { WidgetKind.PULSE -> 28f; WidgetKind.WEEK -> 28f; WidgetKind.NOW -> 48f; WidgetKind.BAND, WidgetKind.COMBO -> 32f; WidgetKind.SCENE -> if (roomyScene) 40f else 34f; else -> 42f }
         // A home-screen widget has very little horizontal room. Use the district/city
         // name as the visible label and keep the full street address for accessibility.
         put(v, R.id.widget_city, cityLabel(snapshot?.city) ?: if (config.locationMode == "located") "等待定位" else "选择地点")
@@ -171,6 +202,14 @@ object WidgetBinder {
         // must remain whole even when the launcher only gives a narrow two-cell slot.
         val padding = if (weatherStrip) stripHorizontalInset * 2 else if (kind == WidgetKind.NOW) nowInset * 2 else if (compact && kind == WidgetKind.PULSE) pulseInset * 2 else if (roomyScene) 28 else if (compact) 16 else if (kind == WidgetKind.PULSE) 20 else if (style == WidgetStyle.CLASSIC && kind != WidgetKind.SCENE) 28 else 32
         val verticalPadding = if (weatherStrip) stripVerticalInset * 2 else padding
+        val combo = if (kind == WidgetKind.COMBO) comboLayoutMetrics(width, height, compact, padding, verticalPadding) else null
+        if (combo != null && android.os.Build.VERSION.SDK_INT >= 31) {
+            v.setViewLayoutHeight(R.id.widget_header, combo.headerHeight, TypedValue.COMPLEX_UNIT_DIP)
+            v.setViewLayoutHeight(R.id.widget_forecast, combo.hourlyHeight, TypedValue.COMPLEX_UNIT_DIP)
+            v.setViewLayoutHeight(R.id.widget_daily_forecast, combo.dailyHeight, TypedValue.COMPLEX_UNIT_DIP)
+            v.setViewLayoutWidth(R.id.widget_icon, combo.heroIcon, TypedValue.COMPLEX_UNIT_DIP)
+            v.setViewLayoutHeight(R.id.widget_icon, combo.heroIcon, TypedValue.COMPLEX_UNIT_DIP)
+        }
         val tempWidth = when {
             classicCurrentWeek -> (width - padding - 58).toFloat()
             !config.showClock && kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.PULSE) -> (width - padding - 60).toFloat()
@@ -178,15 +217,16 @@ object WidgetBinder {
             WidgetKind.NOW -> (width - padding - if (compact) 34 else 52).toFloat()
             WidgetKind.PULSE -> ((width - 32) / 2 - 49).toFloat()
             WidgetKind.WEEK -> (width - padding) / 2.55f - if (compact) 40 else 52
-            WidgetKind.BAND -> if (compact) (width - padding) * .36f else 90f
+            WidgetKind.BAND, WidgetKind.COMBO -> if (compact) (width - padding) * .36f else 90f
             WidgetKind.SCENE -> if (roomyScene) (width - padding) / 2.05f - 54f else (width - padding) / 2.42f - if (compact) 46 else 62
+            else -> (width - padding) * .36f
             }
         }.toFloat()
         val tempHeight = when {
             classicCurrentWeek -> (height - verticalPadding - 60).coerceAtLeast(24).toFloat()
             roomyScene -> 48f
             kind == WidgetKind.NOW -> if (compact) 38f else 50f
-            compact && (kind == WidgetKind.PULSE || kind == WidgetKind.BAND) -> 23f
+            compact && (kind == WidgetKind.PULSE || kind == WidgetKind.BAND || kind == WidgetKind.COMBO) -> 23f
             kind == WidgetKind.PULSE -> 30f
             compact -> 30f
             else -> 42f
@@ -198,7 +238,8 @@ object WidgetBinder {
             (if (height >= 280) 40 else 0)).coerceAtLeast(if (roomyScene) 80 else if (compact) 60 else 82).toFloat()
             else if (roomyScene) 80f else if (compact) 60f else 82f
         val requestedTempHeight = if (extraSceneRoom) sceneHeroHeight - 24f else if (extraReadingRoom) (height - verticalPadding - 44).coerceAtLeast(tempHeight.toInt()).toFloat() else tempHeight
-        fitText(context, v, R.id.widget_temp, temperature(current?.temperature, config), tempSize, tempWidth, requestedTempHeight, config.textScale)
+        fitText(context, v, R.id.widget_temp, temperature(current?.temperature, config),
+            combo?.tempSize ?: tempSize, combo?.tempWidth ?: tempWidth, combo?.tempHeight ?: requestedTempHeight, config.textScale)
         val clockWidth = (width - padding) * when (kind) {
             WidgetKind.PULSE -> .51f
             WidgetKind.SCENE -> if (config.textScale > 1.25f) 1.05f / 2.05f else .55f
@@ -264,22 +305,25 @@ object WidgetBinder {
                 WidgetKind.PULSE -> (width - padding - 12) / 2.34f - if (compact) 39 else 49
                 WidgetKind.WEEK -> if (classicCurrentWeek) (width - padding - 84).toFloat() else if (style == WidgetStyle.VISTA) (width - padding) / 2.55f - (if (compact) 40 else 52) else (width - padding) * .6f
                 WidgetKind.NOW -> (width - padding - if (compact) 0 else 64).toFloat()
-                WidgetKind.BAND -> (width - padding) * .36f
+                WidgetKind.BAND, WidgetKind.COMBO -> (width - padding) * .36f
                 else -> (width - padding).toFloat()
             }
-            val detailHeight = 14f
-            fitText(context, v, R.id.widget_city, cityLabel(snapshot?.city) ?: "等待定位", if (roomyScene) 13f else 12f, cityWidth, if (roomyScene) 16f else detailHeight)
-            fitText(context, v, R.id.widget_condition, current?.weatherText ?: current?.condition?.label ?: "暂无天气", 12f,
-                if (kind == WidgetKind.BAND) (width - padding) * .36f else if (kind == WidgetKind.NOW && !compact) (width - padding) * .42f else (width - padding).toFloat(), detailHeight)
-            fitText(context, v, R.id.widget_range, "${temperature(today?.low, config)} / ${temperature(today?.high, config)}", 12f,
-                if (kind == WidgetKind.NOW) (width - padding) * (if (compact) 1f else .58f) else (width - padding) * (if (kind == WidgetKind.BAND) .36f else .45f), detailHeight, config.textScale)
+            val detailHeight = combo?.let { (it.headerHeight * 0.24f).coerceIn(12f, 20f) } ?: 14f
+            val citySize = combo?.let { (it.headerHeight * 0.21f).coerceIn(11f, 16f) } ?: if (roomyScene) 13f else 12f
+            val conditionSize = combo?.let { (it.headerHeight * 0.20f).coerceIn(11f, 15f) } ?: 12f
+            val rangeSize = combo?.let { (it.headerHeight * 0.20f).coerceIn(11f, 15f) } ?: 12f
+            fitText(context, v, R.id.widget_city, cityLabel(snapshot?.city) ?: "等待定位", citySize, cityWidth, if (roomyScene) 16f else detailHeight)
+            fitText(context, v, R.id.widget_condition, current?.weatherText ?: current?.condition?.label ?: "暂无天气", conditionSize,
+                if (kind == WidgetKind.BAND || kind == WidgetKind.COMBO) (width - padding) * .36f else if (kind == WidgetKind.NOW && !compact) (width - padding) * .42f else (width - padding).toFloat(), detailHeight)
+            fitText(context, v, R.id.widget_range, "${temperature(today?.low, config)} / ${temperature(today?.high, config)}", rangeSize,
+                if (kind == WidgetKind.NOW) (width - padding) * (if (compact) 1f else .58f) else (width - padding) * (if (kind == WidgetKind.BAND || kind == WidgetKind.COMBO) .36f else .45f), detailHeight, config.textScale)
             fitText(context, v, R.id.widget_date, "12月30日 周三", if (roomyScene) 13f else 12f, (width - padding) * (if (roomyScene) .51f else .55f), if (roomyScene) 17f else if (compact) 15f else 16f)
             fitText(context, v, R.id.widget_lunar, "八月二十一", 10f, (width - padding) * .55f, 12f)
             val updateText = weather?.fetchedAt?.let { (if (widgetStale(weather, now, config.intervalMinutes)) "上次 " else "更新 ") + time(it, zone) } ?: "待更新"
             put(v, R.id.widget_footer, updateText)
             fitText(context, v, R.id.widget_footer, updateText, if (kind == WidgetKind.NOW || roomyScene) 10f else 9f,
                 if (classicCurrentWeek) 76f else if (kind == WidgetKind.WEEK) (width - padding) / 2.55f else if (kind == WidgetKind.NOW) 59f else (width - padding).toFloat(), 12f)
-            if (compact && kind == WidgetKind.BAND) v.setViewVisibility(R.id.widget_footer, View.GONE)
+            if (compact && (kind == WidgetKind.BAND || kind == WidgetKind.COMBO)) v.setViewVisibility(R.id.widget_footer, View.GONE)
             val airLabel = if (weather?.aqi?.estimated == true) "空气估算" else "空气"
             val airReading = weather?.aqi?.let { air -> air.value?.let { air.level ?: it.toString() } } ?: "—"
             fitText(context, v, R.id.widget_air, "$airLabel $airReading", 11f, (width - padding) * .5f, 16f)
@@ -290,7 +334,7 @@ object WidgetBinder {
             } ?: "空气质量暂无数据")
         }
         icon(context, v, R.id.widget_icon, WidgetIconSet.from(config.iconSet), weather?.let { phaseAwareCondition(current?.condition, it, now) }, p,
-            ambient = sky?.palette, bitmapBudget = bitmapBudget)
+            combo?.heroIcon ?: 64f, ambient = sky?.palette, bitmapBudget = bitmapBudget)
         val labels = intArrayOf(R.id.widget_metric_label_1, R.id.widget_metric_label_2, R.id.widget_metric_label_3,
             R.id.widget_metric_label_4, R.id.widget_metric_label_5, R.id.widget_metric_label_6)
         val sceneMetrics = config.metrics.take(6)
@@ -340,8 +384,12 @@ object WidgetBinder {
                     if (kind == WidgetKind.SCENE) (if (roomyScene) 18f else 16f) else if (kind == WidgetKind.NOW) 16f else 19f, config.textScale)
             }
         }
-        if (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK, WidgetKind.SCENE)) {
-            v.removeAllViews(R.id.widget_forecast)
+        if (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK, WidgetKind.SCENE, WidgetKind.COMBO)) {
+            // 逐时天光 / 时日预报 use fixed slots from the layout XML. HyperOS reapplies
+            // RemoteViews onto the existing tree and can keep stale addView children,
+            // so those kinds only set text/images/visibility on stable ids.
+            val staticSlots = kind == WidgetKind.BAND || kind == WidgetKind.COMBO
+            if (!staticSlots) v.removeAllViews(R.id.widget_forecast)
             val hours = weather?.hourly.orEmpty().filter { it.timeMillis >= now - 30 * 60_000L }.take(6)
             val availableDays = weather?.currentAndFutureDaily(now).orEmpty().take(5)
             val maxDays = when {
@@ -365,7 +413,7 @@ object WidgetBinder {
                 else -> 5
             }
             val days = availableDays.take(maxDays)
-            val isHours = kind == WidgetKind.BAND
+            val isHours = kind == WidgetKind.BAND || kind == WidgetKind.COMBO
             val isRows = style == WidgetStyle.CLASSIC && kind == WidgetKind.WEEK
             if (kind == WidgetKind.SCENE && !compact) {
                 v.removeAllViews(R.id.widget_hourly_forecast)
@@ -395,9 +443,18 @@ object WidgetBinder {
             val low = days.mapNotNull { it.low }.minOrNull()
             val high = days.mapNotNull { it.high }.maxOrNull()
             val count = (if (isHours) hours.size else days.size).coerceAtLeast(1)
+            if (staticSlots) {
+                HOUR_SLOTS.forEachIndexed { index, slot -> v.setViewVisibility(slot.root, if (index < count) View.VISIBLE else View.GONE) }
+                HOUR_GAPS.forEachIndexed { index, gap ->
+                    v.setViewVisibility(gap, if (kind == WidgetKind.COMBO && index < count - 1) View.VISIBLE else View.GONE)
+                }
+            }
             repeat(count) { index ->
+                val ids = if (staticSlots) HOUR_SLOTS[index] else CellIds.GENERIC
                 val cellLayout = when {
                     isRows -> if (compact) R.layout.widget_forecast_row_compact else R.layout.widget_forecast_row
+                    kind == WidgetKind.COMBO && isHours ->
+                        if (compact) R.layout.widget_forecast_combo_column_compact else R.layout.widget_forecast_combo_column
                     isHours -> if (compact) R.layout.widget_forecast_column_compact else R.layout.widget_forecast_column
                     roomyScene -> R.layout.widget_forecast_scene_roomy
                     kind == WidgetKind.SCENE && compact -> R.layout.widget_forecast_scene_compact
@@ -411,14 +468,14 @@ object WidgetBinder {
                     index == count - 1 && count > 1 -> R.layout.widget_forecast_week_end
                     else -> R.layout.widget_forecast_week
                 }
-                val cell = RemoteViews(context.packageName, cellLayout)
+                val cell = if (staticSlots) v else RemoteViews(context.packageName, cellLayout)
                 if (kind == WidgetKind.WEEK && style == WidgetStyle.VISTA && compact && height < 140) {
-                    cell.setViewVisibility(R.id.widget_cell_icon, View.GONE)
+                    cell.setViewVisibility(ids.icon, View.GONE)
                 }
-                if (compact && android.os.Build.VERSION.SDK_INT >= 31) {
+                if (compact && android.os.Build.VERSION.SDK_INT >= 31 && kind != WidgetKind.COMBO) {
                     val iconSize = if (roomyScene) 34f else if (isRows) 18f else if (kind == WidgetKind.WEEK && style == WidgetStyle.VISTA && height >= 160) 36f else 24f
-                    cell.setViewLayoutHeight(R.id.widget_cell_icon, iconSize, TypedValue.COMPLEX_UNIT_DIP)
-                    cell.setViewLayoutWidth(R.id.widget_cell_icon, iconSize, TypedValue.COMPLEX_UNIT_DIP)
+                    cell.setViewLayoutHeight(ids.icon, iconSize, TypedValue.COMPLEX_UNIT_DIP)
+                    cell.setViewLayoutWidth(ids.icon, iconSize, TypedValue.COMPLEX_UNIT_DIP)
                 }
                 val hour = hours.getOrNull(index)
                 val day = days.getOrNull(index)
@@ -433,31 +490,41 @@ object WidgetBinder {
                     else if (isRows) "${temperature(day?.low, config)} / ${temperature(day?.high, config)}"
                     else "${temperature(day?.low, config)}/${temperature(day?.high, config)}"
                 // Date, artwork and temperature have their own aligned rows.
-                put(cell, R.id.widget_cell_label, cellLabel)
-                fitText(context, cell, R.id.widget_cell_label, cellLabel, if (isRows) 12f else 11f,
+                put(cell, ids.label, cellLabel)
+                fitText(context, cell, ids.label, cellLabel, if (isRows) 12f else 11f,
                     if (isRows) 42f else (width - padding).toFloat() / count - 2f, if (isRows) (if (compact) 16f else 20f) else 14f,
                     if (isHours) config.textScale else null)
-                put(cell, R.id.widget_cell_temp, cellTemp)
+                put(cell, ids.temp, cellTemp)
                 val cellTempSp = 11f
-                fitText(context, cell, R.id.widget_cell_temp, cellTemp, cellTempSp,
+                fitText(context, cell, ids.temp, cellTemp, cellTempSp,
                     if (isRows) 65f else (width - padding).toFloat() / count - 8f,
                     if (isRows) (if (compact) 16f else 20f) else 14f, config.textScale)
-                val extra = if (isHours) hour?.precipProb?.takeIf { it in 0..100 }?.let { "$it%" }
+                val extra = if (kind == WidgetKind.COMBO) null
+                    else if (isHours) hour?.precipProb?.takeIf { it in 0..100 }?.let { "$it%" }
                     else if (isRows) day?.precipProbability?.takeIf { it in 0..100 }?.let { "$it%" }
                     else null
-                put(cell, R.id.widget_cell_extra, extra.orEmpty())
-                fitText(context, cell, R.id.widget_cell_extra, "100%", 10f, if (isRows) 38f else (width - padding).toFloat() / count - 2f, 12f, config.textScale)
-                if (compact && isHours) cell.setViewVisibility(R.id.widget_cell_extra, View.GONE)
-                cell.setTextColor(R.id.widget_cell_label, p.muted)
-                cell.setTextColor(R.id.widget_cell_temp, p.ink)
-                cell.setTextColor(R.id.widget_cell_extra, p.accent)
-                icon(context, cell, R.id.widget_cell_icon, WidgetIconSet.from(config.iconSet),
+                put(cell, ids.extra, extra.orEmpty())
+                fitText(context, cell, ids.extra, "100%", 10f, if (isRows) 38f else (width - padding).toFloat() / count - 2f, 12f, config.textScale)
+                if (kind == WidgetKind.COMBO || (compact && isHours)) cell.setViewVisibility(ids.extra, View.GONE)
+                if (kind == WidgetKind.COMBO && combo != null) {
+                    val cellWidth = (width - padding).toFloat() / count
+                    fitText(context, cell, ids.label, cellLabel, combo.hourlyLabelSize, cellWidth - 2f, combo.hourlyLabelHeight, config.textScale)
+                    fitText(context, cell, ids.temp, cellTemp, combo.hourlyTempSize, cellWidth - 8f, combo.hourlyTempHeight, config.textScale)
+                    if (android.os.Build.VERSION.SDK_INT >= 31) {
+                        cell.setViewLayoutWidth(ids.icon, combo.hourlyIcon, TypedValue.COMPLEX_UNIT_DIP)
+                        cell.setViewLayoutHeight(ids.icon, combo.hourlyIcon, TypedValue.COMPLEX_UNIT_DIP)
+                    }
+                }
+                cell.setTextColor(ids.label, p.muted)
+                cell.setTextColor(ids.temp, p.ink)
+                cell.setTextColor(ids.extra, p.accent)
+                icon(context, cell, ids.icon, WidgetIconSet.from(config.iconSet),
                     if (isHours) hour?.let { h -> weather?.let { phaseAwareCondition(h.condition, it, h.timeMillis) } ?: h.condition }
-                    else day?.condition, p, 40f, bitmapBudget = bitmapBudget)
-                if (isRows) cell.setImageViewBitmap(R.id.widget_cell_chart, rangeBar(context,
+                    else day?.condition, p, if (kind == WidgetKind.COMBO) combo?.hourlyIcon ?: 40f else 40f, bitmapBudget = bitmapBudget)
+                if (isRows) cell.setImageViewBitmap(ids.chart, rangeBar(context,
                     (width - padding - 42 - 18 - 65 - 20).coerceAtLeast(8), if (compact) 8 else 10,
                     day?.low, day?.high, low, high, p, bitmapBudget = bitmapBudget))
-                v.addView(R.id.widget_forecast, cell)
+                if (!staticSlots) v.addView(R.id.widget_forecast, cell)
             }
         }
         // The final beta9 widget language deliberately has no alarm badge.
@@ -469,7 +536,59 @@ object WidgetBinder {
             v.setViewVisibility(R.id.widget_date, if (config.showClock) View.VISIBLE else View.GONE)
             v.setViewVisibility(R.id.widget_lunar, if (config.showClock && config.showLunar) View.VISIBLE else View.GONE)
         }
-        if (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK, WidgetKind.SCENE)) {
+        if (kind == WidgetKind.COMBO) {
+            val todayDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+            val nextDays = weather?.currentAndFutureDaily(now).orEmpty()
+                .filter { Instant.ofEpochMilli(it.dateMillis).atZone(zone).toLocalDate().isAfter(todayDate) }
+                .take(DAY_SLOTS.size)
+            DAY_SLOTS.forEachIndexed { index, slot -> v.setViewVisibility(slot.root, if (index < nextDays.size) View.VISIBLE else View.GONE) }
+            val nextDayPercents = nextDays.mapNotNull { it.precipProbability?.takeIf { p -> p in 0..100 }?.let { p -> "$p%" } }
+            nextDays.forEachIndexed { index, day ->
+                val ids = DAY_SLOTS[index]
+                val cell = v
+                val date = Instant.ofEpochMilli(day.dateMillis).atZone(zone)
+                val weekday = date.format(DateTimeFormatter.ofPattern("E", Locale.CHINA))
+                val dateLabel = date.format(DateTimeFormatter.ofPattern("M/d", Locale.CHINA))
+                val cellTemp = "${temperature(day.low, config)} / ${temperature(day.high, config)}"
+                val extra = day.precipProbability?.takeIf { it in 0..100 }?.let { "$it%" }.orEmpty()
+                val metrics = combo ?: comboLayoutMetrics(width, height, compact, padding, verticalPadding)
+                put(cell, ids.label, weekday)
+                fitText(context, cell, ids.label, weekday, metrics.dailyWeekdaySize, 84f, metrics.dailyWeekdayHeight)
+                put(cell, ids.sublabel, dateLabel)
+                fitText(context, cell, ids.sublabel, dateLabel, metrics.dailyDateSize, 84f, metrics.dailyDateHeight)
+                put(cell, ids.temp, cellTemp)
+                fitText(context, cell, ids.temp, cellTemp, metrics.dailyTempSize, 96f, metrics.dailyTempHeight, config.textScale)
+                put(cell, ids.extra, extra)
+                val extraPx = fitText(context, cell, ids.extra, "100%", metrics.dailyPrecipSize, 36f, metrics.dailyPrecipHeight, config.textScale)
+                // Both rows share one percent column as wide as the widest value shown
+                // ("5%" vs "40%"). Numbers start right after the droplet, so every
+                // droplet sits at the same x and still hugs its own number.
+                val percentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                    textSize = extraPx
+                }
+                cell.setInt(ids.extra, "setMinWidth", nextDayPercents.maxOfOrNull {
+                    kotlin.math.ceil(percentPaint.measureText(it).toDouble()).toInt()
+                } ?: 0)
+                cell.setTextColor(ids.label, p.ink)
+                cell.setTextColor(ids.sublabel, ColorUtils.setAlphaComponent(p.ink, 158))
+                cell.setTextColor(ids.temp, p.ink)
+                cell.setTextColor(ids.extra, p.accent)
+                cell.setViewVisibility(ids.drop, if (extra.isEmpty()) View.GONE else View.VISIBLE)
+                cell.setInt(ids.drop, "setColorFilter", p.accent)
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    cell.setViewLayoutHeight(ids.root, metrics.dailyRowHeight, TypedValue.COMPLEX_UNIT_DIP)
+                    cell.setViewLayoutWidth(ids.icon, metrics.dailyIcon, TypedValue.COMPLEX_UNIT_DIP)
+                    cell.setViewLayoutHeight(ids.icon, metrics.dailyIcon, TypedValue.COMPLEX_UNIT_DIP)
+                    cell.setViewLayoutWidth(ids.drop, metrics.dailyDrop, TypedValue.COMPLEX_UNIT_DIP)
+                    cell.setViewLayoutHeight(ids.drop, metrics.dailyDrop, TypedValue.COMPLEX_UNIT_DIP)
+                }
+                icon(context, cell, ids.icon, WidgetIconSet.from(config.iconSet), day.condition, p,
+                    metrics.dailyIcon, bitmapBudget = bitmapBudget)
+            }
+            v.setViewVisibility(R.id.widget_daily_forecast, if (nextDays.isEmpty() || !config.showForecast) View.GONE else View.VISIBLE)
+        }
+        if (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK, WidgetKind.SCENE, WidgetKind.COMBO)) {
             if (!config.showForecast) v.setViewVisibility(R.id.widget_forecast, View.GONE)
             else if (kind != WidgetKind.SCENE) v.setViewVisibility(R.id.widget_forecast, View.VISIBLE)
         }
@@ -510,8 +629,8 @@ object WidgetBinder {
         WidgetIcons.bind(v, id, condition, iconSet, p.isLight, (sizeDp * context.resources.displayMetrics.density).roundToInt(), ambient, bitmapBudget)
     }
     internal fun layoutFor(style: WidgetStyle, kind: WidgetKind): Int = when (style) {
-        WidgetStyle.VISTA -> when (kind) { WidgetKind.PULSE -> R.layout.widget_vista_pulse; WidgetKind.NOW -> R.layout.widget_vista_now; WidgetKind.BAND -> R.layout.widget_vista_band; WidgetKind.WEEK -> R.layout.widget_vista_week; WidgetKind.SCENE -> R.layout.widget_vista_scene }
-        WidgetStyle.CLASSIC -> when (kind) { WidgetKind.PULSE -> R.layout.widget_classic_pulse; WidgetKind.NOW -> R.layout.widget_classic_now; WidgetKind.BAND -> R.layout.widget_classic_band; WidgetKind.WEEK -> R.layout.widget_classic_week; WidgetKind.SCENE -> R.layout.widget_classic_scene }
+        WidgetStyle.VISTA -> when (kind) { WidgetKind.PULSE -> R.layout.widget_vista_pulse; WidgetKind.NOW -> R.layout.widget_vista_now; WidgetKind.BAND -> R.layout.widget_vista_band; WidgetKind.WEEK -> R.layout.widget_vista_week; WidgetKind.SCENE -> R.layout.widget_vista_scene; WidgetKind.COMBO -> R.layout.widget_vista_combo }
+        WidgetStyle.CLASSIC -> when (kind) { WidgetKind.PULSE -> R.layout.widget_classic_pulse; WidgetKind.NOW -> R.layout.widget_classic_now; WidgetKind.BAND -> R.layout.widget_classic_band; WidgetKind.WEEK -> R.layout.widget_classic_week; WidgetKind.SCENE -> R.layout.widget_classic_scene; WidgetKind.COMBO -> R.layout.widget_classic_combo }
     }
     fun action(c: Context, id: Int, style: WidgetStyle, action: String, city: City? = null, widgetHit: String? = null): PendingIntent {
         if (action == "none") return PendingIntent.getBroadcast(c, 0,
@@ -546,13 +665,13 @@ object WidgetBinder {
             R.id.widget_metric_hit_1, R.id.widget_metric_hit_2, R.id.widget_metric_hit_3,
             R.id.widget_metric_hit_4, R.id.widget_metric_hit_5, R.id.widget_metric_hit_6,
             R.id.widget_scene_briefing, R.id.widget_scene_briefing_text, R.id.widget_scene_girl,
-            R.id.widget_hourly_forecast, R.id.widget_scene_hourly_title, R.id.widget_scene_day_title).forEach { set(it, cfg.clickWeather) }
+            R.id.widget_hourly_forecast, R.id.widget_daily_forecast, R.id.widget_scene_hourly_title, R.id.widget_scene_day_title).forEach { set(it, cfg.clickWeather) }
         set(R.id.widget_clock_hit, cfg.clickTime); set(R.id.widget_time, cfg.clickTime)
         set(R.id.widget_date, cfg.clickDate); set(R.id.widget_lunar, cfg.clickDate)
         set(R.id.widget_edit, "settings")
     }
     private fun fitText(c: Context, views: RemoteViews, id: Int, text: String, preferredSp: Float, widthDp: Float, heightDp: Float,
-                        numberScale: Float? = null, detailScale: Float = 1f) {
+                        numberScale: Float? = null, detailScale: Float = 1f): Float {
         val metrics = c.resources.displayMetrics
         val paint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif", Typeface.BOLD) }
         // Fit the upper end once, leaving space for the full slider range. Fitting
@@ -598,6 +717,7 @@ object WidgetBinder {
             size = maxOf(size, minOf(9f * metrics.density, heightCap))
         }
         views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_PX, size)
+        return size
     }
     private fun bindPrecipitation(context: Context, views: RemoteViews, config: WidgetConfig, weather: WeatherData?, now: Long,
                                   widthDp: Int, heightDp: Int, palette: WidgetPalette, bitmapBudget: WidgetBitmapBudget?) {

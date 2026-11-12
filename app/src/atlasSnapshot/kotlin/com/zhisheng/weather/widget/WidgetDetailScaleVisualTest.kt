@@ -78,7 +78,7 @@ class WidgetDetailScaleVisualTest {
             R.id.widget_scene_briefing_text, R.id.widget_metric_label_1, R.id.widget_metric_label_2,
             R.id.widget_metric_label_3, R.id.widget_metric_label_4, R.id.widget_metric_label_5,
             R.id.widget_metric_label_6, R.id.widget_scene_hourly_title, R.id.widget_scene_day_title,
-            R.id.widget_precip_title, R.id.widget_cell_label)
+            R.id.widget_precip_title, R.id.widget_cell_label) + HOUR_SLOTS.map { it.label }
         return when (view) {
             is TextView -> listOf(view).filter { it.id in ids && it.text.isNotBlank() }
             is ViewGroup -> (0 until view.childCount).flatMap { details(view.getChildAt(it)) }

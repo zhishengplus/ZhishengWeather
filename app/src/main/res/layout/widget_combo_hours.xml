@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated: fixed forecast slots so launchers only reapply leaf setters (no addView at render time). -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+<LinearLayout android:visibility="gone" android:id="@+id/widget_hour_0" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center">
+<TextView android:id="@+id/widget_hour_0_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center">
+</TextView>
+<ImageView android:id="@+id/widget_hour_0_icon" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_hour_0_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+<TextView android:id="@+id/widget_hour_0_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp" android:visibility="gone">
+</TextView>
+</LinearLayout>
+<FrameLayout android:id="@+id/widget_hour_gap_0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:visibility="gone" />
+<LinearLayout android:visibility="gone" android:id="@+id/widget_hour_1" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center">
+<TextView android:id="@+id/widget_hour_1_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center">
+</TextView>
+<ImageView android:id="@+id/widget_hour_1_icon" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_hour_1_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+<TextView android:id="@+id/widget_hour_1_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp" android:visibility="gone">
+</TextView>
+</LinearLayout>
+<FrameLayout android:id="@+id/widget_hour_gap_1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:visibility="gone" />
+<LinearLayout android:visibility="gone" android:id="@+id/widget_hour_2" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center">
+<TextView android:id="@+id/widget_hour_2_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center">
+</TextView>
+<ImageView android:id="@+id/widget_hour_2_icon" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_hour_2_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+<TextView android:id="@+id/widget_hour_2_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp" android:visibility="gone">
+</TextView>
+</LinearLayout>
+<FrameLayout android:id="@+id/widget_hour_gap_2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:visibility="gone" />
+<LinearLayout android:visibility="gone" android:id="@+id/widget_hour_3" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center">
+<TextView android:id="@+id/widget_hour_3_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center">
+</TextView>
+<ImageView android:id="@+id/widget_hour_3_icon" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_hour_3_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+<TextView android:id="@+id/widget_hour_3_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp" android:visibility="gone">
+</TextView>
+</LinearLayout>
+<FrameLayout android:id="@+id/widget_hour_gap_3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:visibility="gone" />
+<LinearLayout android:visibility="gone" android:id="@+id/widget_hour_4" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center">
+<TextView android:id="@+id/widget_hour_4_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center">
+</TextView>
+<ImageView android:id="@+id/widget_hour_4_icon" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_hour_4_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+<TextView android:id="@+id/widget_hour_4_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp" android:visibility="gone">
+</TextView>
+</LinearLayout>
+<FrameLayout android:id="@+id/widget_hour_gap_4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:visibility="gone" />
+<LinearLayout android:visibility="gone" android:id="@+id/widget_hour_5" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center">
+<TextView android:id="@+id/widget_hour_5_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center">
+</TextView>
+<ImageView android:id="@+id/widget_hour_5_icon" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" android:contentDescription="" android:layout_marginTop="1dp">
+</ImageView>
+<TextView android:id="@+id/widget_hour_5_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp">
+</TextView>
+<TextView android:id="@+id/widget_hour_5_extra" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="9sp" android:textColor="#1B3346" android:fontFamily="sans-serif" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:layout_marginTop="1dp" android:visibility="gone">
+</TextView>
+</LinearLayout>
+</merge>
