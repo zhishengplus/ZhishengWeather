@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import com.zhisheng.weather.R
 import com.zhisheng.weather.model.WeatherCondition
-import com.zhisheng.weather.model.conditionIconRes
+import com.zhisheng.weather.ui.components.classicConditionIconRes
 import com.zhisheng.weather.ui.components.drawVistaWeatherArtwork
 import com.zhisheng.weather.ui.components.NaturalLightPalette
 import androidx.compose.ui.graphics.toArgb
@@ -29,11 +29,18 @@ internal object WidgetIcons {
         cache.evictAll()
     }
 
-    @Suppress("UNUSED_PARAMETER")
     fun bind(views: RemoteViews, id: Int, condition: WeatherCondition?, set: WidgetIconSet, light: Boolean, sizePx: Int = 144,
              ambient: NaturalLightPalette? = null, bitmapBudget: WidgetBitmapBudget? = null) {
-        // One Makin-Things set for every widget, same as in-app; icon-set preference is ignored.
-        views.setImageViewResource(id, conditionIconRes(condition) ?: R.drawable.ph_cloud)
+        if (condition == null || condition == WeatherCondition.UNKNOWN) {
+            views.setImageViewResource(id, R.drawable.ph_cloud)
+        } else if (set == WidgetIconSet.CLASSIC) {
+            views.setImageViewResource(id, classicConditionIconRes(condition) ?: R.drawable.ph_cloud)
+        } else {
+            val pixels = bitmapBudget?.dimension(sizePx, 16, 512) ?: sizePx
+            val image = bitmap(condition, light, pixels, ambient)
+            bitmapBudget?.record(image, image.allocationByteCount)
+            views.setImageViewBitmap(id, image)
+        }
         views.setContentDescription(id, condition?.label ?: "暂无天气")
     }
 

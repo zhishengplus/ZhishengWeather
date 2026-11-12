@@ -21,12 +21,23 @@ import com.zhisheng.weather.R
 import com.zhisheng.weather.model.WeatherCondition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
 
 /** Inflates production RemoteViews via WidgetBinder and writes real screenshots. */
 class ComboPreviewExportTest {
+    private var previousZone: java.util.TimeZone? = null
+
+    @Before fun useTheSampleCityTimeZone() {
+        previousZone = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Shanghai"))
+    }
+
+    @After fun restoreTimeZone() { previousZone?.let(java.util.TimeZone::setDefault) }
+
     @get:Rule val paparazzi = Paparazzi(
         deviceConfig = DeviceConfig.NEXUS_5.copy(screenWidth = 1080, screenHeight = 2340, softButtons = false),
         theme = "android:Theme.Material.Light.NoActionBar",
@@ -37,8 +48,22 @@ class ComboPreviewExportTest {
 
     private fun dp(value: Int) = (value * paparazzi.context.resources.displayMetrics.density).toInt()
 
+    @Test fun exportPickerPreviewsWithTheExistingArtwork() {
+        val now = java.time.OffsetDateTime.parse("2026-11-10T12:00:00+08:00").toInstant().toEpochMilli()
+        val sample = sunnyDaytimeSample(widgetPreviewSample(now)).let {
+            it.copy(city = it.city.copy(name = "清华大学", affiliation = "北京·海淀区", latitude = 40.002, longitude = 116.326))
+        }
+        for (style in WidgetStyle.entries) {
+            val frame = render(344, 250, if (style == WidgetStyle.CLASSIC) "dark" else "light", sample, now, 0xFF9BB83A.toInt(), style)
+            val widget = frame.getChildAt(1)
+            val bitmap = Bitmap.createBitmap(widget.width, widget.height, Bitmap.Config.ARGB_8888)
+            widget.draw(Canvas(bitmap))
+            File(outRoot, "widget-preview-${style.key}-combo.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
+
     @Test fun exportRealComboPreviews() {
-        val now = java.time.OffsetDateTime.parse("2026-11-10T12:00:00+02:00").toInstant().toEpochMilli()
+        val now = java.time.OffsetDateTime.parse("2026-11-10T12:00:00+08:00").toInstant().toEpochMilli()
         val sample = sunnyDaytimeSample(widgetPreviewSample(now))
         val wallpaperColor = 0xFF9BB83A.toInt()
         val sizes = listOf(
@@ -86,7 +111,8 @@ class ComboPreviewExportTest {
         ))
     }
 
-    private fun render(widthDp: Int, heightDp: Int, theme: String, sample: WidgetSnapshot, now: Long, wallpaperColor: Int): FrameLayout {
+    private fun render(widthDp: Int, heightDp: Int, theme: String, sample: WidgetSnapshot, now: Long, wallpaperColor: Int,
+                       style: WidgetStyle = WidgetStyle.VISTA): FrameLayout {
         val pad = dp(24)
         val width = dp(widthDp)
         val height = dp(heightDp)
@@ -99,9 +125,9 @@ class ComboPreviewExportTest {
             setImageBitmap(yellowGreenWallpaper(outerW, outerH))
         }
         outer.addView(wallpaper, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val config = WidgetConfig.defaults(WidgetStyle.VISTA).copy(theme = theme)
+        val config = WidgetConfig.defaults(style).copy(theme = theme)
         val remote = WidgetBinder.bind(
-            context, 1, WidgetInstance(1, WidgetStyle.VISTA, WidgetKind.COMBO), config, sample,
+            context, 1, WidgetInstance(1, style, WidgetKind.COMBO), config, sample,
             widthDp, heightDp, now, interactive = false, previewBackground = wallpaperColor,
         )
         // Paparazzi's AppCompat inflater turns ImageView into AppCompatImageView,
@@ -223,7 +249,7 @@ class ComboPreviewExportTest {
     }
 
     @Test fun dropletsAlignForZeroAndHundredPercent() {
-        val now = java.time.OffsetDateTime.parse("2026-11-10T12:00:00+02:00").toInstant().toEpochMilli()
+        val now = java.time.OffsetDateTime.parse("2026-11-10T12:00:00+08:00").toInstant().toEpochMilli()
         val base = sunnyDaytimeSample(widgetPreviewSample(now))
         for ((first, second) in listOf(0 to 100, 100 to 0, 5 to 40, 99 to 1)) {
             val sample = base.copy(weather = base.weather.copy(daily = base.weather.daily.mapIndexed { i, d ->

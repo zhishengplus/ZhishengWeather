@@ -1,34 +1,10 @@
 # Third-party notices
 
-## Makin-Things weather icons (amCharts-based)
-
-All weather-condition icons, in the app and in every home-screen widget, are
-`app/src/main/res/drawable-nodpi/mk_*.webp`. They are rasterized from the static
-SVG set of **Makin-Things weather-icons**, which is based on the **amCharts**
-weather icons.
-
-- Source: <https://github.com/Makin-Things/weather-icons> (`static/` folder)
-- Source commit used: `3793c6a1bf5c52402bb09e5d062b72f9fb5c0410`
-- License: MIT, Copyright (c) 2019 Custom cards for Home Assistant
-- Based on: amCharts weather icons, <https://www.amcharts.com/free-animated-svg-weather-icons/>,
-  licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) (CC BY 4.0)
-- Changes: the static SVGs were rasterized to 512×512 lossless WebP, cropped to their
-  visible bounds and re-centered at a common visual size. Colours and shapes are unchanged.
-
-The full MIT text and the amCharts attribution are packaged in
-`app/src/main/assets/licenses/makin-things-weather-icons.txt`.
-
-Condition mapping (`model/ConditionIcons.kt`):
-clear-day, clear-night, cloudy-2-day (partly cloudy), cloudy-2-night, cloudy (cloudy/overcast),
-rainy-1 (drizzle), rainy-2 (rain), thunderstorms, hail, rain-and-sleet-mix (freezing rain/drizzle),
-snowy-2 (snow), rain-and-snow-mix (sleet), fog, haze, dust (sand), wind.
-
 ## Meteocons
 
-The themed launcher monochrome layer `app/src/main/res/drawable-nodpi/weather_cloud_sun.png`
-is derived from the static flat style of **Meteocons** by Bas Milius. The former
-Meteocons weather-condition rasters (`weather_*`, `classic_*`, `vista_day_*`,
-`vista_night_*`) were replaced by the Makin-Things icons above and are no longer packaged.
+The weather-condition artwork in `app/src/main/res/drawable-nodpi/weather_*.png`
+(excluding the original `weather_girl_*` illustrations) is derived from the static
+flat style of **Meteocons** by Bas Milius.
 
 - Source: <https://github.com/basmilius/weather-icons>
 - Source commit used for review: `70dfb1d6e30dc9e791cfb0e4c5b5e5e60e972aa0`
@@ -63,8 +39,8 @@ Original SVGs and their download URLs/SHA-256 hashes are retained in
 `artwork/meteocons-fill-0.1.0/`. Source: <https://github.com/basmilius/meteocons>.
 The MIT license and copyright notice above also apply to these derivatives.
 `scripts/build_vista_weather_icons.cjs` applies distinct light/dark color ramps
-and exports `vista_day_*.png` / `vista_night_*.png`. Those exports are no longer
-packaged (see Makin-Things above); the source SVGs and script are kept for reference.
+and exports `vista_day_*.png` / `vista_night_*.png`. Existing classic and widget
+artwork is not replaced. The packaged app never downloads these files at runtime.
 
 ## GeoNames offline place data (2026-10-11)
 

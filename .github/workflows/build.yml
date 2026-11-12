@@ -1,14 +1,20 @@
 # ZHISHENG WEATHER TERMINAL // CI
-name: Build // ASSEMBLE
+name: 手动测试或打包
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 选择要执行的操作
+        type: choice
+        required: true
+        options:
+          - 测试
+          - 打包
 
 jobs:
   assemble:
-    name: assembleDebug
+    name: ${{ inputs.task }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout // 检出
@@ -24,14 +30,10 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Unit tests // 单元测试
-        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+      - name: 运行测试和代码检查
+        if: inputs.task == '测试'
+        run: ./gradlew testDebugUnitTest lintDebug --no-daemon --stacktrace
 
-      - name: Android Lint // 静态检查
-        run: ./gradlew lintDebug --no-daemon --stacktrace
-
-      - name: Assemble debug // 构建调试包
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Assemble public release // 构建公共发布包
-        run: ./gradlew assemblePublicRelease --no-daemon --stacktrace
+      - name: 构建 Android 安装包
+        if: inputs.task == '打包'
+        run: ./gradlew assembleDebug assemblePublicRelease --no-daemon --stacktrace

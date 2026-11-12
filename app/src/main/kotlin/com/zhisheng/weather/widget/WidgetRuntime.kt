@@ -84,35 +84,13 @@ object WidgetRuntime {
         kinds.flatMap { (kind, provider) -> AppWidgetManager.getInstance(c).getAppWidgetIds(ComponentName(c, provider)).map { WidgetInstance(it, style, kind) } }
     }
     fun instance(c: Context, id: Int): WidgetInstance? {
-        val info = AppWidgetManager.getInstance(c).getAppWidgetInfo(id) ?: return null
-        return instanceFromProvider(c, id, info.provider)
-    }
-
-    fun instanceFromProvider(c: Context, id: Int, provider: ComponentName): WidgetInstance? {
+        val provider = AppWidgetManager.getInstance(c).getAppWidgetInfo(id)?.provider
+            ?: return instances(c).firstOrNull { it.id == id }
         return providers.entries.firstNotNullOfOrNull { (style, kinds) ->
-            kinds.entries.firstOrNull {
-                providerMatches(ComponentName(c, it.value), provider)
+            kinds.entries.firstOrNull { (_, klass) ->
+                widgetProviderClassMatches(c.packageName, klass.name, provider.packageName, provider.className)
             }?.let { WidgetInstance(id, style, it.key) }
         }
-    }
-
-    private fun providerMatches(local: ComponentName, remote: ComponentName): Boolean {
-        if (local == remote || local.className == remote.className) return true
-        val localNorm = normalizeClassName(local.packageName, local.className)
-        val remotePkg = remote.packageName.ifEmpty { local.packageName }
-        val remoteNorm = normalizeClassName(remotePkg, remote.className)
-        if (localNorm == remoteNorm) return true
-        val localSimple = localNorm.substringAfterLast('.')
-        val remoteSimple = remoteNorm.substringAfterLast('.')
-        return localSimple.isNotEmpty() && localSimple == remoteSimple
-    }
-
-    /** Accept FQCN, ".widget.X", or a short class name the way ActivityInfo.buildClassName does. */
-    private fun normalizeClassName(pkg: String, className: String): String = when {
-        className.startsWith('.') -> pkg + className
-        className.contains('.') -> className
-        className.isEmpty() -> className
-        else -> "$pkg.$className"
     }
     @Synchronized fun start(c: Context) {
         if (started) return
@@ -166,10 +144,10 @@ object WidgetRuntime {
         return WidgetSnapshot(city, data)
     }
     suspend fun renderAll(c: Context) = renderLock.withLock {
-        WidgetRedrawAlarm.markRendered()
         instances(c).forEach { item ->
             try { renderOneLocked(c, item.id) } catch (e: Exception) { android.util.Log.w("DesktopWeather", "Widget ${item.id} unavailable", e) }
         }
+        WidgetRedrawAlarm.markRendered()
     }
     suspend fun renderOne(c: Context, id: Int) = renderLock.withLock { renderOneLocked(c, id) }
 

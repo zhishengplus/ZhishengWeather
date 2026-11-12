@@ -278,7 +278,7 @@ Thank you to everyone who has sent feedback in the groups, on Coolapk and in Iss
 
 Community contributors: `PPQ1028`, `Uinuan1`, `KZzzzo`, `睡觉了寂`, `微生之最`, `r1file`, `vsqesy3721`, `茉莉羽`, `陈大橙`, `飞667`, `一杯冰美式、、`, `M1ralce`, `紅星照耀中國`, `我爱跑步`, `河鱼天雁`, `你的心里没点高数吗`, `周月星斗`, `无敌战神暴王龙`, `control3`, `明珠有泪`, `Gstar_`, `伍拾两HZ`, `寡欲老公猪`, `PickGear`.
 
-Weather icons come from Makin-Things weather-icons (based on the amCharts weather icons), the launcher monochrome icon derives from Meteocons, interface icons from Phosphor Icons, offline place names come from GeoNames, solar positions use commons-suncalc, and badges render with three.js. Licenses and sources are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Weather icons derive from Meteocons, interface icons from Phosphor Icons, offline place names come from GeoNames, solar positions use commons-suncalc, and badges render with three.js. Licenses and sources are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 <details>
 <summary><b>Version history</b></summary>

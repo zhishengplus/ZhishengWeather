@@ -1,55 +1,112 @@
 package com.zhisheng.weather.ui
 
-import com.zhisheng.weather.R
-import com.zhisheng.weather.model.WeatherCondition
-import com.zhisheng.weather.model.conditionIconRes
 import java.io.File
+import java.nio.ByteBuffer
 import org.junit.Assert.*
 import org.junit.Test
 
 class VistaIconAssetsTest {
-    private val makinFiles = listOf("clear_day", "clear_night", "cloudy", "cloudy_2_day", "cloudy_2_night", "dust", "fog",
-        "hail", "haze", "rain_and_sleet_mix", "rain_and_snow_mix", "rainy_1", "rainy_2", "snowy_2", "thunderstorms", "wind")
-
-    @Test fun everyConditionMapsToShippedMakinThingsIcon() {
-        WeatherCondition.entries.filter { it != WeatherCondition.UNKNOWN }.forEach { c ->
-            assertNotNull("$c has no icon", conditionIconRes(c))
-        }
-        assertNull(conditionIconRes(WeatherCondition.UNKNOWN))
-        assertNull(conditionIconRes(null))
-        assertEquals(R.drawable.mk_clear_day, conditionIconRes(WeatherCondition.CLEAR))
-        assertEquals(R.drawable.mk_clear_night, conditionIconRes(WeatherCondition.CLEAR_NIGHT))
-        assertEquals(R.drawable.mk_cloudy_2_night, conditionIconRes(WeatherCondition.PARTLY_CLOUDY_NIGHT))
-        assertEquals(R.drawable.mk_rainy_1, conditionIconRes(WeatherCondition.DRIZZLE))
-        assertEquals(R.drawable.mk_rainy_2, conditionIconRes(WeatherCondition.RAIN))
-    }
-
-    @Test fun makinThingsRastersAre512LosslessWebpWithAlpha() {
-        makinFiles.forEach { n ->
-            val f = File("src/main/res/drawable-nodpi/mk_$n.webp")
-            assertTrue("Missing $f", f.isFile)
-            val b = f.readBytes()
-            assertEquals("RIFF", String(b, 0, 4, Charsets.US_ASCII))
-            assertEquals("WEBP", String(b, 8, 4, Charsets.US_ASCII))
-            // Lossless VP8L chunk: 14-bit width/height minus one, then alpha hint bit.
-            assertEquals("VP8L", String(b, 12, 4, Charsets.US_ASCII))
-            val bits = (b[21].toInt() and 0xff) or ((b[22].toInt() and 0xff) shl 8) or
-                ((b[23].toInt() and 0xff) shl 16) or ((b[24].toInt() and 0xff) shl 24)
-            assertEquals(512, (bits and 0x3fff) + 1)
-            assertEquals(512, ((bits shr 14) and 0x3fff) + 1)
-            assertTrue("$f must keep transparency", (bits shr 28) and 1 == 1)
+    @Test fun everyVistaConditionHasIndependentReadableAssetsWithoutReplacingClassic() {
+        val names = listOf("sun", "moon", "cloud_sun", "cloud_moon", "cloud", "clouds", "rain", "drizzle",
+            "bolt", "sleet", "snow", "fog", "haze", "sand", "wind")
+        names.forEach { name ->
+            assertTrue(File("src/main/res/drawable-nodpi/weather_$name.png").isFile)
+            listOf("day", "night").forEach { mode ->
+                val path = File("src/main/res/drawable-nodpi/vista_${mode}_$name.png")
+                assertTrue("Missing new-theme artwork: $path", path.isFile)
+                val png = path.readBytes()
+                assertEquals("PNG", String(png, 1, 3, Charsets.US_ASCII))
+                assertEquals(256, ByteBuffer.wrap(png, 16, 4).int)
+                assertEquals(256, ByteBuffer.wrap(png, 20, 4).int)
+                assertEquals("Artwork must retain an alpha channel", 6, png[25].toInt())
+            }
         }
     }
 
-    @Test fun replacedWeatherRastersNoLongerShip() {
-        val res = File("src/main/res/drawable-nodpi").list().orEmpty()
-        val leftover = res.filter { (it.startsWith("weather_") || it.startsWith("vista_day_") ||
-            it.startsWith("vista_night_") || it.startsWith("classic_")) && it.endsWith(".png") &&
-            !it.startsWith("weather_girl_") && it != "weather_cloud_sun.png" }
-        assertTrue("Replaced weather rasters still shipped: $leftover", leftover.isEmpty())
-        // Themed launcher monochrome layer still uses the Meteocons cloud-sun silhouette.
+    @Test fun everyConditionHasALicensedClassicMeteocon() {
+        val names = listOf("sun", "moon", "cloud_sun", "cloud_moon", "cloud", "clouds", "rain", "drizzle",
+            "bolt", "sleet", "snow", "fog", "haze", "sand", "wind")
         assertTrue(File("src/main/assets/licenses/meteocons.txt").readText().contains("MIT License"))
-        val makin = File("src/main/assets/licenses/makin-things-weather-icons.txt").readText()
-        assertTrue(makin.contains("MIT License") && makin.contains("amCharts") && makin.contains("CC BY 4.0"))
+        names.forEach { name ->
+            val path = File("src/main/res/drawable-nodpi/classic_$name.png")
+            assertTrue("Missing classic-theme artwork: $path", path.isFile)
+            val png = path.readBytes()
+            assertEquals("PNG", String(png, 1, 3, Charsets.US_ASCII))
+            assertEquals(384, ByteBuffer.wrap(png, 16, 4).int)
+            assertEquals(384, ByteBuffer.wrap(png, 20, 4).int)
+            assertEquals("Artwork must retain an alpha channel", 6, png[25].toInt())
+            assertTrue(File("../artwork/meteocons-fill").isDirectory || File("artwork/meteocons-fill").isDirectory)
+        }
+    }
+
+    /** 解码 PNG 里出现次数最多的不透明像素颜色（简化实现：只处理标准非隔行 PNG）。 */
+    private fun dominantColor(png: ByteArray): Int {
+        var offset = 8
+        var width = 0; var height = 0; var bitDepth = 0; var colorType = 0
+        val idat = java.io.ByteArrayOutputStream()
+        while (offset + 8 <= png.size) {
+            val length = ByteBuffer.wrap(png, offset, 4).int
+            val type = String(png, offset + 4, 4, Charsets.US_ASCII)
+            val dataStart = offset + 8
+            when (type) {
+                "IHDR" -> {
+                    width = ByteBuffer.wrap(png, dataStart, 4).int
+                    height = ByteBuffer.wrap(png, dataStart + 4, 4).int
+                    bitDepth = png[dataStart + 8].toInt()
+                    colorType = png[dataStart + 9].toInt()
+                }
+                "IDAT" -> idat.write(png, dataStart, length)
+                "IEND" -> break
+            }
+            offset = dataStart + length + 4
+        }
+        require(bitDepth == 8 && colorType == 6) { "只支持 8 位 RGBA PNG" }
+        val raw = java.util.zip.InflaterInputStream(java.io.ByteArrayInputStream(idat.toByteArray())).readBytes()
+        val bpp = 4
+        val stride = width * bpp
+        val previous = IntArray(stride)
+        val current = IntArray(stride)
+        val counts = HashMap<Int, Int>()
+        var pos = 0
+        for (y in 0 until height) {
+            val filter = raw[pos++].toInt()
+            for (i in 0 until stride) current[i] = raw[pos + i].toInt() and 0xFF
+            pos += stride
+            for (i in 0 until stride) {
+                val left = if (i >= bpp) current[i - bpp] else 0
+                val up = previous[i]
+                val upLeft = if (i >= bpp) previous[i - bpp] else 0
+                current[i] = (current[i] + when (filter) {
+                    0 -> 0
+                    1 -> left
+                    2 -> up
+                    3 -> (left + up) / 2
+                    4 -> paeth(left, up, upLeft)
+                    else -> 0
+                }) and 0xFF
+            }
+            for (x in 0 until width) {
+                val i = x * bpp
+                val alpha = current[i + 3]
+                if (alpha == 255) {
+                    val color = (current[i] shl 16) or (current[i + 1] shl 8) or current[i + 2]
+                    counts[color] = (counts[color] ?: 0) + 1
+                }
+            }
+            System.arraycopy(current, 0, previous, 0, stride)
+        }
+        return counts.maxByOrNull { it.value }?.key ?: 0
+    }
+
+    private fun paeth(a: Int, b: Int, c: Int): Int {
+        val p = a + b - c
+        val pa = kotlin.math.abs(p - a)
+        val pb = kotlin.math.abs(p - b)
+        val pc = kotlin.math.abs(p - c)
+        return when {
+            pa <= pb && pa <= pc -> a
+            pb <= pc -> b
+            else -> c
+        }
     }
 }

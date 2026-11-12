@@ -113,7 +113,7 @@ object WidgetBinder {
         val stripHeight = height
         val stripVerticalInset = when {
             instance.kind == WidgetKind.COMBO ->
-                minOf(16, ((height - if (compact) 148 else 188) / 2).coerceAtLeast(6))
+                minOf(if (compact) 14 else 16, ((height - if (compact) 148 else 188) / 2).coerceAtLeast(6))
             else -> minOf(if (instance.kind == WidgetKind.BAND) 20 else 16,
                 ((stripHeight - stripMinimumContent) / 2).coerceAtLeast(2))
         }
@@ -586,7 +586,7 @@ object WidgetBinder {
                 icon(context, cell, ids.icon, WidgetIconSet.from(config.iconSet), day.condition, p,
                     metrics.dailyIcon, bitmapBudget = bitmapBudget)
             }
-            v.setViewVisibility(R.id.widget_daily_forecast, if (nextDays.isEmpty()) View.GONE else View.VISIBLE)
+            v.setViewVisibility(R.id.widget_daily_forecast, if (nextDays.isEmpty() || !config.showForecast) View.GONE else View.VISIBLE)
         }
         if (kind in listOf(WidgetKind.BAND, WidgetKind.WEEK, WidgetKind.SCENE, WidgetKind.COMBO)) {
             if (!config.showForecast) v.setViewVisibility(R.id.widget_forecast, View.GONE)

@@ -93,8 +93,9 @@ internal fun comboLayoutMetrics(
     val hourlyTempHeight = hourlyTempSize + 3f
     val columnWidth = contentW / 6f
     val hourlyIconCap = (columnWidth - 4f).coerceIn(22f, 72f)
-    val hourlyIconDesired = (36f * scale).coerceIn(if (compact) 22f else 28f, hourlyIconCap)
-    val hourlyMin = hourlyLabelHeight + hourlyIconDesired + hourlyTempHeight + 8f
+    val hourlyIconDesired = (36f * scale).coerceIn(minOf(if (compact) 22f else 28f, hourlyIconCap), hourlyIconCap)
+    val hourlyPadding = if (compact) 4f else 8f
+    val hourlyMin = hourlyLabelHeight + hourlyIconDesired + hourlyTempHeight + hourlyPadding
     val headerMin = if (compact) 36f else 48f
     // Header growth is also width-capped: a huge hero would crowd 多云 and the city stack.
     val headerMax = if (compact) 58f else 96f
@@ -110,7 +111,7 @@ internal fun comboLayoutMetrics(
     val dailyContent = maxOf(dailyIcon, dailyTextStack)
     // Hug the row to its content (same tightness as 4×3). Leftover host height
     // goes to the header and hourly section, not to inter-row gaps.
-    var dailyHeight = (dailyContent + 6f).coerceAtLeast(dailyRowMin) * 2f + 4f
+    var dailyHeight = (dailyContent + if (compact) 4f else 6f).coerceAtLeast(dailyRowMin) * 2f + 4f
     var headerHeight = ((if (compact) 44f else 58f) * scale).coerceIn(headerMin, headerMax)
     var hourlyHeight = contentH - headerHeight - dailyHeight
     if (hourlyHeight < hourlyMin) {
@@ -132,7 +133,7 @@ internal fun comboLayoutMetrics(
         // Hourly icons are width-capped, so extra height past a small comfort
         // pad would just be an empty well — send what the header can still use.
         // Do not grow daily icons further: that pulls 周三/周四 apart.
-        val hourlyPacked = hourlyLabelHeight + hourlyIconCap + hourlyTempHeight + 8f
+        val hourlyPacked = hourlyLabelHeight + hourlyIconCap + hourlyTempHeight + hourlyPadding
         val hourlyComfort = hourlyPacked + 20f
         if (hourlyHeight > hourlyComfort) {
             val move = minOf(hourlyHeight - hourlyComfort, (headerMax - headerHeight).coerceAtLeast(0f))
@@ -142,10 +143,12 @@ internal fun comboLayoutMetrics(
     }
     val dailyRowHeight = dailyHeight / 2f
     val heroIcon = (headerHeight - if (compact) 4f else 6f).coerceIn(if (compact) 28f else 40f, if (compact) headerHeight else heroCap)
-    val tempHeight = (headerHeight * 0.74f).coerceIn(22f, headerHeight - 2f)
+    // Compact headers stack temperature and condition. Reserve a full CJK line
+    // below the number instead of letting TextView clip it at larger font scales.
+    val tempHeight = (headerHeight * if (compact) .66f else .74f).coerceIn(22f, headerHeight - 2f)
     val tempSize = (headerHeight * 0.66f).coerceIn(26f, 68f)
     val tempWidth = (contentW * 0.36f).coerceIn(78f, 160f)
-    val hourlyIcon = (hourlyHeight - hourlyLabelHeight - hourlyTempHeight - 8f).coerceIn(22f, hourlyIconCap)
+    val hourlyIcon = (hourlyHeight - hourlyLabelHeight - hourlyTempHeight - hourlyPadding).coerceIn(22f, hourlyIconCap)
     val dailyTempHeight = (dailyTempSize + 6f).coerceAtMost(dailyRowHeight - 4f)
     return ComboLayoutMetrics(
         headerHeight = headerHeight,

@@ -188,7 +188,12 @@ class AppUpdateTest {
         assertTrue(AppUpdate.isNewer(info, 20260901, "0.1.5-beta3"))
         assertTrue(AppUpdate.isNewer(info, 20260912, "0.1.5-beta7"))
         assertTrue(AppUpdate.isNewer(info, 20260973, "0.1.5-beta10-public"))
-        assertFalse(AppUpdate.isNewer(info, BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME))
+        // Public source exports can lag the published update manifest. Verify
+        // upgrade/same-version/downgrade behavior without assuming their order.
+        val releasedCode = requireNotNull(info.versionCode)
+        assertTrue(AppUpdate.isNewer(info, releasedCode - 1, info.versionName))
+        assertFalse(AppUpdate.isNewer(info, releasedCode, info.versionName))
+        assertFalse(AppUpdate.isNewer(info, releasedCode + 1, info.versionName))
     }
 
     @Test

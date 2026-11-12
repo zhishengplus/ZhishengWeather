@@ -5,8 +5,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ComboLayoutMetricsTest {
+    @Test fun narrowLauncherOptionsDoNotInvertTheIconBounds() {
+        for (width in listOf(180, 200, 215, 250, 300, 344, 410)) {
+            for (height in listOf(180, 223, 224, 250, 333, 417)) {
+                val horizontal = if (width >= 300) 48 else if (width >= 240) 36 else 24
+                val compact = height < 224
+                val vertical = minOf(if (compact) 14 else 16, ((height - if (compact) 148 else 188) / 2).coerceAtLeast(6)) * 2
+                val m = comboLayoutMetrics(width, height, compact, horizontal, vertical)
+                assertTrue("$width x $height: hourly height", m.hourlyHeight > 0f)
+                assertTrue("$width x $height: icon", m.hourlyIcon.isFinite() && m.hourlyIcon > 0f)
+                assertTrue("$width x $height: column width", m.hourlyIcon <= (width - horizontal) / 6f)
+                assertTrue("$width x $height: hourly text and icon fit vertically",
+                    m.hourlyLabelHeight + m.hourlyIcon + m.hourlyTempHeight <= m.hourlyHeight)
+                assertEquals((height - vertical).toFloat(), m.headerHeight + m.hourlyHeight + m.dailyHeight, .1f)
+            }
+        }
+    }
+
     private fun metrics(height: Int, compact: Boolean = height < 224): ComboLayoutMetrics {
-        val vertical = if (height < 224) 16 else 16
+        val vertical = if (compact) 14 else 16
         return comboLayoutMetrics(344, height, compact, 48, vertical * 2)
     }
 
@@ -21,7 +38,7 @@ class ComboLayoutMetricsTest {
         var previousTemp = 0f
         var previousDaily = 0f
         for ((height, compact) in samples) {
-            val padV = 32
+            val padV = if (compact) 28 else 32
             val m = comboLayoutMetrics(344, height, compact, 48, padV)
             val content = (height - padV).toFloat()
             assertEquals("sections must fill $height dp", content, m.headerHeight + m.hourlyHeight + m.dailyHeight, 0.6f)

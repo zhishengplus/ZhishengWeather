@@ -35,6 +35,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
+import com.zhisheng.weather.ui.components.classicConditionIconRes
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -259,6 +262,10 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                                 Text("0% 完全无底色；100% 遮住壁纸。桌面组件只能绘制自己的底色，无法实时模糊桌面壁纸。", fontSize = 11.sp, color = colors.muted)
                             }
                             Panel {
+                                LabelValue("天气图标", "无界为默认")
+                                IconSetPicker(config.iconSet) { config = config.copy(iconSet = it) }
+                            }
+                            Panel {
                                 LabelValue("文字颜色", "")
                                 Choice(listOf("自动" to "auto", "浅色字" to "light", "深色字" to "dark"), config.text) { config = config.copy(text = it) }
                                 Text("自动只参考壁纸整体明暗；复杂壁纸可选浅色字配深色壁纸，或深色字配浅色壁纸。图标彩色表示天气种类；降水图显示毫米/小时，百分比是降水概率。", fontSize = 11.sp, color = colors.muted, modifier = Modifier.padding(top = 10.dp))
@@ -301,7 +308,7 @@ internal fun WidgetStudio(style: WidgetStyle, editingId: Int?, initialKind: Widg
                                     Toggle("显示时钟和日期", config.showClock) { config = config.copy(showClock = it) }
                                     Toggle("24 小时制", config.clock24) { config = config.copy(clock24 = it) }
                                 }
-                                if (kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.BAND)) Toggle("显示天气预报", config.showForecast) { config = config.copy(showForecast = it) }
+                                if (kind in listOf(WidgetKind.SCENE, WidgetKind.WEEK, WidgetKind.BAND, WidgetKind.COMBO)) Toggle("显示天气预报", config.showForecast) { config = config.copy(showForecast = it) }
                                 if (kind == WidgetKind.SCENE) Toggle("短时降水柱图", config.showPrecipitation) { config = config.copy(showPrecipitation = it) }
                                 if (kind == WidgetKind.SCENE || (kind == WidgetKind.WEEK && !classic)) Toggle("农历", config.showLunar) { config = config.copy(showLunar = it) }
                                 if (kind == WidgetKind.SCENE) Toggle("天气娘提示", config.showWeatherGirl) { config = config.copy(showWeatherGirl = it) }
@@ -577,8 +584,37 @@ internal fun NotificationStudio(value: NotificationSettings, cities: List<City>,
                 }
                 CitySearch(value.config, ::change)
                 Panel {
+                    LabelValue("天气图标", "")
+                    IconSetPicker(value.config.iconSet) { change(value.config.copy(iconSet = it)) }
+                    Spacer(Modifier.height(16.dp))
                     Choice(listOf("摄氏 °C" to "c", "华氏 °F" to "f"), value.config.tempUnit) { change(value.config.copy(tempUnit = it)) }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IconSetPicker(selected: String, onSelect: (String) -> Unit) {
+    val colors = LocalStudio.current
+    val density = LocalDensity.current.density
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        WidgetIconSet.entries.forEach { set ->
+            val active = WidgetIconSet.from(selected) == set
+            Column(Modifier.weight(1f).clip(colors.shape)
+                .background(if (active) colors.accent.copy(alpha = .14f) else colors.bg)
+                .border(if (active) 2.dp else 1.dp, if (active) colors.accent else colors.edge, colors.shape)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSelect(set.key) }
+                .padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    listOf(WeatherCondition.CLEAR, WeatherCondition.OVERCAST, WeatherCondition.RAIN).forEach { condition ->
+                        if (set == WidgetIconSet.WUJIE) {
+                            val bitmap = remember(condition, colors.classic, density) { WidgetIcons.bitmap(condition, !colors.classic, (30f * density).roundToInt()).asImageBitmap() }
+                            Image(bitmap, condition.label, Modifier.size(30.dp))
+                        } else Image(painterResource(classicConditionIconRes(condition) ?: R.drawable.ph_cloud), condition.label, Modifier.size(30.dp))
+                    }
+                }
+                Text(set.title, color = colors.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
             }
         }
     }

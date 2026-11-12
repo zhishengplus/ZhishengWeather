@@ -11,6 +11,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 /**
  * Local-only redraw so hourly slots and 明天/后天 rows advance without a network fetch.
@@ -34,7 +35,7 @@ object WidgetRedrawAlarm {
     internal fun nextTrigger(now: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
         val local = Instant.ofEpochMilli(now).atZone(zone)
         val hour = local.truncatedTo(ChronoUnit.HOURS)
-        val candidates = listOf(hour.plusMinutes(30), hour.plusHours(1), hour.plusHours(1).plusMinutes(30))
+        val candidates = listOf(hour, hour.plusMinutes(30), hour.plusHours(1), hour.plusHours(1).plusMinutes(30))
             .map { it.toInstant().toEpochMilli() + SLACK_MS }
         return candidates.first { it > now }
     }
@@ -58,7 +59,7 @@ object WidgetRedrawAlarm {
     internal fun markRendered(now: Long = System.currentTimeMillis()) { lastRenderAt = now }
 
     /** While the process is alive, also redraw when the user turns on / unlocks the phone. */
-    fun registerScreenReceiver(c: Context) {
+    @Synchronized fun registerScreenReceiver(c: Context) {
         if (screenReceiverRegistered) return
         val ctx = c.applicationContext
         val receiver = object : BroadcastReceiver() {
@@ -67,7 +68,7 @@ object WidgetRedrawAlarm {
                 if (WidgetRuntime.instances(context).isEmpty()) return
                 val pending = goAsync()
                 WidgetRuntime.scope.launch {
-                    try { WidgetRuntime.renderAll(context); schedule(context) }
+                    try { withTimeout(8_000) { WidgetRuntime.renderAll(context); schedule(context) } }
                     catch (e: Exception) { android.util.Log.w("DesktopWeather", "Screen-on redraw deferred", e) }
                     finally { pending.finish() }
                 }

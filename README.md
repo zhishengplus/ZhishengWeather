@@ -277,7 +277,7 @@ qw.private_key=<Ed25519 私钥，单行>
 
 参与过项目的社区贡献者：`PPQ1028`、`Uinuan1`、`KZzzzo`、`睡觉了寂`、`微生之最`、`r1file`、`vsqesy3721`、`茉莉羽`、`陈大橙`、`飞667`、`一杯冰美式、、`、`M1ralce`、`紅星照耀中國`、`我爱跑步`、`河鱼天雁`、`你的心里没点高数吗`、`周月星斗`、`无敌战神暴王龙`、`control3`、`明珠有泪`、`Gstar_`、`伍拾两HZ`、`寡欲老公猪`、`PickGear`。
 
-天气图标来自 Makin-Things weather-icons（基于 amCharts 天气图标），启动器单色图标源自 Meteocons，界面图标源自 Phosphor Icons，离线地名来自 GeoNames，太阳位置计算使用 commons-suncalc，徽章渲染使用 three.js。许可与出处见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+天气图标源自 Meteocons，界面图标源自 Phosphor Icons，离线地名来自 GeoNames，太阳位置计算使用 commons-suncalc，徽章渲染使用 three.js。许可与出处见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 <details>
 <summary><b>版本足迹</b></summary>
