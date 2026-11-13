@@ -216,7 +216,7 @@ GitHub Releases 里也附有 `SHA256SUMS.txt`。
 
 macOS / Linux 使用 `./gradlew :app:assembleDebug`。无服务密钥时也可编译；需要密钥的数据源和地图功能须自行配置。可参考 `local.properties.example`，或在应用设置中添加自己的凭据。
 
-所有变体使用开发者本机生成的调试签名，并关闭官方应用内覆盖更新。没有附带签名文件。开发包不能直接覆盖官方签名版本；请使用独立测试设备或独立配置的应用 ID。
+开发构建使用本机调试签名，并关闭应用内更新。开发包不能直接覆盖已安装的官方版，请使用测试设备或单独的应用 ID。
 
 ## 修改与提 PR
 
@@ -229,9 +229,7 @@ macOS / Linux 使用 `./gradlew :app:assembleDebug`。无服务密钥时也可�
 .\gradlew.bat :app:lintDebug
 ```
 
-本目录只提供 Android 开发工程，没有附带服务器运维配置、数据库或后台账号。共享服务默认地址为不可用的示例地址；需要这部分功能时，在 `local.properties` 中填写自己的 `service.endpoint`，服务须使用受系统信任的 HTTPS 证书。徽章线上配置在 `app/src/main/assets/badges/service.json`，端点和验签公钥留空，需要自行接入兼容服务。天气的公开数据源和穿搭计算不依赖这些后台配置。
-
-群联系方式、收款码及人员名单没有随源码提供，相关资源使用占位图。徽章演示变体只使用明确标记的公开测试材料，不对应线上账号或权益。
+共享服务通过 `local.properties` 中的 `service.endpoint` 配置，徽章服务的端点和验签公钥在 `app/src/main/assets/badges/service.json` 中配置。服务需使用受系统信任的 HTTPS 证书。公开天气源和穿搭计算可独立于这些服务使用。
 
 项目使用 [MIT 许可证](LICENSE)。第三方代码、字体、美术和地理数据的授权见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 及各资源附带的许可证。
 

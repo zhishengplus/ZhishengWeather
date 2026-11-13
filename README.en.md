@@ -206,9 +206,9 @@ GitHub Releases also includes `SHA256SUMS.txt`.
 
 ## Build from source
 
-This is the key-free 0.1.6 / 20261172 community source, including the forecast widgets from PR #17. Install JDK 17 and Android SDK 34, then run `./gradlew :app:assembleDebug` (Windows: `gradlew.bat`). All variants use a local debug signature and disable official self-update. No signing keystore, service credentials, personal rosters or contact QR codes are included.
+The Android source is version 0.1.6 / 20261172 and includes the forecast widgets from PR #17. Install JDK 17 and Android SDK 34, then run `./gradlew :app:assembleDebug` (Windows: `gradlew.bat`). Development builds use a local debug signature, with self-update disabled.
 
-Optional credentials and compatible shared-service configuration belong in your ignored `local.properties`; see `local.properties.example`. Badge endpoint and verification keys are blank in `app/src/main/assets/badges/service.json`. Core public weather sources and outfit calculations do not depend on these services.
+Configure optional weather feeds and shared services in `local.properties`; see `local.properties.example`. Configure the badge endpoint and verification keys in `app/src/main/assets/badges/service.json`. Public weather sources and outfit calculations work independently of these services.
 
 Fork the public repository, create a branch and submit a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Chinese development guide](README.md).
 
