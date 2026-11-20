@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.7/ZhishengWeather-v0.1.7-public.apk"><img src="assets/readme/button-download-en.png" height="56" alt="Download 0.1.7 from Gitee"></a>
+  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.7/ZhishengWeather-v0.1.7-20261219-public.apk"><img src="assets/readme/button-download-en.png" height="56" alt="Download 0.1.7 from Gitee"></a>
   &nbsp;
   <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img src="assets/readme/button-github-en.png" height="56" alt="Download from GitHub Releases"></a>
 </p>
@@ -187,7 +187,7 @@ The full text is in the in-app privacy notice (隐私说明). System permissions
 
 ## Download and install
 
-1. Download `ZhishengWeather-v0.1.7-public.apk` from [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.7) (recommended) or [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest). Both host the same file.
+1. Download `ZhishengWeather-v0.1.7-20261219-public.apk` from [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.7) (recommended) or [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest). Both host the same file.
 2. Install it on Android 8.0 or later. The "install unknown apps" prompt is the system's standard notice for APKs from outside an app store, not an extra permission the app asks for.
 3. On first launch, locate yourself or pick a city. Later you can check for updates in settings; updating in place keeps your cities, settings and badges.
 
@@ -198,12 +198,12 @@ The full text is in the in-app privacy notice (隐私说明). System permissions
 SHA-256 for 0.1.7:
 
 ```text
-30097875C9A60402FAF309B559E13C3B1CDF1A34B305580807E8A40DA1BE3708
+91109272F2B54D1D57AF71819F0F0D0A426E94E1D97AFE197414DBA97C852525
 ```
 
 ```bash
-certutil -hashfile ZhishengWeather-v0.1.7-public.apk SHA256   # Windows
-shasum -a 256 ZhishengWeather-v0.1.7-public.apk                # macOS / Linux
+certutil -hashfile ZhishengWeather-v0.1.7-20261219-public.apk SHA256   # Windows
+shasum -a 256 ZhishengWeather-v0.1.7-20261219-public.apk                # macOS / Linux
 ```
 
 GitHub Releases also includes `SHA256SUMS.txt`.

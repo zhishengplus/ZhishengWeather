@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.7/ZhishengWeather-v0.1.7-public.apk"><img src="assets/readme/button-download-zh.png" height="56" alt="下载 0.1.7（Gitee 主下载）"></a>
+  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.7/ZhishengWeather-v0.1.7-20261219-public.apk"><img src="assets/readme/button-download-zh.png" height="56" alt="下载 0.1.7（Gitee 主下载）"></a>
   &nbsp;
   <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img src="assets/readme/button-github-zh.png" height="56" alt="GitHub 备用下载"></a>
 </p>
@@ -187,7 +187,7 @@
 
 ## 下载与安装
 
-1. 从 [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.7)（推荐）或 [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest) 下载 `ZhishengWeather-v0.1.7-public.apk`，两边是同一个安装包。
+1. 从 [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.7)（推荐）或 [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest) 下载 `ZhishengWeather-v0.1.7-20261219-public.apk`，两边是同一个安装包。
 2. 安装到 Android 8.0 及以上的手机。系统提示「允许安装未知来源应用」是安装渠道的提示，不是枳生天气额外申请的权限。
 3. 首次打开时选择定位当前位置，或者手动选城。以后可以在设置里检查更新，覆盖安装会保留城市、设置和徽章。
 
@@ -198,12 +198,12 @@
 0.1.7 的 SHA-256：
 
 ```text
-30097875C9A60402FAF309B559E13C3B1CDF1A34B305580807E8A40DA1BE3708
+91109272F2B54D1D57AF71819F0F0D0A426E94E1D97AFE197414DBA97C852525
 ```
 
 ```bash
-certutil -hashfile ZhishengWeather-v0.1.7-public.apk SHA256   # Windows
-shasum -a 256 ZhishengWeather-v0.1.7-public.apk                # macOS / Linux
+certutil -hashfile ZhishengWeather-v0.1.7-20261219-public.apk SHA256   # Windows
+shasum -a 256 ZhishengWeather-v0.1.7-20261219-public.apk                # macOS / Linux
 ```
 
 GitHub Releases 里也附有 `SHA256SUMS.txt`。
