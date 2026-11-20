@@ -6,14 +6,14 @@
 </p>
 
 <p align="center">
-  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.6/ZhishengWeather-v0.1.6-public.apk"><img src="assets/readme/button-download-en.png" height="56" alt="Download 0.1.6 from Gitee"></a>
+  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.7/ZhishengWeather-v0.1.7-public.apk"><img src="assets/readme/button-download-en.png" height="56" alt="Download 0.1.7 from Gitee"></a>
   &nbsp;
   <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img src="assets/readme/button-github-en.png" height="56" alt="Download from GitHub Releases"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/zhishengplus/ZhishengWeather/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/zhishengplus/ZhishengWeather?style=flat-square&label=Stars&labelColor=17303D&color=16677D"></a>
-  <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img alt="Version 0.1.6" src="https://img.shields.io/badge/version-0.1.6-16677D?style=flat-square&labelColor=17303D"></a>
+  <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img alt="Version 0.1.7" src="https://img.shields.io/badge/version-0.1.7-16677D?style=flat-square&labelColor=17303D"></a>
   <img alt="Android 8.0 or later" src="https://img.shields.io/badge/Android-8.0%2B-16677D?style=flat-square&labelColor=17303D">
   <img alt="No ads" src="https://img.shields.io/badge/ads-none-B98A3E?style=flat-square&labelColor=17303D">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-16677D?style=flat-square&labelColor=17303D"></a>
@@ -29,7 +29,13 @@ When I open a weather app, I want a few answers fast: how warm it is right now, 
 
 If a source doesn't return a number, the field stays empty instead of being filled with an estimate, and the details always show which source each reading came from. The app's interface is in Simplified Chinese, with Japanese as an option.
 
-## What's new in 0.1.6
+## What's new in 0.1.7
+
+Explore twilight in full screen. Scrub the timeline to see light move across the clouds and hills. The short-term precipitation view now has an interactive water surface. Expired and cancelled warnings leave the home screen. The hourly forecast and weather calendar widgets bring more of the forecast to your home screen.
+
+New and returning users can receive the Isobar Capsule and have one 10% chance of receiving the Rose Vine Ring. Automatic awards of First Light and the Clear Sky Ring have ended. Existing collectibles keep their serial numbers and inscriptions. Each automatic reward can be issued only once. Gifts and transfers can still add other serial numbers of the same design to your collection. Press and hold a badge or its caption to rearrange your collection.
+
+## Features introduced in 0.1.6
 
 <p align="center">
   <img src="assets/readme/whats-new.webp" width="100%" alt="The in-app 0.1.6 release notes: demo cards for outfits, badges, typhoons and lookback">
@@ -51,7 +57,7 @@ The outfit module reads the feels-like temperature, rain, snow, gusts, UV and ac
   <img src="assets/readme/cabinet-turn.webp" width="100%" alt="The 0.1.6 collection in the app: First Light, the ClearSky Ring, Clear Sky Crown and Together With You">
 </p>
 
-Badges are 3D collectibles you can turn in your hand. Drag one in the list to rotate it, tap to enlarge it, and read both faces up close; each carries its own serial number. While an event is open you can claim First Light. You can accept a badge before its model finishes downloading, and retry any single badge that fails to load. Save your recovery codes from the menu before you uninstall or switch phones. First Light and the ClearSky Ring can also carry an ID of your choosing.
+Badges are 3D collectibles you can turn in your hand. Drag one in the list to rotate it, tap to enlarge it, and read both faces up close; each carries its own serial number. First Light badges earned during 0.1.6 can still be viewed and recovered. You can accept a badge before its model finishes downloading, and retry any single badge that fails to load. Save your recovery codes from the menu before you uninstall or switch phones. First Light and the ClearSky Ring can also carry an ID of your choosing.
 
 ### Follow the storm
 
@@ -181,7 +187,7 @@ The full text is in the in-app privacy notice (隐私说明). System permissions
 
 ## Download and install
 
-1. Download `ZhishengWeather-v0.1.6-public.apk` from [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.6) (recommended) or [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest). Both host the same file.
+1. Download `ZhishengWeather-v0.1.7-public.apk` from [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.7) (recommended) or [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest). Both host the same file.
 2. Install it on Android 8.0 or later. The "install unknown apps" prompt is the system's standard notice for APKs from outside an app store, not an extra permission the app asks for.
 3. On first launch, locate yourself or pick a city. Later you can check for updates in settings; updating in place keeps your cities, settings and badges.
 
@@ -189,15 +195,15 @@ The full text is in the in-app privacy notice (隐私说明). System permissions
 <summary><b>Verify the APK</b></summary>
 <br>
 
-SHA-256 for 0.1.6:
+SHA-256 for 0.1.7:
 
 ```text
-68920185B20EDE8B91B31BCC45ECD041B0B1B2774CDBB51C3608226AF1A8CAB0
+30097875C9A60402FAF309B559E13C3B1CDF1A34B305580807E8A40DA1BE3708
 ```
 
 ```bash
-certutil -hashfile ZhishengWeather-v0.1.6-public.apk SHA256   # Windows
-shasum -a 256 ZhishengWeather-v0.1.6-public.apk                # macOS / Linux
+certutil -hashfile ZhishengWeather-v0.1.7-public.apk SHA256   # Windows
+shasum -a 256 ZhishengWeather-v0.1.7-public.apk                # macOS / Linux
 ```
 
 GitHub Releases also includes `SHA256SUMS.txt`.

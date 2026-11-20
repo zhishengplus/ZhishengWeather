@@ -6,14 +6,14 @@
 </p>
 
 <p align="center">
-  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.6/ZhishengWeather-v0.1.6-public.apk"><img src="assets/readme/button-download-zh.png" height="56" alt="下载 0.1.6（Gitee 主下载）"></a>
+  <a href="https://gitee.com/zhisheng8888/ZhishengWeather/releases/download/v0.1.7/ZhishengWeather-v0.1.7-public.apk"><img src="assets/readme/button-download-zh.png" height="56" alt="下载 0.1.7（Gitee 主下载）"></a>
   &nbsp;
   <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img src="assets/readme/button-github-zh.png" height="56" alt="GitHub 备用下载"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/zhishengplus/ZhishengWeather/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/zhishengplus/ZhishengWeather?style=flat-square&label=Stars&labelColor=17303D&color=16677D"></a>
-  <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img alt="当前版本 0.1.6" src="https://img.shields.io/badge/版本-0.1.6-16677D?style=flat-square&labelColor=17303D"></a>
+  <a href="https://github.com/zhishengplus/ZhishengWeather/releases/latest"><img alt="当前版本 0.1.7" src="https://img.shields.io/badge/版本-0.1.7-16677D?style=flat-square&labelColor=17303D"></a>
   <img alt="Android 8.0 及以上" src="https://img.shields.io/badge/Android-8.0%2B-16677D?style=flat-square&labelColor=17303D">
   <img alt="没有广告" src="https://img.shields.io/badge/广告-没有-B98A3E?style=flat-square&labelColor=17303D">
   <a href="LICENSE"><img alt="MIT 许可" src="https://img.shields.io/badge/许可-MIT-16677D?style=flat-square&labelColor=17303D"></a>
@@ -29,7 +29,13 @@
 
 数据源没给的数字就留空，不拿估算值凑满；每一项读数用的是哪个来源，都能在详情里查到。
 
-## 0.1.6：这一版的新东西
+## 0.1.7 更新
+
+霞光时刻可以全屏查看。拖动时间轴，看太阳落下时山影和云层怎样变化。短时降水用可拨动的水面呈现，预警会随解除或过期退出首页。桌面新增时日预报和天气月历，点日期可打开万年历。
+
+新版活动向新老用户开放。领取等压舱时有一次 10% 的机会获得玫瑰藤蔓金戒。初光和澄空之戒停止自动发放，原有收藏、编号和署名继续保留。活动奖励只自动发一次。通过赠送或恢复转入，仍可收藏同款的不同编号。长按徽章图案或文字即可给收藏换个顺序。
+
+## 0.1.6 功能回顾
 
 <p align="center">
   <img src="assets/readme/whats-new.webp" width="100%" alt="应用内的 0.1.6 更新说明：穿搭、徽章、台风、回看四张演示卡片">
@@ -51,7 +57,7 @@
   <img src="assets/readme/cabinet-turn.webp" width="100%" alt="0.1.6 应用内的三维收藏：初光、澄空之戒、晴空冠冕与与君同行">
 </p>
 
-徽章是能拿在手里转的三维收藏：在列表里直接拖动旋转，轻触放大，正反两面都看得清，每一枚都有自己的编号。活动开放时可以领取「初光」；模型还没下载好也能先收下，哪一枚加载失败就单独重试。菜单里可以保存恢复码，卸载或换机前记得留一份；初光和澄空之戒还能改成你自己的 ID。
+徽章是能拿在手里转的三维收藏：在列表里直接拖动旋转，轻触放大，正反两面都看得清，每一枚都有自己的编号。在 0.1.6 活动中领到的「初光」仍可把玩和恢复。模型还没下载好也能先收下，哪一枚加载失败就单独重试。菜单里可以保存恢复码，卸载或换机前记得留一份；初光和澄空之戒还能改成你自己的 ID。
 
 ### 沿着路径，看清动向
 
@@ -181,7 +187,7 @@
 
 ## 下载与安装
 
-1. 从 [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.6)（推荐）或 [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest) 下载 `ZhishengWeather-v0.1.6-public.apk`，两边是同一个安装包。
+1. 从 [Gitee](https://gitee.com/zhisheng8888/ZhishengWeather/releases/tag/v0.1.7)（推荐）或 [GitHub Releases](https://github.com/zhishengplus/ZhishengWeather/releases/latest) 下载 `ZhishengWeather-v0.1.7-public.apk`，两边是同一个安装包。
 2. 安装到 Android 8.0 及以上的手机。系统提示「允许安装未知来源应用」是安装渠道的提示，不是枳生天气额外申请的权限。
 3. 首次打开时选择定位当前位置，或者手动选城。以后可以在设置里检查更新，覆盖安装会保留城市、设置和徽章。
 
@@ -189,15 +195,15 @@
 <summary><b>校验安装包</b></summary>
 <br>
 
-0.1.6 的 SHA-256：
+0.1.7 的 SHA-256：
 
 ```text
-68920185B20EDE8B91B31BCC45ECD041B0B1B2774CDBB51C3608226AF1A8CAB0
+30097875C9A60402FAF309B559E13C3B1CDF1A34B305580807E8A40DA1BE3708
 ```
 
 ```bash
-certutil -hashfile ZhishengWeather-v0.1.6-public.apk SHA256   # Windows
-shasum -a 256 ZhishengWeather-v0.1.6-public.apk                # macOS / Linux
+certutil -hashfile ZhishengWeather-v0.1.7-public.apk SHA256   # Windows
+shasum -a 256 ZhishengWeather-v0.1.7-public.apk                # macOS / Linux
 ```
 
 GitHub Releases 里也附有 `SHA256SUMS.txt`。
